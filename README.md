@@ -37,6 +37,29 @@
 
 ## 快速开始
 
+### 方式一：解压后双击（推荐）
+
+1. 下载 [`forgeform-v3.0.0.zip`](https://github.com/TIANKONGskyy/forgeform/releases/latest) 并解压
+2. 双击 **`启动.bat`**
+
+它会依次做：检查 Python → 建 `.venv` 并装依赖（3–5 分钟，只一次）→ 首次运行跑配置向导
+（探硬件、选方案、装模型）→ 启动服务 → **自动打开浏览器**。
+
+之后每次双击直接进界面（约 10 秒）。窗口就是服务端，关掉窗口即停止。
+
+首次运行向导：
+
+```
+硬件：Tesla V100 32G（可用 30） · 内存 128 GB · 磁盘剩 166 GB
+已有：ComfyUI(含3D)、本地 diffusers 模型 2 个、hy3dgen、对话服务
+
+ ★ [1] 复用现有 ComfyUI（零下载）        0.0 GB · auto
+   [2] 最小可用（SD1.5 + 3D 2mini）       8.2 GB · direct
+   [3] 推荐（Z-Image Turbo + 3D 2mini）  30.6 GB · auto
+```
+
+### 方式二：命令行
+
 ```powershell
 git clone https://github.com/TIANKONGskyy/forgeform.git
 cd forgeform
