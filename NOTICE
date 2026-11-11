@@ -1,15 +1,24 @@
 铸想 ForgeForm
-Copyright 2026 YuKai and ForgeForm contributors
+Copyright (C) 2026 YuKai / ZYKT studio
 
-本产品包含或通过接口使用下列第三方组件，各自遵守其原始许可：
+本程序是自由软件：你可以依据 GNU Affero 通用公共许可证（GNU Affero General Public
+License）第 3 版或（由你选择）任何更新版本，再分发和/或修改它。发布时须保留本许可
+与来源声明。完整条款见 LICENSE 文件，或 https://www.gnu.org/licenses/agpl-3.0.html
+
+本程序按「现状」提供，不附带任何担保。
+
+── 第三方组件 ────────────────────────────────────────────────
+
+本仓库不包含下列组件的代码，仅通过依赖或 HTTP 接口使用；它们各自遵守自己的许可：
 
   Gradio                 Apache-2.0   https://github.com/gradio-app/gradio
   ComfyUI                GPL-3.0      https://github.com/comfyanonymous/ComfyUI
-                         （本仓库不包含 ComfyUI 代码，仅通过 HTTP API 调用独立进程）
+                         （独立进程，仅通过 HTTP API 调用，不链接其代码）
   trimesh                MIT          https://github.com/mikedh/trimesh
+  fast-simplification    MIT          https://github.com/pyvista/fast-simplification
   pymeshlab              GPL-3.0      https://github.com/cnr-isti-vclab/PyMeshLab
   pymeshfix              AGPL-3.0     https://github.com/pyvista/pymeshfix
-  fast-simplification    MIT / BSD    https://github.com/pyvista/fast-simplification
+                         （上游 MeshFix 为 CNR-IMATI 双许可：GPL-3.0 或商业授权）
   NumPy / SciPy          BSD-3-Clause
   Pillow                 HPND
   OpenCV                 Apache-2.0
@@ -17,8 +26,12 @@ Copyright 2026 YuKai and ForgeForm contributors
   fastapi / starlette    MIT / BSD
   Bambu Studio / bambu-cli  AGPL-3.0（仅在你启用直发打印功能时使用）
 
-模型权重不在本仓库内，也不在 Apache-2.0 覆盖范围内。使用 Qwen-Image、FLUX、
-Hunyuan3D、MiniMax H3 等模型前请阅读各自的模型许可（部分模型对商用有限制）。
+模型权重不在本仓库内，也不在本许可覆盖范围内。使用 Qwen-Image、FLUX、Hunyuan3D、
+MiniMax H3 等模型前请阅读各自的模型许可（部分模型对商用有限制）。
 
-注意：pymeshfix 是 AGPL-3.0。如果你要把本项目作为闭源网络服务分发，需自行评估
-该许可的影响，或改用其他补洞方案（例如仅依赖 pymeshlab）。
+── 关于本项目为什么是 AGPL ──────────────────────────────────
+
+pymeshfix 与 pymeshlab 是 copyleft 依赖，链接它们的程序必须同样 copyleft。
+如果你需要一个可闭源商用的版本，做法是移除这两个依赖（`backend/mesh_optimizer.py`
+里对它们是函数内延迟 import + try/except），改用纯 trimesh 的补洞路径，此时本项目
+的代码本身可以按 MIT / Apache-2.0 另行发布。

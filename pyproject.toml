@@ -6,6 +6,14 @@ build-backend = "setuptools.build_meta"
 name = "forgeform"
 version = "3.0.0"
 description = "铸想 ForgeForm —— 对话式 3D 建模/打印工作流（Gradio + ComfyUI + 本地 LLM）"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "ZYKT studio" }]
+classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+]
 requires-python = ">=3.11"
 # 只做"声明"，好让工具链（含自动化验证）认得这个仓库的入口：
 #   python -m pytest            ← 标准入口，跑 tests/（unittest 用例同样被收集）

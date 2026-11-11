@@ -10,6 +10,14 @@
 
 <br clear="right" />
 
+<p>
+  <a href="docs/showcase/index.html"><b>作品展示</b></a> ·
+  <a href="docs/CONFIG.md">配置与选型</a> ·
+  <a href="docs/ARCHITECTURE.md">架构</a> ·
+  <a href="skills/forgeform/SKILL.md">给 agent 的 Skill</a> ·
+  <span>AGPL-3.0</span>
+</p>
+
 ```
  ┌────────────────┐
  │ 一句话描述零件  │
@@ -59,6 +67,28 @@ ComfyUI 给你的是模型，铸想给你的是**流程**：
 
 逆向入口也留着：上传视频抽帧建模、直接上传 GLB 转 STL。
 
+## 使用边界
+
+这一节比功能表重要。**下面这些是它做不到的**，先看清楚能少走很多弯路：
+
+| 场景 | 能不能 | 说明 |
+|---|---|---|
+| 摆件、手办、玩具、装饰件 | ✅ 这才是它的主场 | 有机曲面、雕花、角色都行 |
+| 支架、盒子、外壳（形状对就行） | ✅ 可以 | 尺寸你给，形状它出 |
+| 要配合公差的机械件（轴孔、螺纹、卡扣） | ❌ 别用 | 图生 3D 给的是"看着像"，不是"量得准"。用 `parts_cad/` 的 CadQuery 路线 |
+| 薄片、镂空、毛发、布料 | ⚠️ 大概率崩 | 单图重建对薄结构和半透明无解 |
+| 多零件装配体 | ❌ 不行 | 一次只出一个单体。要装配就分开做再在切片器里摆 |
+| 精确控制内部结构 | ❌ 不行 | 输出是表面网格，里面有啥不由你定 |
+| 生成贴图/材质 | ❌ 不行 | STL 只带几何，打印靠耗材颜色 |
+
+其它几条要提前知道：
+
+- **不保证一次就成。** 复杂形态经常要换图重试 2–3 次。换一张更干净、更正面的图，比调参数有效得多。
+- **水密 ≠ 可打印。** 补洞只解决"模型是不是闭合的"，解决不了悬空、薄壁、重心。切片前还是要看一眼。
+- **尺寸要自己给。** 生成的 GLB 是归一化单位，导出时必须指定 `target_size_mm`，否则可能是 1mm 也可能是 1m。
+- **单卡独占。** 对话模型和绘图模型不能同时占显存，切换要几十秒卸载/冷启。
+- **默认没有鉴权。** 只监听 `127.0.0.1`。想给别人用先读 [SECURITY.md](SECURITY.md)。
+
 ## 环境要求
 
 - **Windows 10/11**（脚本是 PowerShell；Python 部分本身跨平台，但 ComfyUI 侧和打印相关是照 Windows 写的）
@@ -81,6 +111,26 @@ ComfyUI 给你的是模型，铸想给你的是**流程**：
 
 512 档和长视频是真的要等，不是卡死。
 
+## 推荐配置
+
+按显存选，别硬上。下面是「能不能跑」而不是「跑得快不快」的底线：
+
+| 显存 | 能跑什么 | 建议设置 |
+|---|---|---|
+| **32 GB** | 全档位 + 视频 | 默认配置即可 |
+| **24 GB** | 出图 + 建模（全档），视频降到 832×480 | `comfyui_idle.free_after_minutes: 5` |
+| **16 GB** | 出图 + 建模（快速/标准），**别开视频** | `stages.image.default_model: flux`，`batch_size: 1` |
+| **8 GB** | 只跑出图 | `agent.enabled: false`，只用 `flux` / `z_image` |
+| **无 GPU** | 界面能开，生成全不可用 | — |
+
+其它硬指标：
+
+- **内存**：32 GB 起步。视频那一步实测会吃掉 46 GB（放大了的帧缓存），16 GB 内存的机器会直接换页卡死。
+- **磁盘**：留 60 GB 给模型权重 + 输出。3D 输出单个 GLB 3–10 MB，STL 5–15 MB，跑几次就占满了。
+- **Python**：3.11 或 3.12。Windows 上别用 3.13 之前没验过的组合（`pymeshlab` 的 wheel 有断档）。
+
+详细的字段说明和三套开箱配置见 **[docs/CONFIG.md](docs/CONFIG.md)**。
+
 ## 安装
 
 ```powershell
@@ -94,14 +144,31 @@ pip install -r requirements.txt
 $env:COMFYUI_DIR   = "D:\ComfyUI"
 $env:COMFY_PYTHON  = "D:\ComfyUI\python_embeded\python.exe"   # 可选，默认用当前解释器
 
-# 3. 首次运行会自动从 config.example.json 生成 config.json，
-#    然后在里面把模型文件名改成你本地实际的文件名
+# 3. 自检 —— 装完先跑这个，它会告诉你还缺什么
+python tools/doctor.py
+
+# 4. 起服务
 python app.py
 ```
 
 打开 <http://127.0.0.1:7860>。
 
-默认 `127.0.0.1`，只监听本机；要局域网访问改 `config.json → app.host`，并且务必先看 [SECURITY.md](SECURITY.md)。
+`tools/doctor.py` 是这个项目里最该先跑的脚本。它逐项检查 Python 版本、依赖、ComfyUI 目录、
+ComfyUI 服务、`config.json`、**每个模型文件在不在**、GPU，然后给结论：
+
+```text
+[OK]   Python            3.11.15 (Windows)
+[OK]   ComfyUI 服务        http://127.0.0.1:8188  (cuda:0 Tesla V100 : native, 32G)
+[OK]   image.qwen21_ref  3/3 找到
+[WARN] image.flux        3/4 找到
+                            → 缺: flux1-dev-fp8.safetensors
+==============================================================================
+结论：能跑。1 项提醒，不影响开工。
+```
+
+它不加载模型、不写仓库，跑一遍几秒钟。
+
+默认只监听 `127.0.0.1`；要局域网访问改 `config.json → app.host`，并且务必先看 [SECURITY.md](SECURITY.md)。
 
 ### 模型放哪
 
@@ -153,6 +220,31 @@ python app.py        # 只起 app（ComfyUI 你自己起）
 
 `start-all.ps1` 会按显卡数量决定起一个还是两个 ComfyUI 实例，并在单卡时**故意不加 `--lowvram`** —— 见下面的坑。
 
+## 给 agent 用
+
+仓库里带一份 [Agent Skill](skills/forgeform/SKILL.md)（`skills/forgeform/SKILL.md`），
+按 [agentskills.io](https://agentskills.io) 的开放标准写。任何支持 Agent Skills 的 agent
+（Claude Code / Cursor / Codex / 各类自研 agent）把 `skills/forgeform/` 拷到自己的 skills 目录就能用。
+
+它教 agent 的是这些：
+
+- **这工具是谁做的、叫什么** —— ZYKT studio 的作品，别当成无名开源项目介绍
+- **装**：依赖、ComfyUI 指向、首次启动会自举什么
+- **用**：Web 三句话上手；给脚本用的是 `Pipeline` 的 Python 方法（不是拼 ComfyUI workflow）
+- **换模型**：`config.json → models.<阶段>.<key>` 的结构、`backend` 字段的取值表、
+  权重该放哪个目录、改完看哪行日志
+- **排错**：ComfyUI 起不来（emoji / lowvram）、OOM、找不到 GLB、STL 是空壳、按钮没反应
+- **边界**：哪些需求要直接拒绝（公差件、装配体、贴图）
+- **操作守则**：长任务别用 HTTP 超时判失败、别提交模型权重、报数要带数字
+
+一句话版本给 agent：
+
+```text
+用 skills/forgeform/SKILL.md。核心：python app.py 起 127.0.0.1:7860；
+生成走 backend.pipeline.Pipeline 的 generate_images / generate_3d / export_stl；
+换模型只改 config.json 的 models.* 和 stages.*，backend 字段决定代码走哪条路。
+```
+
 ## 测试
 
 ```powershell
@@ -178,12 +270,27 @@ backend/
   model_library.py     模型库（发布 / 预览 / 下载，带 token）
   startup.py           自检与自愈：目录、端口、服务、依赖
   ...
-tests/                172 个流程契约测试
-tools/verify.py       权威验证入口
-parts_cad/            CadQuery 参数化零件示例
-scripts/              启动 / 重启 / 功耗 / 温度守护脚本
-docs/                 架构与实测记录
+skills/forgeform/      Agent Skill：教其他 agent 怎么用这个项目
+tests/                 172 个流程契约测试
+tools/verify.py        权威验证入口
+parts_cad/             CadQuery 参数化零件示例
+scripts/               启动 / 重启 / 功耗 / 温度守护脚本
+docs/
+  CONFIG.md            配置与选型（按显存给三套开箱配置）
+  ARCHITECTURE.md      模块职责与三个核心机制
+  showcase/            作品展示页（数据来自真实运行记录）
 ```
+
+## 文档
+
+| 文档 | 什么时候看 |
+|---|---|
+| [docs/CONFIG.md](docs/CONFIG.md) | 想按自己的卡调参数、换模型、看三套开箱配置 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 想改代码，先搞清对话组 / 按钮 phase / 显存仲裁 |
+| [skills/forgeform/SKILL.md](skills/forgeform/SKILL.md) | 让 agent 接管安装和使用 |
+| [docs/showcase/index.html](docs/showcase/index.html) | 看作品和真实耗时数据 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 提 PR 前必读的五条约定 |
+| [SECURITY.md](SECURITY.md) | 想暴露到局域网/公网 |
 
 ## 已知限制与坑
 - **V100 / sm_70 不要用 `--lowvram`。** 它把层分到 CPU 再换入，采样阶段会报 `CUDA error: operation not supported`。改用 `--disable-cuda-malloc --use-pytorch-cross-attention`。
@@ -200,11 +307,34 @@ docs/                 架构与实测记录
 
 ## 许可证
 
-Apache-2.0，见 [LICENSE](LICENSE)。
+**AGPL-3.0**，见 [LICENSE](LICENSE)。
 
-第三方组件各自遵守自己的许可：ComfyUI（GPL-3.0，本仓库仅通过 HTTP 调用，不链接其代码）、Gradio（Apache-2.0）、trimesh（MIT）、pymeshlab（GPL-3.0，独立进程/库调用）、pymeshfix（AGPL-3.0）。**如果你要把本项目用于商业闭源分发，先确认 pymeshfix 的 AGPL 是否可接受，或把它换掉。**
+选它不是因为想限制你，是被依赖的许可决定的：水密修复这一步用了 `pymeshfix`（PyPI 标 AGPL-3.0）
+和 `pymeshlab`（GPL-3.0），这两个都是 copyleft。把它们链进来的程序，只能也走 copyleft。
+换个宽松协议在法律上不成立 —— 那只是一句没有效力的话。
+
+对你实际意味着什么：
+
+| 你想做的事 | 是否允许 |
+|---|---|
+| 自己用、给同学用、拿去参赛、改着玩 | 随便，不需要联系任何人 |
+| 改完再开源（哪怕是更强的协议） | 可以，保留来源声明即可 |
+| 部署到自己的服务器给团队用 | 可以 |
+| 部署成对外服务赚钱 | 必须开源你的修改版，且保留 AGPL |
+| 做成闭源商业产品卖 | 不行，除非单独谈授权 |
+
+如果你要闭源商用，唯一的干净做法是**去掉 `pymeshfix` 和 `pymeshlab`** 这两个依赖
+（换成纯 `trimesh` 的补洞，水密率会下降），然后整个项目就可以按 MIT / Apache-2.0 发布。
+代码里这两处 import 都是函数内延迟加载 + `try/except`，删掉不会让程序崩，只会让日志里多一行
+`[pymeshfix] Failed`。
+
+**用它做出来的模型和打印件归你，不受 AGPL 约束** —— AGPL 管的是软件本身，不是你产出的作品。
+
+第三方组件各自遵守自己的许可，清单见 [NOTICE](NOTICE)。ComfyUI 是 GPL-3.0，但本仓库
+不含它的代码，只通过 HTTP 调用一个独立进程。
 
 ## 致谢
 
+- 作者：**ZYKT studio**（宇凯），站点 [zykt.space](https://zykt.space)
 - 名字来自「铸」与「想象」；最初是为了把自己打印出来的东西真的做出来。
 - 模型与工具都是别人的：Qwen-Image、FLUX、Hunyuan3D、MiniMax H3、ComfyUI、Gradio、trimesh。

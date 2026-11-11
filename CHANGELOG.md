@@ -28,6 +28,22 @@
 - `tools/verify.py` 作为权威验证入口
 - 开机自检：目录、端口、依赖、服务状态，能修的自己修
 
+**文档与协作**
+
+- `README.md`：使用边界、按显存分档的推荐配置、实测耗时表
+- `docs/CONFIG.md`：字段说明 + 三套开箱配置 + 换模型的完整步骤
+- `docs/ARCHITECTURE.md`：模块职责、三个核心机制、测试策略
+- `docs/showcase/`：作品展示页，数据来自真实运行记录
+- `skills/forgeform/SKILL.md`：符合 Agent Skills 标准的技能文件，教会 agent 安装、使用、换模型、排错
+- `CONTRIBUTING.md` / `SECURITY.md` / `NOTICE` / CI workflow
+
+**许可**
+
+- 采用 **AGPL-3.0**。原因不是偏好，是依赖决定的：水密修复用了 `pymeshfix`（AGPL-3.0）
+  和 `pymeshlab`（GPL-3.0），链入 copyleft 的程序只能同样 copyleft。
+  想闭源商用的做法在 README「许可证」一节写了。
+- 用它产出的模型与打印件归使用者，不受 AGPL 约束。
+
 **平台**
 
 - Windows 优先（PowerShell 启动脚本、Bambu 打印）
