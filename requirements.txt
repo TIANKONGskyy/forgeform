@@ -6,7 +6,7 @@
 # ── Web / 界面 ─────────────────────────────────────────────
 gradio>=5.50,<6
 fastapi>=0.115
-starlette>=0.40
+starlette>=1.10.0
 requests>=2.32
 psutil>=5.9
 
