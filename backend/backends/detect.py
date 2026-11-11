@@ -59,8 +59,21 @@ def _port_open(host: str, port: int, timeout: float = 0.6) -> bool:
         return False
 
 
+_SCAN_CACHE: dict[str, dict[str, list[str]]] = {}
+
+
 def _scan_model_dir(comfy: Path) -> dict[str, list[str]]:
-    """扫 ComfyUI 的 models 目录，判断它到底有没有能用的权重。"""
+    """扫 ComfyUI 的 models 目录，判断它到底有没有能用的权重。
+
+    ⚠️ **必须缓存**：`D:\\ComfyUI-New\\models` 有 240 GB、几千个文件，rglob 一遍要 13 秒。
+    而 `probe_all` 会为 8188 / 8189 各扫一次 —— 实测 27 秒，把启动拖到不可用。
+    同一目录在一个进程里扫一次就够（模型目录不会在启动过程中变）。
+    """
+    key = str(Path(comfy).resolve()).lower()
+    hit = _SCAN_CACHE.get(key)
+    if hit is not None:
+        return hit
+
     out = {"image": [], "mesh": [], "vae": []}
     subs = {
         "image": ("checkpoints", "diffusion_models", "unet"),
@@ -81,6 +94,8 @@ def _scan_model_dir(comfy: Path) -> dict[str, list[str]]:
         for f in pack.rglob("*.ckpt"):
             if f.is_file():
                 out["mesh"].append(f.name)
+
+    _SCAN_CACHE[key] = out
     return out
 
 
@@ -156,26 +171,41 @@ def probe_comfyui(host: str = "127.0.0.1", port: int = 8188,
 
 
 def probe_local_diffusers(extra_roots: list[str | Path] | None = None) -> Framework:
-    """扫本地有哪些 diffusers 格式模型（有 model_index.json 的目录）。"""
+    """扫本地有哪些 diffusers 格式模型（有 model_index.json 的目录）。
+
+    ⚠️ 用 os.walk + 深度剪枝，不用 rglob —— rglob 会把每个子目录都走完，
+    在 `~/.cache/huggingface` + `D:/models`（几十 GB）上一趟要 15 秒以上，
+    而 `probe_all` 会调它，启动就被拖住。限制到 4 层，跳过明显的缓存目录。
+    """
+    import os as _os
+
     fw = Framework("diffusers", "本地 diffusers 模型")
     roots = [Path.home() / ".cache" / "huggingface", Path("D:/models"), Path("D:/hf-cache")]
     for r in extra_roots or []:
         roots.insert(0, Path(r))
+
+    SKIP = {"blobs", "snapshots", ".locks", "node_modules", "site-packages", "__pycache__",
+            ".git", ".cache"}
     found = []
     for root in roots:
         if not root.exists():
             continue
         try:
-            for f in root.rglob("model_index.json"):
-                if len(f.parts) - len(root.parts) > 5:
+            for dirpath, dirnames, filenames in _os.walk(root):
+                depth = dirpath[len(str(root)):].count(_os.sep)
+                if depth >= 4:
+                    dirnames[:] = []
                     continue
-                try:
-                    idx = json.loads(f.read_text(encoding="utf-8"))
-                    found.append((f.parent, idx.get("_class_name", "?")))
-                except Exception:
-                    continue
+                dirnames[:] = [d for d in dirnames if d not in SKIP]
+                if "model_index.json" in filenames:
+                    try:
+                        idx = json.loads(Path(dirpath, "model_index.json").read_text(encoding="utf-8"))
+                        found.append((Path(dirpath), idx.get("_class_name", "?")))
+                    except Exception:
+                        pass
         except Exception:
             continue
+
     fw.models = [f"{cls} @ {p}" for p, cls in found[:12]]
     fw.alive = bool(found)
     if found:
@@ -185,26 +215,28 @@ def probe_local_diffusers(extra_roots: list[str | Path] | None = None) -> Framew
 
 
 def probe_hy3dgen() -> Framework:
+    """只看包在不在，**不 import 子模块**。
+
+    ⚠️ `from hy3dgen.shapegen import ...` 会连锁 import torch。
+    torch 首次 import 在这台机器上要 10–20 秒（加载 CUDA 库、初始化 CUDA context），
+    而 `probe_all` 是在 `Pipeline.__init__` 里调的 —— 于是启动被拖到 20 秒，
+    连"初始化很快"的测试都会超时（实测 verify 的 warmup_deduped 就是这么红的）。
+    用 find_spec 判断存在性，代价是毫秒级。
+    """
+    import importlib.util as _u
+
     fw = Framework("hy3dgen", "hy3dgen（Hunyuan3D Python 包）")
     try:
-        import hy3dgen  # noqa: F401
+        if _u.find_spec("hy3dgen") is None:
+            return fw
         fw.alive = True
         fw.caps = {"mesh"}
-        fw.detail = "已安装"
         mods = []
-        try:
-            from hy3dgen.shapegen import (Hunyuan3DDiTPipeline,  # noqa: F401
-                                          Hunyuan3DDiTFlowMatchingPipeline)  # noqa: F401
+        if _u.find_spec("hy3dgen.shapegen") is not None:
             mods.append("shapegen")
-        except Exception:
-            pass
-        try:
-            from hy3dgen.texgen import Hunyuan3DPaintPipeline  # noqa: F401
+        if _u.find_spec("hy3dgen.texgen") is not None:
             mods.append("texgen")
-        except Exception:
-            pass
-        if mods:
-            fw.detail += "（" + " + ".join(mods) + "）"
+        fw.detail = "已安装" + (f"（{' + '.join(mods)}）" if mods else "")
     except Exception:
         pass
     return fw
@@ -212,28 +244,54 @@ def probe_hy3dgen() -> Framework:
 
 def probe_all(comfy_dir: str | Path | None = None,
               hosts: list[str] | None = None) -> list[Framework]:
-    """把能探的都探一遍。返回按"能干活"排序的清单。"""
+    """把能探的都探一遍。返回按固定顺序排好的清单。
+
+    ⚠️ 必须**并发**探。串行时每个不通的端口要等 0.6 秒连接超时，
+    8 个端点就是 5 秒起步 —— 而 `HybridBackend.__init__` 会调这个，
+    于是 `Pipeline()` 初始化变成 5–10 秒，把依赖"初始化很快"的测试拖红
+    （实测：干净 clone 里 `verify.py` 的 warmup_deduped 就是因此失败）。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
     hosts = hosts or ["127.0.0.1"]
-    out: list[Framework] = []
+    tasks: list = []          # 保持顺序，结果按这个顺序返回
+
+    def _add(fn):
+        tasks.append(fn)
+
+    def _comfy(h, port, label):
+        def run():
+            fw = probe_comfyui(h, port, comfy_dir)
+            if port != 8188:
+                fw.key = f"comfyui-{port}"
+                fw.label = f"ComfyUI ({port})"
+            return fw
+        return run
 
     for h in hosts:
         if h == "127.0.0.1":
-            out.append(probe_ollama(h, 11434))
-            out.append(probe_comfyui(h, 8188, comfy_dir))
+            _add(lambda h=h: probe_ollama(h, 11434))
+            _add(_comfy(h, 8188, None))
             # 双卡时的第二个实例。key 要区分开 —— 都叫 comfyui 的话，
             # 8189 没起时会把它塞进字典覆盖掉 8188 的活实例（踩过）。
-            second = probe_comfyui(h, 8189, comfy_dir)
-            second.key = "comfyui-8189"
-            second.label = "ComfyUI (8189)"
-            out.append(second)
-        out.append(probe_openai_compat(f"llama-{h}", "llama.cpp", h, 8080))
-        out.append(probe_openai_compat(f"llama8091-{h}", "llama.cpp (8091)", h, 8091))
-        out.append(probe_openai_compat(f"vllm-{h}", "vLLM", h, 8000))
-        out.append(probe_openai_compat(f"lmstudio-{h}", "LM Studio", h, 1234))
+            _add(_comfy(h, 8189, None))
+        _add(lambda h=h: probe_openai_compat(f"llama-{h}", "llama.cpp", h, 8080))
+        _add(lambda h=h: probe_openai_compat(f"llama8091-{h}", "llama.cpp (8091)", h, 8091))
+        _add(lambda h=h: probe_openai_compat(f"vllm-{h}", "vLLM", h, 8000))
+        _add(lambda h=h: probe_openai_compat(f"lmstudio-{h}", "LM Studio", h, 1234))
 
-    out.append(probe_local_diffusers([comfy_dir] if comfy_dir else None))
-    out.append(probe_hy3dgen())
-    return out
+    _add(lambda: probe_local_diffusers([comfy_dir] if comfy_dir else None))
+    _add(probe_hy3dgen)
+
+    out: list = [None] * len(tasks)
+    with ThreadPoolExecutor(max_workers=min(12, len(tasks) or 1)) as ex:
+        futures = {ex.submit(fn): i for i, fn in enumerate(tasks)}
+        for fut, i in futures.items():
+            try:
+                out[i] = fut.result()
+            except Exception as exc:
+                out[i] = Framework(key="error", label="探测失败", note=str(exc)[:120])
+    return [f for f in out if f is not None]
 
 
 # ────────────────────────────────────────────────────────────────
