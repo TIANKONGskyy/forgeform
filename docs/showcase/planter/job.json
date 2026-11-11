@@ -1,0 +1,25 @@
+{
+  "slug": "planter",
+  "name": "多面体花盆",
+  "prompt": "一个低多边形多面体花盆，几何折面造型，陶瓷白，底部平整可放置，单件",
+  "quality": "高质量",
+  "target_mm": 100,
+  "ok": true,
+  "image_s": 168.2,
+  "model_s": 568.0,
+  "glb_kb": 3516,
+  "vertices": 100002,
+  "faces": 200000,
+  "watertight": true,
+  "bbox_raw": [
+    1.988,
+    1.703,
+    1.929
+  ],
+  "volume_raw": 1.05985,
+  "stl_kb": 3906,
+  "stl_s": 9.6,
+  "total_s": 746.3,
+  "bodies": 1,
+  "quality_gate": "通过（单体，1 个连通块；折面造型和底面都完整）"
+}

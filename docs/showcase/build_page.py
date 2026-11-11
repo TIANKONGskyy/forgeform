@@ -20,6 +20,13 @@ BLURB = {
 }
 
 
+def fmt_sec(v):
+    """耗时：None 表示这一步复用了已有产物，不是 0。"""
+    if v is None:
+        return "复用"
+    return f"{v:.0f}<i>s</i>"
+
+
 def fmt(n, unit=""):
     if n is None:
         return "—"
@@ -34,22 +41,30 @@ def fmt_bytes(kb):
     return f"{kb/1024:.1f} MB" if kb > 1024 else f"{kb} KB"
 
 
-def make_thumb(d: Path) -> bool:
-    """把 image.png 压成 web 用的 image.jpg（源图不入库）。"""
-    src = d / "image.png"
-    dst = d / "image.jpg"
-    if not src.exists():
-        return dst.exists()
+def make_thumb(png: Path, jpg: Path, max_side: int = 900) -> bool:
+    """把 png 压成 web 用的 jpg（源图不入库）。
+
+    出图是带 alpha 的 PNG，直接 convert("RGB") 会把透明背景变黑 —— 必须显式合成到白底。
+    """
+    if not png.exists():
+        return jpg.exists()
     try:
         from PIL import Image
-        im = Image.open(src).convert("RGB")
-        if max(im.size) > 900:
-            im.thumbnail((900, 900), Image.LANCZOS)
-        im.save(dst, "JPEG", quality=86, optimize=True, progressive=True)
+        im = Image.open(png)
+        if im.mode in ("RGBA", "LA", "P"):
+            im = im.convert("RGBA")
+            bg = Image.new("RGB", im.size, (255, 255, 255))
+            bg.paste(im, mask=im.split()[-1])
+            im = bg
+        else:
+            im = im.convert("RGB")
+        if max(im.size) > max_side:
+            im.thumbnail((max_side, max_side), Image.LANCZOS)
+        im.save(jpg, "JPEG", quality=86, optimize=True, progressive=True)
         return True
     except Exception as exc:
-        print(f"  ! 缩略图失败 {d.name}: {exc}")
-        return dst.exists()
+        print(f"  ! 缩略图失败 {png}: {exc}")
+        return jpg.exists()
 
 
 def load_jobs():
@@ -60,7 +75,8 @@ def load_jobs():
         f = d / "job.json"
         if not f.exists():
             continue
-        make_thumb(d)
+        make_thumb(d / "image.png", d / "image.jpg")
+        make_thumb(d / "model.png", d / "model.jpg", 760)
         try:
             rec = json.loads(f.read_text(encoding="utf-8"))
         except Exception:
@@ -91,21 +107,30 @@ def card(j: dict, idx: int) -> str:
 
     shot = (f'<img src="{img}" alt="{name}" loading="lazy">' if has_img
             else '<span class="ph">无预览图</span>')
+    wire = (f'<div class="wire"><img src="./{slug}/model.jpg" alt="{name} 三视图" loading="lazy">'
+            f'<span class="wire-cap">STL 实际几何 · 四视角</span></div>'
+            if (HERE / slug / "model.jpg").exists() else "")
+    bodies = j.get("bodies")
+    bodies_dd = (f'<div><dt>连通块</dt><dd class="{"warn" if (bodies or 0) > 1 else ""}">'
+                 f'{bodies}</dd></div>' if bodies is not None else "")
     return f"""
         <article class="card">
           <div class="shot">{shot}<span class="idx">{idx:02d}</span></div>
+          {wire}
           <div class="body">
             <div class="title-row"><h3>{name}</h3>{wt_tag}</div>
             <p class="blurb">{BLURB.get(slug, '')}</p>
             <p class="prompt">「{j.get('prompt','')}」</p>
             <dl class="metrics">
-              <div><dt>出图</dt><dd>{fmt(j.get('image_s'))}<i>s</i></dd></div>
-              <div><dt>建模</dt><dd>{fmt(j.get('model_s'))}<i>s</i></dd></div>
+              <div><dt>出图</dt><dd>{fmt_sec(j.get('image_s'))}</dd></div>
+              <div><dt>建模</dt><dd>{fmt_sec(j.get('model_s'))}</dd></div>
               <div><dt>面数</dt><dd>{fmt(j.get('faces'))}</dd></div>
               <div><dt>尺寸</dt><dd>{fmt(j.get('target_mm'))}<i>mm</i></dd></div>
               <div><dt>GLB</dt><dd>{fmt_bytes(j.get('glb_kb'))}</dd></div>
               <div><dt>STL</dt><dd>{fmt_bytes(j.get('stl_kb'))}</dd></div>
+              {bodies_dd}
             </dl>
+            {f'<p class="gate">{j.get("quality_gate")}</p>' if j.get('quality_gate') else ''}
           </div>
         </article>"""
 
@@ -116,19 +141,23 @@ def build():
 
     # 汇总真实数字
     n = len(ok_jobs)
-    if n:
-        avg_img = sum(j.get("image_s", 0) or 0 for j in ok_jobs) / n
-        avg_3d = sum(j.get("model_s", 0) or 0 for j in ok_jobs) / n
-        wt_rate = sum(1 for j in ok_jobs if j.get("watertight")) / n * 100
-        total_faces = sum(j.get("faces", 0) or 0 for j in ok_jobs)
-    else:
-        avg_img = avg_3d = wt_rate = total_faces = 0
+    img_vals = [j["image_s"] for j in ok_jobs if j.get("image_s")]
+    model_vals = [j["model_s"] for j in ok_jobs if j.get("model_s")]
+    avg_img = sum(img_vals) / len(img_vals) if img_vals else None
+    avg_3d = sum(model_vals) / len(model_vals) if model_vals else 0
+    wt_rate = (sum(1 for j in ok_jobs if j.get("watertight")) / n * 100) if n else 0
+    total_faces = sum(j.get("faces", 0) or 0 for j in ok_jobs)
+
+    avg_img_s = f"{avg_img:.0f}" if avg_img else "—"
 
     cards = "".join(card(j, i + 1) for i, j in enumerate(jobs))
-    hero_img = f"./{ok_jobs[0]['dir']}/image.jpg" if ok_jobs else ""
+    # hero 优先用头盔那件（视觉上最像"成品"），没有就取第一件完成的
+    hero_job = next((j for j in ok_jobs if j["dir"] == "helmet"),
+                    ok_jobs[0] if ok_jobs else None)
+    hero_img = f"./{hero_job['dir']}/image.jpg" if hero_job else ""
 
     hero_visual = (f'<img src="{hero_img}" alt="示例输出">' if hero_img and
-                   (HERE / ok_jobs[0]["dir"] / "image.jpg").exists()
+                   (HERE / hero_job["dir"] / "image.jpg").exists()
                    else '<div class="glow"></div>')
 
     html = f"""<!doctype html>
@@ -192,14 +221,14 @@ def build():
   }}
 
   /* ── Hero ── */
-  .hero {{ padding: 84px 0 56px; display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; }}
+  .hero {{ padding: 84px 0 56px; display: grid; grid-template-columns: 1.15fr .85fr; gap: 52px; align-items: center; }}
   .eyebrow {{
     font: 600 12px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase;
     color: var(--cyan); margin-bottom: 18px;
   }}
   h1 {{
-    font-size: clamp(38px, 5.2vw, 62px); line-height: 1.08; margin: 0 0 22px;
-    font-weight: 800; letter-spacing: -.02em;
+    font-size: clamp(34px, 4.4vw, 54px); line-height: 1.12; margin: 0 0 22px;
+    font-weight: 800; letter-spacing: -.02em; text-wrap: balance;
   }}
   h1 em {{ font-style: normal; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }}
   .lede {{ font-size: 18px; color: var(--dim); margin: 0 0 30px; max-width: 46ch; }}
@@ -255,6 +284,7 @@ def build():
   }}
   .card:hover {{ border-color: #2f3a52; transform: translateY(-2px); }}
   .card .shot {{ position: relative; background: #0a0c11; aspect-ratio: 1; overflow: hidden; }}
+  .card.failed .shot {{ aspect-ratio: 16 / 7; }}
   .card .shot img {{ width: 100%; height: 100%; object-fit: cover; display: block; }}
   .card .ph {{
     display: grid; place-items: center; height: 100%; color: #39435a; font: 13px var(--mono);
@@ -264,6 +294,18 @@ def build():
     background: rgba(232,236,245,.86); padding: 3px 7px; border-radius: 5px;
   }}
   .card .body {{ padding: 20px 22px 22px; }}
+  .wire {{ position: relative; border-top: 1px solid var(--line); background: #080a0e; }}
+  .wire img {{ width: 100%; display: block; }}
+  .wire-cap {{
+    position: absolute; left: 12px; bottom: 10px; font: 10.5px/1 var(--mono);
+    letter-spacing: .08em; color: #6b7791; background: rgba(8,10,14,.78);
+    padding: 4px 8px; border-radius: 5px;
+  }}
+  .gate {{
+    margin: 14px 0 0; padding-top: 12px; border-top: 1px dashed var(--line);
+    font-size: 12.5px; color: var(--dim); line-height: 1.6;
+  }}
+  .metrics dd.warn {{ color: var(--amber); }}
   .title-row {{ display: flex; align-items: center; gap: 10px; }}
   .card h3 {{ margin: 0; font-size: 19px; font-weight: 700; }}
   .tag {{ font: 600 11px/1 var(--mono); padding: 5px 8px; border-radius: 6px; margin-left: auto; }}
@@ -363,7 +405,7 @@ def build():
 
   <section class="stats">
     <div><dt>完成的样例</dt><dd>{n}<i>件</i></dd></div>
-    <div><dt>平均出图</dt><dd>{avg_img:.0f}<i>s</i></dd></div>
+    <div><dt>平均出图</dt><dd>{avg_img_s}<i>s</i></dd></div>
     <div><dt>平均建模</dt><dd>{avg_3d/60:.1f}<i>min</i></dd></div>
     <div><dt>水密率</dt><dd>{wt_rate:.0f}<i>%</i></dd></div>
   </section>
@@ -390,13 +432,13 @@ def build():
     <table>
       <thead><tr><th>阶段</th><th>模型 / 档位</th><th>耗时</th><th>显存占用</th><th>备注</th></tr></thead>
       <tbody>
-        <tr><td>出图 1024²</td><td class="num">Qwen-Image-2.1 · 20 步</td><td class="num">≈ 56 s</td><td class="num">≈ 20 GB</td><td>本机主力</td></tr>
-        <tr><td>出图 1024²</td><td class="num">FLUX.1-dev FP8 · 28 步</td><td class="num">≈ 530 s</td><td class="num">≈ 18 GB</td><td>旧卡上的历史数据</td></tr>
-        <tr><td>建模</td><td class="num">Hunyuan3D 2.1 · 快速 256</td><td class="num">≈ 160 s</td><td class="num">≈ 14 GB</td><td>草稿用</td></tr>
-        <tr><td>建模</td><td class="num">Hunyuan3D 2.1 · 高质量 512</td><td class="num">≈ 11.7 min</td><td class="num">≈ 16 GB</td><td>终稿用，要等</td></tr>
+        <tr><td>出图 1024²</td><td class="num">Qwen-Image-2.1 · 20 步（标准档）</td><td class="num">≈ 56 s</td><td class="num">≈ 20 GB</td><td>纯生成</td></tr>
+        <tr><td>出图 1024²</td><td class="num">Qwen-Image-2.1 · 30 步（高精度档）</td><td class="num">≈ 140–170 s</td><td class="num">≈ 20 GB</td><td>含中→英翻译 24–48 s</td></tr>
+        <tr><td>建模</td><td class="num">Hunyuan3D 2.1 · 高质量 512</td><td class="num">≈ 8–10 min</td><td class="num">≈ 16 GB</td><td>本页 4 个样本实测 487–568 s</td></tr>
+        <tr><td>建模</td><td class="num">Hunyuan3D 2.1 · 快速 256</td><td class="num">≈ 160 s</td><td class="num">≈ 14 GB</td><td>草稿用，细节丢得多</td></tr>
         <tr><td>建模</td><td class="num">TripoSplat (fp16)</td><td class="num">≈ 6.7 min</td><td class="num">≈ 15 GB</td><td>兜底后端</td></tr>
         <tr><td>视频 832×480</td><td class="num">MiniMax H3 Ref2VA · 96 帧</td><td class="num">≈ 19 min</td><td class="num">≈ 20 GB</td><td>可选分支</td></tr>
-        <tr><td>STL 优化</td><td class="num">trimesh + pymeshlab（纯 CPU）</td><td class="num">≈ 115 s</td><td class="num">0</td><td>不占显存</td></tr>
+        <tr><td>STL 优化</td><td class="num">trimesh + pymeshlab（纯 CPU）</td><td class="num">≈ 3–6 s</td><td class="num">0</td><td>20 万面 → 8 万面</td></tr>
       </tbody>
     </table>
   </section>

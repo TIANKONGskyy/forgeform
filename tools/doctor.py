@@ -119,10 +119,11 @@ def resolve_paths(cfg: dict) -> dict:
 
 def check_paths(paths: dict) -> None:
     comfy = paths.get("comfyui", "")
-    if comfy and Path(comfy).exists():
+    shown = "(未设置)" if (not comfy or "${" in str(comfy)) else comfy
+    if comfy and "${" not in str(comfy) and Path(comfy).exists():
         add(OK, "ComfyUI 目录", comfy)
     else:
-        add(BAD, "ComfyUI 目录", comfy or "(未设置)",
+        add(BAD, "ComfyUI 目录", shown,
             '设环境变量 COMFYUI_DIR，或在 config.json 的 paths.comfyui 里写绝对路径')
 
     for key in ("output", "temp"):

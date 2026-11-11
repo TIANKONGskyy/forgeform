@@ -1,0 +1,25 @@
+{
+  "slug": "dragon",
+  "name": "龙头浮雕",
+  "prompt": "一个中国龙头造型的球形摆件，鳞片与鬃毛细节清晰，青铜质感，单件",
+  "quality": "高质量",
+  "target_mm": 100,
+  "ok": true,
+  "image_s": 138.7,
+  "model_s": 523.1,
+  "glb_kb": 3516,
+  "vertices": 100002,
+  "faces": 200000,
+  "watertight": true,
+  "bbox_raw": [
+    1.99,
+    1.928,
+    1.33
+  ],
+  "volume_raw": 2.03798,
+  "stl_kb": 3906,
+  "stl_s": 3.2,
+  "total_s": 665.4,
+  "bodies": 1,
+  "quality_gate": "通过（单体，1 个连通块；鳞片与鬃毛在 512 octree 下保住了）"
+}

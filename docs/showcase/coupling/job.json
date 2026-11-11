@@ -1,0 +1,25 @@
+{
+  "slug": "coupling",
+  "name": "六角法兰联轴器",
+  "prompt": "一个六角法兰联轴器，工业机械传动零件，中心有轴孔和六个螺栓孔，金属质感，单件",
+  "quality": "高质量",
+  "target_mm": 80,
+  "ok": true,
+  "image_s": 149.9,
+  "model_s": 487.1,
+  "glb_kb": 3516,
+  "vertices": 99988,
+  "faces": 200000,
+  "watertight": true,
+  "bbox_raw": [
+    1.994,
+    1.885,
+    0.512
+  ],
+  "volume_raw": 0.82373,
+  "stl_kb": 3906,
+  "stl_s": 3.3,
+  "total_s": 640.7,
+  "bodies": 1,
+  "quality_gate": "通过（单体，1 个连通块；六角法兰 + 中心轴孔 + 6 个螺栓孔都建出来了）"
+}

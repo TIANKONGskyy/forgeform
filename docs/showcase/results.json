@@ -1,11 +1,71 @@
 [
   {
-    "slug": "helmet",
-    "name": "骑士头盔",
-    "prompt": "一顶中世纪骑士头盔，抛光金属质感，正面对称，适合 3D 打印的摆件，单件",
+    "slug": "coupling",
+    "name": "六角法兰联轴器",
+    "prompt": "一个六角法兰联轴器，工业机械传动零件，中心有轴孔和六个螺栓孔，金属质感，单件",
     "quality": "高质量",
-    "target_mm": 90,
-    "ok": false,
-    "error": "出图失败: "
+    "target_mm": 80,
+    "ok": true,
+    "image_s": 149.9,
+    "model_s": 487.1,
+    "glb_kb": 3516,
+    "vertices": 99988,
+    "faces": 200000,
+    "watertight": true,
+    "bbox_raw": [
+      1.994,
+      1.885,
+      0.512
+    ],
+    "volume_raw": 0.82373,
+    "stl_kb": 3906,
+    "stl_s": 3.3,
+    "total_s": 640.7
+  },
+  {
+    "slug": "planter",
+    "name": "多面体花盆",
+    "prompt": "一个低多边形多面体花盆，几何折面造型，陶瓷白，底部平整可放置，单件",
+    "quality": "高质量",
+    "target_mm": 100,
+    "ok": true,
+    "image_s": 168.2,
+    "model_s": 568.0,
+    "glb_kb": 3516,
+    "vertices": 100002,
+    "faces": 200000,
+    "watertight": true,
+    "bbox_raw": [
+      1.988,
+      1.703,
+      1.929
+    ],
+    "volume_raw": 1.05985,
+    "stl_kb": 3906,
+    "stl_s": 9.6,
+    "total_s": 746.3
+  },
+  {
+    "slug": "dragon",
+    "name": "龙头浮雕",
+    "prompt": "一个中国龙头造型的球形摆件，鳞片与鬃毛细节清晰，青铜质感，单件",
+    "quality": "高质量",
+    "target_mm": 100,
+    "ok": true,
+    "image_s": 138.7,
+    "model_s": 523.1,
+    "glb_kb": 3516,
+    "vertices": 100002,
+    "faces": 200000,
+    "watertight": true,
+    "bbox_raw": [
+      1.99,
+      1.928,
+      1.33
+    ],
+    "volume_raw": 2.03798,
+    "stl_kb": 3906,
+    "stl_s": 3.2,
+    "total_s": 665.4
   }
 ]

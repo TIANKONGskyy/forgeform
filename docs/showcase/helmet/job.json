@@ -4,6 +4,22 @@
   "prompt": "一顶中世纪骑士头盔，抛光金属质感，正面对称，适合 3D 打印的摆件，单件",
   "quality": "高质量",
   "target_mm": 90,
-  "ok": false,
-  "error": "出图失败: "
+  "ok": true,
+  "image_s": null,
+  "model_s": 505.9,
+  "glb_kb": 3515,
+  "vertices": 99910,
+  "faces": 200000,
+  "watertight": true,
+  "bbox_raw": [
+    1.288,
+    1.991,
+    1.416
+  ],
+  "volume_raw": 0.28349,
+  "stl_kb": 659,
+  "stl_s": 5.8,
+  "total_s": 512.3,
+  "bodies": 6,
+  "quality_gate": "通过（6 个连通块，头盔面甲缝隙分裂，属这类形态常态）"
 }
