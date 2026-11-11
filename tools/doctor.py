@@ -194,6 +194,44 @@ def check_models(cfg: dict, paths: dict) -> None:
 
 
 # ── 7. GPU ─────────────────────────────────────────────────
+# ── 6. 推理框架探测（决定 auto 模式怎么路由）────────────
+CAP_CN = {"text": "对话", "image": "出图", "mesh": "建模", "video": "视频"}
+
+
+def check_frameworks(paths: dict) -> None:
+    """这台机器上有什么能用的推理框架 —— auto 模式靠这个决定走谁。"""
+    try:
+        from backend.backends import detect as D
+    except Exception as exc:
+        add(WARN, "框架探测", f"跳过（{type(exc).__name__}）")
+        return
+
+    fws = D.probe_all(comfy_dir=paths.get("comfyui") or None)
+    for f in fws:
+        if not f.alive:
+            continue
+        caps = "、".join(CAP_CN.get(c, c) for c in sorted(f.caps)) or "?"
+        add(OK, f.label, f"{f.url}  能: {caps}" + (f"  （{f.detail}）" if f.detail else ""))
+        if f.note:
+            add(WARN, f.label + " 备注", f.note)
+
+    for f in fws:
+        if not f.alive and f.key == "hy3dgen":
+            add(WARN, "hy3dgen", "未安装", "想用直连建模就 pip install hy3dgen")
+        if not f.alive and f.key == "diffusers":
+            add(WARN, "本地 diffusers 模型", "没找到", "出图想直连就得先 fetch_model 拉一个")
+
+    plan = D.recommend(fws)
+    pretty = "，".join(f"{CAP_CN.get(k, k)}→{v}" for k, v in plan.items())
+    missing = [CAP_CN.get(k, k) for k in ("image", "mesh") if k not in plan]
+    if missing:
+        add(BAD, "自动路由", pretty or "无",
+            f"{'、'.join(missing)} 没有可用后端：装 ComfyUI 或 "
+            f"python tools/fetch_model.py 拉一个 diffusers 模型（见 docs/BACKENDS.md）")
+    else:
+        add(OK, "自动路由", pretty)
+
+
 def check_gpu() -> None:
     try:
         out = subprocess.run(
@@ -242,6 +280,7 @@ def main() -> int:
     check_comfy_service()
     if cfg:
         check_models(cfg, paths)
+    check_frameworks(paths)
     check_gpu()
     return report()
 

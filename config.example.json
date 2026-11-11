@@ -1,7 +1,7 @@
 {
   "backend": {
-    "mode": "comfyui",
-    "_doc": "comfyui=走 ComfyUI（默认）；direct=直接 diffusers/hy3dgen，见 docs/BACKENDS.md"
+    "mode": "auto",
+    "_doc": "auto=启动时探测这台机器有什么（Ollama / ComfyUI / llama.cpp / vLLM / LM Studio / 本地 diffusers / hy3dgen），按阶段自动路由；comfyui=只走 ComfyUI（默认，行为不变）；direct=只走直连。见 docs/BACKENDS.md"
   },
   "agent": {
     "enabled": true,

@@ -1,13 +1,67 @@
 # 不用 ComfyUI 跑铸想
 
-铸想原来只有一条路：把工作流 JSON 提交给 ComfyUI。现在多了一条 ——
-`backend.mode = "direct"`，直接在 Python 里调 `diffusers` / `hy3dgen`，不经过 ComfyUI。
+铸想原来只有一条路：把工作流 JSON 提交给 ComfyUI。现在有三种：
 
-默认仍然是 ComfyUI。**不写这个配置，行为一行都不变。**
+```jsonc
+"backend": { "mode": "comfyui" }   // 默认：只用 ComfyUI，行为与以前完全一致
+"backend": { "mode": "direct" }    // 只用直连：diffusers / hy3dgen，不碰 ComfyUI
+"backend": { "mode": "auto" }      // 先探测，再按阶段自动路由（推荐新用户）
+```
+
+`config.example.json` 里默认给的是 **auto**。
 
 ---
 
-## 一句话状态
+## auto 模式在做什么
+
+启动时花不到 1 秒做一次探测（只发 GET、2.5 秒超时、**绝不拉起任何服务**），
+然后为每个阶段挑一个后端：
+
+```
+出图  → ComfyUI 活着且有出图权重？ 用它（省得重下 20 GB）
+        否则本地有 diffusers 模型？ 直连
+建模  → ComfyUI + 3D-Pack？        用它
+        否则 hy3dgen 有权重？      直连
+对话  → Ollama → llama.cpp → vLLM → LM Studio → 谁活着用谁
+        都没有                      关掉（纯规则模式）
+```
+
+探测项：
+
+| 框架 | 怎么发现 | 判据 |
+|---|---|---|
+| Ollama | `:11434/api/tags` | 能列出模型 |
+| ComfyUI | `:8188/system_stats` | 服务活着 + 扫 `models/` 有没有出图权重、有没有 3D-Pack |
+| llama.cpp / vLLM / LM Studio | `:8080` `:8091` `:8000` `:1234` 的 `/v1/models` | 能列出模型 |
+| 本地 diffusers | 扫 `model_index.json` | 找到完整 pipeline 目录 |
+| hy3dgen | `import hy3dgen` | 装了，且 shapegen/texgen 可导入 |
+
+**ComfyUI 活着但没出图权重**时不会硬塞给它 —— 出图会改用直连。这个判断是从
+「扫 `models/checkpoints|diffusion_models|unet` 有没有权重文件」来的。
+
+看这台机器实际探到什么（`python tools/doctor.py`）：
+
+```
+[OK]   Ollama              http://127.0.0.1:11434     能: 对话  （10 个模型）
+[OK]   ComfyUI             http://127.0.0.1:8188      能: 出图、建模  （Tesla V100，32G · 出图权重 12，VAE 13，3D-Pack 已装）
+[OK]   llama.cpp (8091)    http://127.0.0.1:8091/v1   能: 对话  （1 个模型）
+[OK]   本地 diffusers 模型                            能: 出图  （2 个）
+[OK]   hy3dgen（Hunyuan3D Python 包）                  能: 建模  （已安装（shapegen + texgen））
+[OK]   自动路由            出图→comfyui，建模→comfyui，对话→ollama
+```
+
+**一个都没有**的时候，`doctor` 会直接说清楚两条路：
+
+```
+[FAIL] 自动路由  出图→，建模→
+         → 出图、建模 没有可用后端：装 ComfyUI 或 python tools/fetch_model.py 拉一个 diffusers 模型
+```
+
+---
+
+## 直连模式（direct）的细节
+
+### 状态
 
 | 阶段 | 直连（direct） | 依赖 |
 |---|---|---|
