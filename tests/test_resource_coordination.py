@@ -8,6 +8,7 @@
 """
 
 import ast
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -44,11 +45,26 @@ class TestResourcePlan(unittest.TestCase):
     def setUp(self):
         import backend.startup as SU
         self.SU = SU
-        # 让 exists() 检查通过（真实路径确实都在，但显式说明意图）
         self._real_run = SU.subprocess.run
+
+        # 把"资源协调器存在"这件事**自己造出来**。
+        # 原来只注释了一句"真实路径确实都在"却什么都没做 —— 在作者机器上碰巧过了，
+        # clone 到没装 ZYKT 的机器上就必然失败（_resource_plan 会因为文件不存在返回 None）。
+        self._tmp = tempfile.TemporaryDirectory()
+        root = Path(self._tmp.name)
+        guard = root / "tools" / "resource-guard.mjs"
+        guard.parent.mkdir(parents=True, exist_ok=True)
+        guard.write_text("// stub", encoding="utf-8")
+        tsx = root / "node_modules" / ".bin" / "tsx.cmd"
+        tsx.parent.mkdir(parents=True, exist_ok=True)
+        tsx.write_text("@echo off", encoding="utf-8")
+        self._saved = (SU.RESOURCE_GUARD, SU.TSX, SU.ZYKT_DIR)
+        SU.RESOURCE_GUARD, SU.TSX, SU.ZYKT_DIR = guard, tsx, root
 
     def tearDown(self):
         self.SU.subprocess.run = self._real_run
+        self.SU.RESOURCE_GUARD, self.SU.TSX, self.SU.ZYKT_DIR = self._saved
+        self._tmp.cleanup()
 
     def _stub(self, stdout: str, returncode: int):
         """把 CLI 调用替换成固定输出。"""
