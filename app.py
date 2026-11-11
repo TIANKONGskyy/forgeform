@@ -240,29 +240,41 @@ CSS = """
      · 对话/输入    —— ChatGPT（消息块 + 底部大圆角输入条）
    ══════════════════════════════════════════════════════════════════ */
 :root {
-    --bg:        #0e1116;
-    --panel:     #12151c;
-    --card:      #171b24;
-    --card-hi:   #1d222d;
-    --line:      rgba(255,255,255,0.07);
-    --line-hi:   rgba(255,255,255,0.13);
-    --txt:       #e7eaf0;
-    --dim:       #98a1b0;
-    --dimmer:    #6b7480;
-    --brand:     #7c5cff;
-    --brand-hi:  #9179ff;
-    --brand-soft:rgba(124,92,255,0.13);
-    --ok:        #3ddc97;
-    --ok-soft:   rgba(61,220,151,0.13);
+    --bg:        #04060d;
+    /* 配色对齐 ZYKT studio（深空 + 北斗/星图）：ink 底色 + aurora 青 + nova 紫 */
+    --panel:     #070b16;
+    --card:      #0b1120;
+    --card-hi:   #101a2e;
+    --line:      rgba(150,185,235,0.14);
+    --line-hi:   rgba(150,185,235,0.28);
+    --txt:       #e6ecf9;
+    --dim:       #8b9ac0;
+    --dimmer:    #55648a;
+    --brand:     #22c8f5;
+    --brand-hi:  #56e0ff;
+    --brand-soft:rgba(86,224,255,0.12);
+    --ok:        #6ee7b7;
+    --ok-soft:   rgba(110,231,183,0.13);
     --warn:      #f5b544;
-    --r-lg: 16px; --r-md: 11px; --r-sm: 8px;
-    --shadow: 0 1px 2px rgba(0,0,0,.35), 0 8px 24px -12px rgba(0,0,0,.6);
+    --r-lg: 14px; --r-md: 10px; --r-sm: 7px;
+    --shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 1px 0 rgba(2,4,9,.5), 0 20px 44px -34px rgba(0,0,0,.95);
+    /* ZYKT 签名：青→紫→粉流光 + 面板顶部高光 */
+    --aurora: #56e0ff;
+    --nova:   #9d8dff;
+    --pink:   #f472b6;
+    --grad:   linear-gradient(100deg, #56e0ff 0%, #9d8dff 52%, #f472b6 100%);
+    --grad-soft: linear-gradient(100deg, rgba(86,224,255,.16), rgba(157,141,255,.16));
+    --panel-topline: rgba(140,234,255,0.38);
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 
 body, .gradio-container {
     background: var(--bg) !important;
+    background-image:
+        radial-gradient(900px 520px at 12% -8%, rgba(86,224,255,.055), transparent 62%),
+        radial-gradient(760px 480px at 88% 0%, rgba(157,141,255,.06), transparent 64%) !important;
+    background-attachment: fixed !important;
     color: var(--txt) !important;
     font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
                  "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif !important;
@@ -530,6 +542,95 @@ footer, .built-with, .show-api { display: none !important; }
 /* ── 通用 Gradio 收敛 ─────────────────────────────── */
 .block, .form { background: transparent !important; border: none !important; }
 label > span, .label-wrap span { color: var(--dim) !important; font-size: 12px !important; }
+
+/* ═══ ZYKT studio 风格：流光 / 面板高光 / 渐变按钮 ═══ */
+
+/* 面板的顶部高光线（ZYKT 每张卡顶部那一道细光） */
+.gradio-container .block,
+.gradio-container .form,
+.gradio-container .panel {
+    position: relative;
+    border-radius: var(--r-lg) !important;
+    border-color: var(--line) !important;
+    background: linear-gradient(180deg, rgba(16,25,43,.94), rgba(8,13,24,.96)) !important;
+    box-shadow: var(--shadow) !important;
+}
+.gradio-container .block::before {
+    content: "";
+    position: absolute; inset: 0 12% auto 12%; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--panel-topline), transparent);
+    pointer-events: none;
+}
+
+/* 主按钮：青→紫渐变 */
+#send_btn, #btn_gen, #btn_model, #btn_stl,
+button.lg.primary, button.primary {
+    background: var(--grad) !important;
+    border: 0 !important;
+    color: #04060d !important;
+    font-weight: 650 !important;
+    letter-spacing: .01em;
+    box-shadow: 0 10px 26px -16px rgba(86,224,255,.85) !important;
+    transition: filter .18s ease, transform .12s ease;
+}
+#send_btn:hover, #btn_gen:hover, #btn_model:hover, #btn_stl:hover,
+button.primary:hover { filter: brightness(1.07) saturate(1.05); }
+#send_btn:active, button.primary:active { transform: translateY(1px); }
+
+/* 次按钮：ghost + 青色描边悬停 */
+button.secondary {
+    background: var(--ghost, rgba(19,29,49,.9)) !important;
+    border: 1px solid var(--line-hi) !important;
+    color: var(--txt) !important;
+}
+button.secondary:hover {
+    border-color: var(--brand-hi) !important;
+    color: var(--brand-hi) !important;
+    box-shadow: 0 0 0 1px rgba(86,224,255,.16), 0 10px 26px -22px rgba(86,224,255,.8);
+}
+
+/* 示例胶囊：细边框 + 悬停泛青 */
+.gradio-container .gr-button-secondary,
+.gradio-container .examples button {
+    background: linear-gradient(180deg, rgba(20,31,53,.96), rgba(10,16,30,.96)) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 999px !important;
+}
+
+/* 输入框：深一档的底 + 聚焦泛青 */
+textarea, input[type="text"], input[type="search"] {
+    background: rgba(5,8,15,.92) !important;
+    border: 1px solid var(--line) !important;
+    color: var(--txt) !important;
+    border-radius: var(--r-md) !important;
+}
+textarea:focus, input[type="text"]:focus {
+    border-color: rgba(86,224,255,.55) !important;
+    box-shadow: 0 0 0 3px rgba(86,224,255,.10) !important;
+    outline: none !important;
+}
+
+/* 标题流光（ZYKT 字标那套青→蓝→紫的扫光） */
+.gradio-container h1,
+.gradio-container .md h1 {
+    background: var(--grad);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent !important;
+    font-weight: 750 !important;
+    letter-spacing: -.01em;
+}
+
+/* 对话气泡：用户侧偏青、助手侧用卡片底 */
+.gradio-container .message.user,
+.gradio-container .bubble-wrap.user {
+    background: linear-gradient(135deg, rgba(34,200,245,.16), rgba(122,102,245,.16)) !important;
+    border: 1px solid rgba(86,224,255,.22) !important;
+}
+
+/* 滚动条也跟上（ZYKT 的 thumb 是 #1b2740） */
+*::-webkit-scrollbar-thumb { background: #1b2740; }
+*::-webkit-scrollbar-thumb:hover { background: #26385c; }
+
 """
 
 
