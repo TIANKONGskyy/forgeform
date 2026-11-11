@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>铸想 ForgeForm · UI 原型</title>
+<style>
+:root{
+  --bg:#04060d; --panel:#070b16; --card:#0b1120; --card-hi:#101a2e;
+  --line:rgba(150,185,235,.14); --line-hi:rgba(150,185,235,.28);
+  --txt:#e6ecf9; --dim:#8b9ac0; --dimmer:#55648a;
+  --aurora:#56e0ff; --nova:#9d8dff; --pink:#f472b6;
+  --grad:linear-gradient(100deg,#56e0ff,#9d8dff 52%,#f472b6);
+  --r:20px; --r-sm:12px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg);
+  background-image:
+    radial-gradient(900px 520px at 12% -8%,rgba(86,224,255,.06),transparent 62%),
+    radial-gradient(760px 480px at 88% 0%,rgba(157,141,255,.07),transparent 64%);
+  background-attachment:fixed;
+  color:var(--txt);
+  font:14px/1.55 "Inter","Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  display:flex; justify-content:center;
+  padding:0;
+}
+/* 手机框：桌面居中显示 430px，窄屏铺满 */
+#phone{
+  width:430px; height:100vh; max-height:932px;
+  background:linear-gradient(180deg,#070b16,#04060d 40%);
+  border:1px solid var(--line); border-radius:28px;
+  display:flex; flex-direction:column; overflow:hidden; position:relative;
+  box-shadow:0 40px 120px -60px rgba(0,0,0,.95),0 0 0 1px rgba(86,224,255,.05);
+  margin:0;
+}
+@media (max-width:520px){
+  body{padding:0}
+  #phone{width:100%;height:100vh;max-height:none;border-radius:0;border:0}
+}
+
+/* ── 顶部栏 ── */
+header{
+  height:56px; flex:0 0 56px; display:flex; align-items:center; gap:10px;
+  padding:0 14px; border-bottom:1px solid var(--line);
+  backdrop-filter:blur(12px); background:rgba(7,11,22,.72);
+}
+.icon-btn{
+  width:34px; height:34px; border-radius:10px; border:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(20,31,53,.9),rgba(10,16,30,.9));
+  display:grid; place-items:center; cursor:pointer; color:var(--dim);
+  font-size:15px; transition:.15s;
+}
+.icon-btn:hover{border-color:var(--line-hi);color:var(--aurora)}
+.brand{
+  font-weight:750; font-size:15px; letter-spacing:.01em;
+  background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.brand small{font-weight:500;color:var(--dimmer);-webkit-text-fill-color:var(--dimmer);margin-left:6px;font-size:11px}
+.spacer{flex:1}
+.pill{
+  font-size:11px; padding:4px 10px; border-radius:999px;
+  border:1px solid var(--line); color:var(--dim);
+  background:rgba(86,224,255,.06);
+}
+.pill.ok{border-color:rgba(110,231,183,.35);color:#6ee7b7;background:rgba(110,231,183,.08)}
+
+/* ── 抽屉 ── */
+#drawer{
+  position:absolute; inset:0 auto 0 0; width:290px; z-index:20;
+  background:linear-gradient(180deg,#0a0f1c,#05080f);
+  border-right:1px solid var(--line);
+  transform:translateX(-100%); transition:transform .26s cubic-bezier(.22,.7,.3,1);
+  display:flex; flex-direction:column;
+}
+#drawer.open{transform:none}
+#scrim{
+  position:absolute; inset:0; background:rgba(2,4,9,.6); z-index:15;
+  opacity:0; pointer-events:none; transition:opacity .2s;
+}
+#scrim.on{opacity:1;pointer-events:auto}
+.drawer-head{padding:16px 16px 10px;font-size:12px;color:var(--dimmer);letter-spacing:.08em;text-transform:uppercase}
+.conv{
+  margin:0 10px 6px; padding:11px 12px; border-radius:14px; border:1px solid transparent;
+  display:flex; gap:10px; align-items:center; cursor:pointer;
+}
+.conv:hover{border-color:var(--line);background:rgba(20,31,53,.5)}
+.conv.active{border-color:rgba(86,224,255,.35);background:rgba(86,224,255,.07)}
+.conv .dot{width:7px;height:7px;border-radius:999px;background:var(--dimmer);flex:0 0 7px}
+.conv.active .dot{background:var(--aurora);box-shadow:0 0 10px var(--aurora)}
+.conv .t{font-size:13px}
+.conv .s{font-size:11px;color:var(--dimmer);margin-top:2px}
+
+/* ── 主区 ── */
+main{flex:1;overflow-y:auto;padding:18px 16px 8px;scroll-behavior:smooth}
+main::-webkit-scrollbar{width:0}
+
+.hero{text-align:center;padding:14px 4px 20px}
+.hero h1{
+  margin:0;font-size:23px;font-weight:800;letter-spacing:-.02em;
+  background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.hero p{margin:8px 0 0;color:var(--dim);font-size:12.5px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.chip{
+  font-size:12px;padding:8px 14px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(20,31,53,.95),rgba(10,16,30,.95));
+  color:var(--dim);transition:.15s;
+}
+.chip:hover{border-color:rgba(86,224,255,.5);color:var(--txt);transform:translateY(-1px)}
+
+.bubble{
+  max-width:88%;margin:14px 0;padding:13px 15px;border-radius:18px;
+  background:linear-gradient(180deg,rgba(16,25,43,.95),rgba(8,13,24,.96));
+  border:1px solid var(--line); font-size:13.5px; line-height:1.6;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+}
+.bubble.me{
+  margin-left:auto; border-color:rgba(86,224,255,.28);
+  background:linear-gradient(135deg,rgba(34,200,245,.16),rgba(122,102,245,.16));
+}
+
+/* 作品卡片：图 + 3D + STL 三态 */
+.work{
+  margin:16px 0; border:1px solid var(--line); border-radius:var(--r); overflow:hidden;
+  background:linear-gradient(180deg,rgba(16,25,43,.94),rgba(8,13,24,.96));
+  position:relative;
+}
+.work::before{
+  content:"";position:absolute;inset:0 14% auto 14%;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(140,234,255,.42),transparent);
+}
+.work .thumb{
+  aspect-ratio:1; display:grid; place-items:center; position:relative;
+  background:radial-gradient(circle at 50% 42%,rgba(86,224,255,.10),transparent 62%),#080d18;
+}
+.work .thumb .shape{
+  width:56%;aspect-ratio:1;border-radius:26%;
+  background:linear-gradient(145deg,#c9d3e6,#8d9abb 55%,#5d6a8c);
+  box-shadow:0 24px 60px -30px rgba(86,224,255,.7),inset 0 -10px 30px rgba(0,0,0,.45);
+  position:relative;
+}
+.work .thumb .shape::after{
+  content:"";position:absolute;inset:34%;border-radius:50%;
+  background:#080d18;box-shadow:0 0 0 8px rgba(0,0,0,.25) inset;
+}
+.work .meta{padding:12px 14px 14px;display:flex;gap:10px;align-items:center}
+.work .meta .k{font-size:12px;color:var(--dim)}
+.work .meta .v{font-size:12px;color:var(--aurora);font-variant-numeric:tabular-nums}
+.work .meta .right{margin-left:auto;display:flex;gap:6px}
+
+/* ── 底部输入 ── */
+footer{
+  flex:0 0 auto;padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+  border-top:1px solid var(--line);
+  background:rgba(7,11,22,.82);backdrop-filter:blur(14px);
+}
+.inputbar{
+  display:flex;gap:8px;align-items:center;padding:6px 6px 6px 14px;
+  border:1px solid var(--line-hi);border-radius:999px;
+  background:rgba(5,8,15,.92);
+  transition:.18s;
+}
+.inputbar:focus-within{border-color:rgba(86,224,255,.55);box-shadow:0 0 0 3px rgba(86,224,255,.10)}
+.inputbar input{
+  flex:1;border:0;background:transparent;color:var(--txt);font-size:13.5px;outline:none;
+}
+.inputbar input::placeholder{color:var(--dimmer)}
+.send{
+  width:42px;height:42px;border-radius:999px;border:0;cursor:pointer;
+  background:var(--grad);color:#04060d;font-size:17px;font-weight:700;
+  display:grid;place-items:center;transition:.15s;flex:0 0 42px;
+  box-shadow:0 10px 26px -14px rgba(86,224,255,.9);
+}
+.send:hover{filter:brightness(1.08)}
+.subbar{display:flex;gap:8px;margin-top:8px}
+.subbar .icon-btn{width:auto;padding:0 12px;font-size:12px;gap:6px}
+
+/* ── 安装向导（第二屏）── */
+#wizard{position:absolute;inset:0;z-index:30;background:linear-gradient(180deg,#070b16,#04060d);display:none;flex-direction:column}
+#wizard.show{display:flex}
+.wiz-head{padding:20px 20px 6px}
+.wiz-head h2{margin:0;font-size:19px;font-weight:800}
+.wiz-head p{margin:6px 0 0;font-size:12px;color:var(--dim)}
+.steps{display:flex;gap:6px;padding:16px 20px 4px}
+.step{flex:1;height:3px;border-radius:99px;background:rgba(150,185,235,.16);overflow:hidden}
+.step.on{background:var(--grad)}
+.wiz-body{flex:1;overflow-y:auto;padding:14px 20px 20px}
+.wiz-body::-webkit-scrollbar{width:0}
+.plan{
+  border:1px solid var(--line);border-radius:var(--r);padding:15px;margin-bottom:12px;
+  background:linear-gradient(180deg,rgba(16,25,43,.94),rgba(8,13,24,.96));
+  cursor:pointer;transition:.16s;position:relative;
+}
+.plan:hover{border-color:rgba(86,224,255,.4)}
+.plan.sel{border-color:rgba(86,224,255,.65);box-shadow:0 0 0 1px rgba(86,224,255,.2),0 18px 40px -30px rgba(86,224,255,.8)}
+.plan .top{display:flex;align-items:center;gap:8px}
+.plan .name{font-size:14px;font-weight:700}
+.plan .tag{font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
+.plan .tag.star{border-color:rgba(86,224,255,.4);color:var(--aurora);background:rgba(86,224,255,.08)}
+.plan .desc{font-size:12px;color:var(--dim);margin-top:7px;line-height:1.55}
+.plan .stat{display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--dimmer);font-variant-numeric:tabular-nums}
+.plan .stat b{color:var(--txt);font-weight:600}
+.wiz-foot{padding:12px 20px calc(18px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
+.btn-primary{
+  width:100%;padding:14px;border:0;border-radius:var(--r-sm);cursor:pointer;
+  background:var(--grad);color:#04060d;font-weight:750;font-size:14px;
+  box-shadow:0 14px 34px -18px rgba(86,224,255,.9);
+}
+.btn-primary:hover{filter:brightness(1.07)}
+.progress{height:6px;border-radius:99px;background:rgba(150,185,235,.14);overflow:hidden;margin-top:12px}
+.progress i{display:block;height:100%;width:0;background:var(--grad);transition:width .3s}
+.log{
+  margin-top:12px;font:11px/1.7 "JetBrains Mono",Consolas,monospace;color:var(--dimmer);
+  max-height:140px;overflow-y:auto;
+}
+.log b{color:var(--aurora);font-weight:500}
+</style>
+</head>
+<body>
+<div id="phone">
+
+  <header>
+    <div class="icon-btn" id="menuBtn">☰</div>
+    <div class="brand">铸想 <small>ForgeForm</small></div>
+    <div class="spacer"></div>
+    <div class="pill ok">GPU 就绪</div>
+    <div class="icon-btn" id="wizBtn" title="安装向导">⚙</div>
+  </header>
+
+  <div id="scrim"></div>
+  <aside id="drawer">
+    <div class="drawer-head">对话组</div>
+    <div class="conv active"><div class="dot"></div><div><div class="t">六角法兰联轴器</div><div class="s">今天 22:14 · 已有 STL</div></div></div>
+    <div class="conv"><div class="dot"></div><div><div class="t">多面体花盆</div><div class="s">昨天 · 已打印</div></div></div>
+    <div class="conv"><div class="dot"></div><div><div class="t">龙头球形摆件</div><div class="s">11-09 · 已有 GLB</div></div></div>
+    <div class="conv"><div class="dot"></div><div><div class="t">骑士头盔</div><div class="s">11-07 · 6 个连通块</div></div></div>
+  </aside>
+
+  <main id="main">
+    <div class="hero">
+      <h1>一句话，变成实物</h1>
+      <p>描述 → 出图 → 建模 → 可打印 STL</p>
+      <div class="chips">
+        <div class="chip">一个熊大</div>
+        <div class="chip">机械臂底座</div>
+        <div class="chip">茶杯垫 90mm</div>
+        <div class="chip">手机支架</div>
+      </div>
+    </div>
+
+    <div class="bubble me">做一个六角法兰联轴器，中心轴孔，六个螺栓孔</div>
+
+    <div class="bubble">
+      收到。默认外径 80 mm、厚 20 mm、中心孔 20 mm、六个 M6 螺栓孔。<br>
+      要改尺寸直接说，或者点下面的按钮开始。
+    </div>
+
+    <div class="work">
+      <div class="thumb"><div class="shape"></div></div>
+      <div class="meta">
+        <div><div class="k">面数</div><div class="v">40,000</div></div>
+        <div><div class="k">水密</div><div class="v">是</div></div>
+        <div><div class="k">尺寸</div><div class="v">80×29×78 mm</div></div>
+        <div class="right">
+          <div class="icon-btn">↻</div>
+          <div class="icon-btn">⤓</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="inputbar">
+      <input placeholder="描述你想打印的东西…">
+      <button class="send">↑</button>
+    </div>
+    <div class="subbar">
+      <div class="icon-btn">🖼 上传图</div>
+      <div class="icon-btn">✎ 按提示词改</div>
+      <div class="icon-btn">◱ 3D 预览</div>
+    </div>
+  </footer>
+
+  <!-- ── 安装向导 ── -->
+  <section id="wizard">
+    <div class="wiz-head">
+      <h2>开始使用铸想</h2>
+      <p>先看看这台机器有什么，再决定装哪套模型</p>
+    </div>
+    <div class="steps"><div class="step on"></div><div class="step"></div><div class="step"></div></div>
+
+    <div class="wiz-body">
+      <div class="plan sel">
+        <div class="top"><div class="name">复用现有 ComfyUI</div><div class="tag star">推荐</div></div>
+        <div class="desc">这台机器上 ComfyUI 已经在跑，有 12 个出图权重，3D-Pack 已装。出图/建模都走它。</div>
+        <div class="stat"><span>下载 <b>0 GB</b></span><span>后端 <b>auto</b></span><span>显存 <b>≥ 8 GB</b></span></div>
+      </div>
+      <div class="plan">
+        <div class="top"><div class="name">最小可用</div><div class="tag">SD1.5 + 3D 2mini</div></div>
+        <div class="desc">没有 ComfyUI 时的起步方案。画质一般，但出图到 STL 全链路能跑通。</div>
+        <div class="stat"><span>下载 <b>8.2 GB</b></span><span>后端 <b>direct</b></span><span>显存 <b>≥ 7 GB</b></span></div>
+      </div>
+      <div class="plan">
+        <div class="top"><div class="name">推荐画质</div><div class="tag">Z-Image + 3D 2mini</div></div>
+        <div class="desc">8 步出图，1024²，中文提示词理解好。</div>
+        <div class="stat"><span>下载 <b>30.6 GB</b></span><span>后端 <b>auto</b></span><span>显存 <b>≥ 12 GB</b></span></div>
+      </div>
+
+      <div style="margin-top:18px;font-size:12px;color:var(--dimmer)">下载进度</div>
+      <div class="progress"><i style="width:62%"></i></div>
+      <div class="log">
+        <div><b>✓</b> 探测硬件 · Tesla V100 32G · RAM 128 GB</div>
+        <div><b>✓</b> 找到 ComfyUI :8188（12 权重 / 3D-Pack）</div>
+        <div><b>✓</b> 找到 Ollama :11434（10 模型）</div>
+        <div>↓ 正在拉取 hunyuan3d-dit-v2-mini 2.2 / 3.6 GB · 3.1 MB/s</div>
+      </div>
+    </div>
+
+    <div class="wiz-foot">
+      <button class="btn-primary" id="startBtn">开始安装</button>
+    </div>
+  </section>
+
+</div>
+
+<script>
+const drawer=document.getElementById('drawer'), scrim=document.getElementById('scrim');
+const openD=()=>{drawer.classList.add('open');scrim.classList.add('on')};
+const closeD=()=>{drawer.classList.remove('open');scrim.classList.remove('on')};
+document.getElementById('menuBtn').onclick=openD;
+scrim.onclick=closeD;
+const wizard=document.getElementById('wizard');
+document.getElementById('wizBtn').onclick=()=>wizard.classList.add('show');
+document.getElementById('startBtn').onclick=()=>wizard.classList.remove('show');
+document.querySelectorAll('.plan').forEach(p=>p.onclick=()=>{
+  document.querySelectorAll('.plan').forEach(x=>x.classList.remove('sel'));
+  p.classList.add('sel');
+});
+document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{
+  document.querySelector('.inputbar input').value=c.textContent;
+});
+</script>
+</body>
+</html>
