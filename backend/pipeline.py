@@ -97,9 +97,13 @@ class Pipeline:
                     "default_model": self.config.get("generation", {}).get(f"default_{stage_name}_model", "")
                 }
         
-        # 初始化客户端
-        from .comfy_client import ComfyUIClient
-        self.comfy = ComfyUIClient(self.config)
+        # 初始化生成后端。
+        # 默认是 ComfyUI（config 里不写 backend 就完全走老路）；
+        # 写 "backend": {"mode": "direct"} 就换成 diffusers / hy3dgen 直连，见 docs/BACKENDS.md。
+        # 属性名仍叫 self.comfy —— 下面二十多处调用因此一行都不用改。
+        from .backends import make_backend
+        self.comfy = make_backend(self.config)
+        self.backend_mode = getattr(self.comfy, "name", "comfyui")
         
         # 状态
         self.state = PipelineState()

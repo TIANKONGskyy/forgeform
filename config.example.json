@@ -1,4 +1,8 @@
 {
+  "backend": {
+    "mode": "comfyui",
+    "_doc": "comfyui=走 ComfyUI（默认）；direct=直接 diffusers/hy3dgen，见 docs/BACKENDS.md"
+  },
   "agent": {
     "enabled": true,
     "provider": "strata",
