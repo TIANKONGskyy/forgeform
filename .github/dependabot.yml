@@ -1,0 +1,26 @@
+version: 2
+
+updates:
+  # Python 依赖（requirements.txt）
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps"
+    labels: ["dependencies"]
+    # 这几个是 copyleft 的重依赖，升级会牵动水密闸门的行为 —— 手动跟，不用机器人推
+    ignore:
+      - dependency-name: "pymeshlab"
+      - dependency-name: "pymeshfix"
+      - dependency-name: "trimesh"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "ci"
+    labels: ["dependencies"]

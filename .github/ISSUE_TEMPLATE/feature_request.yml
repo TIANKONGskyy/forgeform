@@ -1,0 +1,52 @@
+name: 功能建议
+description: 想要新的能力、新的模型支持、或者觉得哪里不顺手
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        这个项目的取舍很保守 —— 加功能容易，保证「一句话到能打印」这条链路不断很难。
+        所以请先说明**你要解决什么问题**，而不是先给方案。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你遇到的实际问题
+      description: 具体场景。比如"想给手机支架加个卡扣结构，现在只能在提示词里描述，经常做不出来"
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你想到的做法（可选）
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 属于哪块
+      multiple: true
+      options:
+        - 对话 / agent
+        - 出图
+        - 建模（3D）
+        - STL / 水密 / 减面
+        - 视频
+        - 打印
+        - Web 界面
+        - 文档 / 上手体验
+        - 其他
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: 你愿意提 PR 吗
+      options:
+        - label: 愿意，我可以自己实现
+        - label: 愿意，但需要指路
+        - label: 只能提建议

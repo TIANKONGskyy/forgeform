@@ -1,0 +1,38 @@
+# 换行规范：仓库里一律存 LF，检出到工作区时按类型转换。
+# 不加这个文件时，Windows 上每个 commit 都会刷 "LF will be replaced by CRLF" 警告，
+# 而且别人在 Linux/macOS 上 clone 下来的 shell 脚本会带着 CRLF 跑不起来。
+* text=auto eol=lf
+
+# PowerShell / cmd 必须是 CRLF，否则某些环境下解析异常
+*.ps1  text eol=crlf
+*.psm1 text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+# 二进制：不做任何转换
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.glb  binary
+*.gltf binary
+*.stl  binary
+*.3mf  binary
+*.step binary
+*.safetensors binary
+*.gguf binary
+*.mp4  binary
+*.webm binary
+*.zip  binary
+
+# 文档与配置的 diff 友好处理
+*.md   text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# 别把生成的展示页算进"主要语言"
+docs/showcase/index.html linguist-documentation
+docs/**.md               linguist-documentation
