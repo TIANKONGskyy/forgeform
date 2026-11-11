@@ -107,7 +107,12 @@ def _warm_image_model_async(model_key: str) -> None:
             # 队列里已经有预热作业？直接跳过（否则重复排队，实测堆过 5 个在偷 GPU）
             try:
                 import requests as _rq
-                q = _rq.get(f"{p.comfy._pick_url('image')}/queue", timeout=8).json()
+                # 用 getattr 兜一下：后端实现（比如 HybridBackend）不一定有 _pick_url，
+                # 缺了会抛 AttributeError 被下面的 except 吞掉 —— 那等于"队列忙也不跳过"，
+                # 预热照样提交（verify 的 warmup_deduped 抓的就是这个）。
+                _base = getattr(p.comfy, "_pick_url", None)
+                _url = _base("image") if callable(_base) else "http://127.0.0.1:8188"
+                q = _rq.get(f"{_url}/queue", timeout=8).json()
                 if q.get('queue_running') or q.get('queue_pending'):
                     print("[DSH] 队列忙，跳过生图预热", flush=True)
                     return

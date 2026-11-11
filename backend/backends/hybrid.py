@@ -124,6 +124,20 @@ class HybridBackend:
     def upload_image(self, image_path: str, stage: str = "image") -> str:
         return self.pick(stage).upload_image(image_path, stage=stage)
 
+    # ── 兼容层：ComfyUIClient 的私有方法，业务代码里有几处直接调 ──
+    def _pick_url(self, stage: str | None = None) -> str:
+        """`conversation._warm_image_model_async` 会用它拼 `/queue` 的地址。
+
+        ⚠️ 这个方法**必须存在**。少了它时 AttributeError 会被外面那层
+        `except: pass` 吞掉，于是"队列忙就跳过预热"的分支失效 ——
+        表现是预热照常提交（干净 clone 里 verify 的 warmup_deduped 就是这么红的，
+        开发机上因为 config 走的是 comfyui 模式才碰巧过）。
+        """
+        try:
+            return self._get_comfy()._pick_url(stage)
+        except Exception:
+            return "http://127.0.0.1:8188"
+
     def build_workflow(self, stage_name: str, params: dict) -> dict:
         wf = self.pick(stage_name).build_workflow(stage_name, params)
         if isinstance(wf, dict):
