@@ -91,6 +91,8 @@ const WORKS = [
   { slug:'coupling', name:'六角法兰联轴器', mm:80,  note:'单体，1 个连通块' },
   { slug:'dragon',   name:'龙头球形摆件',   mm:100, note:'单体，1 个连通块' },
   { slug:'planter',  name:'多面体花盆',     mm:100, note:'单体，1 个连通块' },
+  { slug:'_bench',       name:'直连 3D · 原始', mm:0,   note:'hy3dgen 直出 48 万面，未修水密', badge:'DIRECT' },
+  { slug:'_bench_fixed', name:'直连 3D · 修复后', mm:120, note:'水密链修复后 20 万面', badge:'DIRECT' },
 ];
 
 const main = document.querySelector('main');
@@ -106,7 +108,8 @@ main.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x07080c);
-scene.fog = new THREE.Fog(0x07080c, 6, 22);
+// 不用雾：雾的 near/far 是固定距离，粗尺度模型（120mm）的相机距离是 250+，
+// 会被整块雾吃掉 —— 表现是"数据读到了但画面全黑"（踩过）。要纵深用背景渐变就够。
 
 const camera = new THREE.PerspectiveCamera(38, main.clientWidth/main.clientHeight, 0.01, 200);
 camera.position.set(2.2, 1.7, 2.8);
@@ -150,6 +153,13 @@ function fit(obj){
   const maxDim = Math.max(size.x, size.y, size.z) || 1;
   const dist = maxDim * 2.1;
   camera.position.set(dist*0.62, dist*0.52, dist*0.72);
+  // 相机远平面必须跟着模型尺度走：毫米级的模型（比如 120mm 的 STL）会被默认 far=200 裁掉，
+  // 表现是"数据显示正常但画面上什么都没有"（踩过）。
+  camera.far = Math.max(1000, maxDim * 30);
+  camera.near = Math.max(0.01, maxDim / 5000);
+  camera.updateProjectionMatrix();
+  // 地面网格也跟着模型尺度走，否则毫米级模型下面是个看不见的小格子
+  grid.scale.setScalar(Math.max(0.05, maxDim / 3));
   controls.target.set(0, size.y*0.45, 0);
   controls.minDistance = maxDim * 0.9;
   controls.maxDistance = maxDim * 7;
