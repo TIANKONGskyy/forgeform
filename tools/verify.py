@@ -696,69 +696,74 @@ def check_agent_layer() -> None:
     ck("tuned_unload_before_generation", "agent.unload_tuned()" in src_c2,
        "生成前让出显存，否则 14B 与 ComfyUI 抢 20GB")
     FT = ROOT / "finetune"
-    ck("finetune_scripts_present",
-       all((FT / f).exists() for f in
-           ("gen_agent_dataset.py", "train_v8.py", "serve_agent.py", "verify_v8.py")),
-       "造数据 / 训练 / 推理服务 三个脚本")
-    ck("serve_agent_has_stream_and_unload",
-       "/api/stream" in (FT / "serve_agent.py").read_text(encoding="utf-8")
-       and "/unload" in (FT / "serve_agent.py").read_text(encoding="utf-8"))
-    src_train = (FT / "train_v8.py").read_text(encoding="utf-8")
-    ck("train_v8_seq_len_adequate",
-       'DSH_TRAIN_MAXSEQ' in src_train and '"2048"' in src_train,
-       "v7 的 1024 会截断我们的 JSON 样本；默认 2048 且可用环境变量下调（显存紧张时）")
-    ck("training_lock_skips_warmup",
-       "def _gpu_busy_lock" in src_a and "TRAINING.lock" in src_a
-       and "跳过预热" in src_a and "TRAINING.lock" in src_train,
-       "训练期间任何 import app 的脚本都不该把 12GB 对话模型拉回显存"
-       "（实测把训练拖慢 3 倍：步时 14s→53s）")
-    ck("describer_guards_respect_lock",
-       "def _training_lock_active" in src_d and src_d.count("_training_lock_active()") >= 4,
-       "咽喉点守卫：预热 / 非流式 / 流式 三处都要认锁（否则任何一次真实调用都会拉回模型）")
+    # 判存在要看具体脚本，不能只看目录：app 初始化时会 mkdir finetune/（放训练锁与 venv），
+    # 空目录不代表微调线真的在。
+    if (FT / "serve_agent.py").exists():
+        ck("finetune_scripts_present",
+           all((FT / f).exists() for f in
+               ("gen_agent_dataset.py", "train_v8.py", "serve_agent.py", "verify_v8.py")),
+           "造数据 / 训练 / 推理服务 三个脚本")
+        ck("serve_agent_has_stream_and_unload",
+           "/api/stream" in (FT / "serve_agent.py").read_text(encoding="utf-8")
+           and "/unload" in (FT / "serve_agent.py").read_text(encoding="utf-8"))
+        src_train = (FT / "train_v8.py").read_text(encoding="utf-8")
+        ck("train_v8_seq_len_adequate",
+           'DSH_TRAIN_MAXSEQ' in src_train and '"2048"' in src_train,
+           "v7 的 1024 会截断我们的 JSON 样本；默认 2048 且可用环境变量下调（显存紧张时）")
+        ck("training_lock_skips_warmup",
+           "def _gpu_busy_lock" in src_a and "TRAINING.lock" in src_a
+           and "跳过预热" in src_a and "TRAINING.lock" in src_train,
+           "训练期间任何 import app 的脚本都不该把 12GB 对话模型拉回显存"
+           "（实测把训练拖慢 3 倍：步时 14s→53s）")
+        ck("describer_guards_respect_lock",
+           "def _training_lock_active" in src_d and src_d.count("_training_lock_active()") >= 4,
+           "咽喉点守卫：预热 / 非流式 / 流式 三处都要认锁（否则任何一次真实调用都会拉回模型）")
 
-    # ── gpt-oss 那条线（v9）：硬约束是"不能再量化一次"+"必须用 harmony 模板" ──
-    v9 = (FT / "train_gptoss_v9.py")
-    ck("train_v9_present", v9.exists())
-    if v9.exists():
-        src_v9 = v9.read_text(encoding="utf-8")
-        ck("train_v9_uses_fastmodel", "from unsloth import FastModel" in src_v9,
-           "gpt-oss 权重原生 MXFP4，FastLanguageModel 不支持")
-        ck("train_v9_no_double_quant",
-           "load_in_4bit=False" in src_v9 and "dtype=None" in src_v9,
-           "已经是 4-bit 了再量化一次既无意义也伤精度；转 bf16 又会翻倍到 40GB")
-        ck("train_v9_harmony_template", "apply_chat_template" in src_v9
-           and "add_generation_prompt=False" in src_v9)
-    src_srv = (FT / "serve_agent.py").read_text(encoding="utf-8")
-    ck("serve_agent_dual_kind",
-       'DSH_AGENT_KIND' in src_srv and "FastModel" in src_srv and "FastLanguageModel" in src_srv,
-       "同一服务要能起 Qwen(dense,4bit) 与 gpt-oss(MXFP4,harmony) 两种")
-    ck("serve_agent_strips_reasoning_channel",
-       "_ANALYSIS" in src_srv and "def _clean" in src_srv,
-       "gpt-oss 的 analysis 频道内容不该混进最终答复")
-    ck("serve_agent_no_reasoning_effort_kwarg",
-       "reasoning_effort=os.environ" not in src_srv,
-       "模板里别再传 reasoning_effort —— 它会往 system 插推理档位说明，"
-       "训练数据里没有这段，格式不一致就答非所问")
-    ck("serve_maxnew_default_is_kind_aware",
-       '_DEFAULT_NEW = "2048" if KIND != "gptoss" else "700"' in src_srv,
-       "v8 的 JSON 要 ~1.5k 预算；gpt-oss 给大会空转到十几分钟（实测 312s）")
-    # 微调服务的「接入」：启动检查里自动拉起（以前靠人工起，双击启动的 app 不知道有这回事）
-    src_su = (ROOT / "backend" / "startup.py").read_text(encoding="utf-8")
-    ck("startup_wires_tuned_service",
-       "def _check_tuned_agent" in src_su and "self._check_tuned_agent()" in src_su
-       and "TUNED_VENV_PYTHON" in src_su and "serve_agent.py" in src_su,
-       "provider=tuned 但服务不在时会静默回退关键词路径（观感=变笨），必须自动拉起")
-    ck("tuned_autostart_clears_pythonpath",
-       'env.pop("PYTHONPATH", None)' in src_su,
-       "不清 PYTHONPATH，venv 的 python 会加载 Hermes venv 的 torch → DLL 失败")
-    ck("bootstrap_logs_check_summary",
-       "checker.log_summary()" in src_a and "def log_summary" in src_su,
-       "自动拉起失败必须进日志，否则用户只感到'agent 变笨了'，看不到真因")
-    ck("tuned_autostart_gated_by_provider",
-       '!= "tuned"' in src_su, "provider=ollama 时不该去起微调服务")
-    src_en = (FT / "enable_tuned.py").read_text(encoding="utf-8")
-    ck("enable_tuned_supports_gptoss",
-       "ON_GPT" in src_en and ":8083" in src_en and 'arg in ("on", "gpt")' in src_en)
+        # ── gpt-oss 那条线（v9）：硬约束是"不能再量化一次"+"必须用 harmony 模板" ──
+        v9 = (FT / "train_gptoss_v9.py")
+        ck("train_v9_present", v9.exists())
+        if v9.exists():
+            src_v9 = v9.read_text(encoding="utf-8")
+            ck("train_v9_uses_fastmodel", "from unsloth import FastModel" in src_v9,
+               "gpt-oss 权重原生 MXFP4，FastLanguageModel 不支持")
+            ck("train_v9_no_double_quant",
+               "load_in_4bit=False" in src_v9 and "dtype=None" in src_v9,
+               "已经是 4-bit 了再量化一次既无意义也伤精度；转 bf16 又会翻倍到 40GB")
+            ck("train_v9_harmony_template", "apply_chat_template" in src_v9
+               and "add_generation_prompt=False" in src_v9)
+        src_srv = (FT / "serve_agent.py").read_text(encoding="utf-8")
+        ck("serve_agent_dual_kind",
+           'DSH_AGENT_KIND' in src_srv and "FastModel" in src_srv and "FastLanguageModel" in src_srv,
+           "同一服务要能起 Qwen(dense,4bit) 与 gpt-oss(MXFP4,harmony) 两种")
+        ck("serve_agent_strips_reasoning_channel",
+           "_ANALYSIS" in src_srv and "def _clean" in src_srv,
+           "gpt-oss 的 analysis 频道内容不该混进最终答复")
+        ck("serve_agent_no_reasoning_effort_kwarg",
+           "reasoning_effort=os.environ" not in src_srv,
+           "模板里别再传 reasoning_effort —— 它会往 system 插推理档位说明，"
+           "训练数据里没有这段，格式不一致就答非所问")
+        ck("serve_maxnew_default_is_kind_aware",
+           '_DEFAULT_NEW = "2048" if KIND != "gptoss" else "700"' in src_srv,
+           "v8 的 JSON 要 ~1.5k 预算；gpt-oss 给大会空转到十几分钟（实测 312s）")
+        # 微调服务的「接入」：启动检查里自动拉起（以前靠人工起，双击启动的 app 不知道有这回事）
+        src_su = (ROOT / "backend" / "startup.py").read_text(encoding="utf-8")
+        ck("startup_wires_tuned_service",
+           "def _check_tuned_agent" in src_su and "self._check_tuned_agent()" in src_su
+           and "TUNED_VENV_PYTHON" in src_su and "serve_agent.py" in src_su,
+           "provider=tuned 但服务不在时会静默回退关键词路径（观感=变笨），必须自动拉起")
+        ck("tuned_autostart_clears_pythonpath",
+           'env.pop("PYTHONPATH", None)' in src_su,
+           "不清 PYTHONPATH，venv 的 python 会加载 Hermes venv 的 torch → DLL 失败")
+        ck("bootstrap_logs_check_summary",
+           "checker.log_summary()" in src_a and "def log_summary" in src_su,
+           "自动拉起失败必须进日志，否则用户只感到'agent 变笨了'，看不到真因")
+        ck("tuned_autostart_gated_by_provider",
+           '!= "tuned"' in src_su, "provider=ollama 时不该去起微调服务")
+        src_en = (FT / "enable_tuned.py").read_text(encoding="utf-8")
+        ck("enable_tuned_supports_gptoss",
+           "ON_GPT" in src_en and ":8083" in src_en and 'arg in ("on", "gpt")' in src_en)
+    else:
+        print("SKIP finetune_*  [本仓库不含 finetune/ 微调线，相关断言跳过]\n")
 
 
 def check_canonical_suite() -> None:

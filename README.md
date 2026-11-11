@@ -186,13 +186,13 @@ docs/                 架构与实测记录
 ```
 
 ## 已知限制与坑
-
 - **V100 / sm_70 不要用 `--lowvram`。** 它把层分到 CPU 再换入，采样阶段会报 `CUDA error: operation not supported`。改用 `--disable-cuda-malloc --use-pytorch-cross-attention`。
 - **Windows 上 ComfyUI 必须 `PYTHONIOENCODING=utf-8`。** 它的 logger 写 emoji 时按 GBK 抛 `UnicodeEncodeError`，进程在绑定端口**之前**就死了 —— 表现为「卡在启动 ComfyUI」。
 - **`.ps1` 里只用英文注释。** PowerShell 5.1 按 GBK 读 UTF-8 无 BOM 脚本会截断中文，变成 ParserError。
 - **单卡不要同时开对话模型和 ComfyUI**。大模型常驻 + 出图会一起掉到 CPU 上跑。
 - 自动建模由 Gradio Timer 驱动，纯 HTTP 调用测不出来，得真浏览器。
 - `http://` 经隧道暴露时，长任务会撞网关超时（约 100 s）。所以真正的长动作走「提交即返回 jobId + 轮询」，不要指望一个请求等完。
+- **本仓库不含 LoRA 微调线。** 「把对话规则内化进小模型」那一套（造数据 → Unsloth 训练 → PEFT 推理服务）在本地 `finetune/` 里，几十 GB 的数据和权重，没进仓库。代码里只留了接口和守卫（`agent.provider=tuned`、训练锁 `TRAINING.lock`、训练期间不预热模型），想复现得自备数据集和显存。
 
 ## 开发约定
 

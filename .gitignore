@@ -8,6 +8,10 @@ models/
 meshy_api/
 parts_cad/out/
 
+# LoRA 微调线的本地环境（数据 / 权重 / venv，几十 GB）。开源版不含，见 README
+finetune/
+training-data/
+
 # 本地配置：含本机路径、端口、模型文件名。示例见 config.example.json
 config.json
 config.*.json

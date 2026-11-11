@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dsh-forgeform"
+name = "forgeform"
 version = "3.0.0"
 description = "铸想 ForgeForm —— 对话式 3D 建模/打印工作流（Gradio + ComfyUI + 本地 LLM）"
 requires-python = ">=3.11"
