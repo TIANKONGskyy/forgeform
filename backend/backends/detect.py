@@ -220,7 +220,12 @@ def probe_all(comfy_dir: str | Path | None = None,
         if h == "127.0.0.1":
             out.append(probe_ollama(h, 11434))
             out.append(probe_comfyui(h, 8188, comfy_dir))
-            out.append(probe_comfyui(h, 8189, comfy_dir))     # 双卡时的第二个实例
+            # 双卡时的第二个实例。key 要区分开 —— 都叫 comfyui 的话，
+            # 8189 没起时会把它塞进字典覆盖掉 8188 的活实例（踩过）。
+            second = probe_comfyui(h, 8189, comfy_dir)
+            second.key = "comfyui-8189"
+            second.label = "ComfyUI (8189)"
+            out.append(second)
         out.append(probe_openai_compat(f"llama-{h}", "llama.cpp", h, 8080))
         out.append(probe_openai_compat(f"llama8091-{h}", "llama.cpp (8091)", h, 8091))
         out.append(probe_openai_compat(f"vllm-{h}", "vLLM", h, 8000))

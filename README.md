@@ -162,37 +162,46 @@ clone 后本地打开 `docs/showcase/index.html`，或等 GitHub Pages 部署好
 ```powershell
 git clone https://github.com/<you>/forgeform.git
 cd forgeform
-
-# 1. 依赖
 pip install -r requirements.txt
+```
 
-# 2. 指向你机器上的 ComfyUI
-$env:COMFYUI_DIR   = "D:\ComfyUI"
-$env:COMFY_PYTHON  = "D:\ComfyUI\python_embeded\python.exe"   # 可选，默认用当前解释器
+然后**跑配置向导**——它会看你这台机器有什么，推荐装哪套：
 
-# 3. 自检 —— 装完先跑这个，它会告诉你还缺什么
+```powershell
+python tools/setup.py
+```
+
+```
+════════════════════════════════════════════════════════════
+硬件：Tesla V100 · 显存 32 GB（可用 30） · 内存 128 GB · 磁盘剩 166 GB
+已有：ComfyUI(含3D)、本地 diffusers 模型 2 个、hy3dgen、对话服务
+════════════════════════════════════════════════════════════
+ ★ [1] 复用现有 ComfyUI（零下载）        可用 · 0.0 GB · auto
+   [2] 最小可用（SD1.5 + 3D 2mini）       可用 · 8.2 GB · direct
+   [3] 推荐（Z-Image Turbo + 3D 2mini）   可用 · 30.6 GB · auto
+   [4] 全量（ComfyUI + Hunyuan3D 2.1）    可用 · 0.0 GB · comfyui
+```
+
+选一个回车就行，它会下载缺的模型、把 `config.json` 写好、跑一遍自检。
+也可以：
+
+```powershell
+python tools/setup.py --dry-run            # 只看方案和下载命令，不动任何东西
+python tools/setup.py --custom             # 自己选出图/建模各用哪个模型
+python tools/setup.py --profile minimal --yes   # 直接按某个方案装，不交互
+```
+
+**「装不下」是真判断，不是吓唬人** —— 8 GB 显存 + 16 GB 内存的机器上，向导会把
+「最小可用」标成装不下并给出原因（模型自身要 10.8 GB 内存，16 GB 机器只剩 0.2 GB 余量）。
+详见 [docs/HARDWARE.md](docs/HARDWARE.md) 的实测数据。
+
+### 装完自检
+
+```powershell
 python tools/doctor.py
-
-# 4. 起服务
-python app.py
 ```
 
 打开 <http://127.0.0.1:7860>。
-
-`tools/doctor.py` 是这个项目里最该先跑的脚本。它逐项检查 Python 版本、依赖、ComfyUI 目录、
-ComfyUI 服务、`config.json`、**每个模型文件在不在**、GPU，然后给结论：
-
-```text
-[OK]   Python            3.11.15 (Windows)
-[OK]   ComfyUI 服务        http://127.0.0.1:8188  (cuda:0 Tesla V100 : native, 32G)
-[OK]   image.qwen21_ref  3/3 找到
-[WARN] image.flux        3/4 找到
-                            → 缺: flux1-dev-fp8.safetensors
-==============================================================================
-结论：能跑。1 项提醒，不影响开工。
-```
-
-它不加载模型、不写仓库，跑一遍几秒钟。
 
 默认只监听 `127.0.0.1`；要局域网访问改 `config.json → app.host`，并且务必先看 [SECURITY.md](SECURITY.md)。
 
