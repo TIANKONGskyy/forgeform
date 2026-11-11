@@ -112,8 +112,35 @@ python tools/fetch_model.py --repo someone/superimage-3 --dest D:/models/superim
 | `path` | 二选一 | 本地目录；写了就优先用它，忽略 `repo` |
 | `vram_hint` | | 显存提示（GB），只用于展示 |
 | `notes` | | 给人看的备注 |
+| `quant` | | `auto`（默认）/ `none` / `bnb8` / `bnb4` / `gguf`。`auto` 按显存自动选 |
+| `offload` | | `model` / `sequential`。留空=自动，显式写了就听你的 |
 | `defaults` | | 该模型的出厂参数，见下 |
 | `adapter` | | 可选，同目录的 `.py`，用于参数不兼容时的转接 |
+
+### 量化与显存：`quant` + `offload`
+
+同一个插件，在 8G 卡和 32G 卡上要能跑，靠的就是这两个字段。
+
+`quant: auto`（默认）的决策顺序（`backend/backends/quant.py`）：
+
+```
+量出「模型要多少」和「这张卡还剩多少」
+  → 能整块放下   → quant=none（原精度，最快）
+  → 放不下       → quant=none + offload=model（按子模块换入换出，慢但结果对）
+```
+
+**故意不自动选 bnb**：实测 bitsandbytes 8bit 量化 `Flux2Transformer2DModel` 之后，
+出图是纯噪声 —— 不报错、速度还更快（89s vs 194s），特别坑。
+想试可以显式写 `quant: bnb8`，但 `DirectBackend` 会用拉普拉斯方差验图，
+一旦发现是噪声就直接报错，不会静默存一张垃圾。
+
+显存实测（V100 32G，FLUX.2 Klein 33 GB，512²，8 步）：
+
+| 模式 | 耗时 | 首步 | 稳定性 |
+|---|---|---|---|
+| `offload=model` + bf16 | **194 s** | 69 s | ✅ 正确 |
+| `quant=bnb8` | 89 s | — | ❌ 出噪声（被检测拦下） |
+| `quant=bnb8`（只量化 transformer） | 64 s | — | ❌ 仍是噪声 |
 
 ### `defaults` 常用键
 

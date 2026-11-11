@@ -133,25 +133,42 @@ ComfyUI 帮你换入换出模型，直连就得自己做。`DirectBackend` 里�
 
 ---
 
-## 真实成本：先翻一遍本地，别急着下
+## 在不同机器上跑
 
-这是最容易被忽略的一条。**ComfyUI 的权重大多不能直接给 diffusers 用**：
+`quant` 和 `offload` 的目的是：**同一份插件配置，换台机器不用改**。
+`quant: auto` 会量当前可用显存，再决定加载方式。
 
-| 现有文件 | 为什么不行 |
-|---|---|
-| `qwen_image_2.1_int8_convrot.safetensors` | 自定义 int8 量化，`from_single_file` 不认 |
-| `flux-2-klein-9b-Q5_K_M.gguf` | GGUF，diffusers 不支持这种布局 |
-| `z_image_turbo-Q8_0.gguf` | 同上 |
-| `hunyuan3d-dit-v2-1_fp16.ckpt` | 3D-Pack 的私有布局 |
+| 显存 | 出图 | 3D | 来源 |
+|---|---|---|---|
+| **32 GB** | Klein(33G) 走 offload；<26G 的模型整块 | Hunyuan3D 2.1 | **实测**（V100 32G） |
+| **24 GB** | Flux/SDXL 整块；Klein 走 offload | 2mini | 按比例推算 |
+| **16 GB** | SDXL/小模型整块；大模型 offload 会很慢 | 2mini 勉强 | 推算 |
+| **8 GB** | 只能小模型；大模型 offload 到 CPU 内存 | 跑不了 | 推算 |
+| **无 GPU** | 跑不了（diffusers 要 CUDA） | 跑不了 | — |
 
-**但有一类例外：你自己做过 LoRA 微调的话，本地多半躺着完整的 diffusers 格式 base 模型。**
-作者这台机器上就有 —— `D:\AI-Workshop\finetune\flux2klein-base`，**32.3 GB，完整可用**，
-一次都没重下。
+> 只有 32 GB 那一行是真机实测的，其余是按模型大小和 offload 行为推的。
+> 你在自己的卡上跑一次 `tools/bench_direct.py` 就知道了，别信表。
 
-先花 10 秒翻一遍，比下 20 GB 划算：
+CPU offload 的代价是**有上限**的：它把放不下的子模块放到内存，每步换进换出。
+32 GB 模型在 32 GB 卡上，第一步 69 秒、之后 4-8 秒/步；如果卡只有 8 GB，
+换入换出的频率会高得多，实际会慢到不可用 —— 那时候要么换小模型，要么换卡。
+
+---
+
+## 复用已有的权重
+
+**先翻本地，别急着下。** ComfyUI 那套权重大多不能直接用（GGUF / 私有 int8 / 3D-Pack 布局），
+但有两类例外：
+
+1. **你自己做过 LoRA 微调**：`finetune/xxx-base/` 多半是完整 diffusers 格式。
+   作者这台机器上 `D:\AI-Workshop\finetune\flux2klein-base` 就是 32.3 GB 完整模型，一次没重下。
+2. **`from_single_file` 支持的 pipeline**：实测 `ZImagePipeline` 和 `FluxPipeline` 有这个方法，
+   所以 `z_image_turbo-Q8_0.gguf` 这类 ComfyUI 单文件可以直接喂（配合 `GGUFQuantizationConfig`）。
+   `QwenImagePipeline` / `Flux2Pipeline` / `Flux2KleinPipeline` **没有**，只能吃 diffusers 目录。
+
+扫一遍本地有哪些 diffusers 格式模型：
 
 ```powershell
-# 找所有 diffusers 格式模型（有 model_index.json 的目录）
 Get-ChildItem D:\,C:\Users\$env:USERNAME -Recurse -File -Filter model_index.json -Depth 5 `
   -ErrorAction SilentlyContinue | ForEach-Object {
     $j = Get-Content $_.FullName -Raw | ConvertFrom-Json
@@ -168,7 +185,7 @@ python tools/fetch_model.py --repo Tongyi-MAI/Z-Image-Turbo \
     --dest D:/models/z-image-turbo-diffusers --exclude "assets/" --threads 8
 ```
 
-（`fetch_model.py` 自动挑镜像、8 线程分片、断点续传；实测峰值 4.97 MB/s。）
+（自动挑镜像、8 线程分片、断点续传；实测峰值 4.97 MB/s。）
 
 ### 作者这台机器上的实测下载速度（2026-11，务必先测你自己的）
 

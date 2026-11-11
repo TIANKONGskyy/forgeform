@@ -52,6 +52,24 @@ _PIPELINE_BY_BACKEND = {
     "sd_turbo": "StableDiffusionPipeline",
 }
 
+# 噪声判定阈值。实测：正常出图 0.0022–0.0029，量化坏掉的噪声 0.041–0.044，
+# 差 7-10 倍，所以中间留很宽的余量。
+NOISE_THRESHOLD = 0.015
+
+
+def _noise_score(img) -> float:
+    """拉普拉斯方差：结构越清晰越低，纯噪声极高。用来挡"量化坏了但没报错"。"""
+    try:
+        import numpy as np
+        a = np.asarray(img.convert("L"), dtype=np.float32) / 255.0
+        if a.shape[0] < 3 or a.shape[1] < 3:
+            return 0.0
+        lap = (a[1:-1, 1:-1] * 4 - a[:-2, 1:-1] - a[2:, 1:-1]
+               - a[1:-1, :-2] - a[1:-1, 2:])
+        return float(lap.var())
+    except Exception:
+        return 0.0
+
 
 # ────────────────────────────────────────────────────────────────
 # 本地产物 HTTP 服务：伪造 ComfyUI 的 /view?filename=
@@ -340,7 +358,8 @@ class DirectBackend:
 
         def build():
             return self._load_pipe(pipe_cls_name, ref, opts.get("dtype") or "bfloat16",
-                                   str(cfg.get("offload") or opts.get("offload") or ""))
+                                   str(cfg.get("offload") or opts.get("offload") or ""),
+                                   str(cfg.get("quant") or opts.get("quant") or "auto"))
 
         pipe = self._keeper.get(f"image:{pipe_cls_name}:{ref}", build)
         gen = None
@@ -361,49 +380,120 @@ class DirectBackend:
         t0 = time.time()
         out = pipe(**kwargs)
         img = out.images[0]
+
+        # 出完先验一下是不是噪声。量化/加载出问题时模型会"正常"跑完、不报错、
+        # 速度快得可疑，但图是纯噪声 —— 宁可直接失败，也不要静默存一张垃圾。
+        score = _noise_score(img)
+        if score > NOISE_THRESHOLD:
+            raise RuntimeError(
+                f"出图异常（拉普拉斯方差 {score:.4f} > {NOISE_THRESHOLD}，正常图约 0.002-0.003）。"
+                f"通常是量化后端与这个模型不兼容 —— 常见于 quant=bnb8/bnb4 加载 Flux2/Klein。"
+                f"改用 quant=none + offload=model 重试。")
+
         name = f"direct_{int(time.time())}_{uuid.uuid4().hex[:6]}.png"
         path = self.out_root / "images" / name
         img.save(path)
-        self._log(f"[direct] 出图完成 {round(time.time()-t0,1)}s → {name}")
+        self._log(f"[direct] 出图完成 {round(time.time()-t0,1)}s → {name}（sharpness {score:.4f}）")
         return [path]
 
     def _load_pipe(self, cls_name: str, ref: str, dtype_name: str = "bfloat16",
-                  offload: str = ""):
-        """按插件声明的类名从 diffusers 里拿 pipeline。
+                  offload: str = "", quant_pref: str = "auto"):
+        """按插件声明的类名从 diffusers 里拿 pipeline，并按显存自动选量化档。
 
-        `offload` 决定显存策略：
-          - 空（默认）：整模型 .to("cuda")
-          - "model"：enable_model_cpu_offload() —— 32 GB 的模型塞 32 GB 的卡必须用这个，
-            它按子模块换入换出（慢一点，但不会 OOM）
-          - "sequential"：最省显存、最慢
+        `quant_pref`：auto / none / fp8 / bnb8 / bnb4 / gguf
+        `offload`：空 / model / sequential（显式指定时优先于自动决策）
         """
         import diffusers
         import torch
+
+        from .quant import choose_quant, estimate_model_gb, probe_vram, summary, torch_free_vram
 
         dtype = getattr(torch, dtype_name, torch.bfloat16)
         cls = getattr(diffusers, cls_name, None)
         if cls is None:
             raise RuntimeError(f"diffusers 里没有 {cls_name}（版本 {diffusers.__version__}）"
                                f"—— 检查插件 YAML 的 pipeline 字段，或升级 diffusers")
-        self._log(f"[direct] 加载 {cls_name} ← {ref}  (offload={offload or 'none'})")
-        try:
-            pipe = cls.from_pretrained(ref, torch_dtype=dtype, use_safetensors=True)
-        except Exception:
-            # 有些社区模型只有 pytorch_model.bin（没转 safetensors）
-            pipe = cls.from_pretrained(ref, torch_dtype=dtype, use_safetensors=False)
+
+        est = estimate_model_gb(ref)
+        _total, free, gpu = probe_vram()
+        if free <= 0:
+            free = torch_free_vram()
+        dec = choose_quant(quant_pref, est, free)
+        if offload:                       # 插件显式写了就听插件的
+            dec["offload"] = offload
+        self._log(summary(est, free, dec) + (f"  [{gpu}]" if gpu else ""))
+
+        def build(quant: str, off: str):
+            kw = dict(torch_dtype=dtype)
+            if quant == "gguf":
+                if not hasattr(diffusers, "GGUFQuantizationConfig"):
+                    raise RuntimeError("这个 diffusers 版本没有 GGUFQuantizationConfig")
+                if not hasattr(cls, "from_single_file"):
+                    raise RuntimeError(f"{cls_name} 不支持 from_single_file，不能直接加载 GGUF")
+                cfg = diffusers.GGUFQuantizationConfig(compute_dtype=dtype)
+                return cls.from_single_file(ref, quantization_config=cfg, **kw)
+            if quant in ("bnb8", "bnb4"):
+                # diffusers 0.39 要的是 PipelineQuantizationConfig（不是 transformers 的
+                # BitsAndBytesConfig）—— 传错类型会报 "must be an instance of PipelineQuantizationConfig"
+                #
+                # ⚠️ 只量化 transformer，**不要量化 text_encoder**：实测把 Qwen3ForCausalLM
+                # 一起量化后，出图是纯噪声（提示词 embedding 已经坏了，但不会报错）。
+                from diffusers import PipelineQuantizationConfig
+                if quant == "bnb8":
+                    cfg = PipelineQuantizationConfig(
+                        quant_backend="bitsandbytes_8bit",
+                        quant_kwargs={"load_in_8bit": True},
+                        components_to_quantize=["transformer"],
+                    )
+                else:
+                    cfg = PipelineQuantizationConfig(
+                        quant_backend="bitsandbytes_4bit",
+                        quant_kwargs={"load_in_4bit": True, "bnb_4bit_quant_type": "nf4",
+                                      "bnb_4bit_compute_dtype": "bfloat16"},
+                        components_to_quantize=["transformer"],
+                    )
+                return cls.from_pretrained(ref, quantization_config=cfg,
+                                           device_map="cuda", **kw)
+            try:
+                return cls.from_pretrained(ref, use_safetensors=True, **kw)
+            except Exception:
+                return cls.from_pretrained(ref, use_safetensors=False, **kw)
+
+        # 逐步降级：按决策 → 更狠的量化 → 加 offload
+        chain = [(dec["quant"], dec["offload"])]
+        if dec["quant"] == "none":
+            chain += [("bnb8", dec["offload"]), ("bnb4", "model")]
+        elif dec["quant"] == "bnb8":
+            chain += [("bnb4", "model")]
+        elif dec["quant"] == "bnb4" and not dec["offload"]:
+            chain += [("bnb4", "model")]
+
+        pipe = None
+        last_err = None
+        for quant, off in chain:
+            try:
+                self._log(f"[direct] 加载 {cls_name} ← {ref}  (quant={quant} offload={off or 'none'})")
+                pipe = build(quant, off)
+                if off == "sequential":
+                    pipe.enable_sequential_cpu_offload()
+                elif off == "model":
+                    pipe.enable_model_cpu_offload()
+                elif quant not in ("bnb8", "bnb4"):
+                    pipe.to("cuda")
+                break
+            except Exception as exc:
+                last_err = exc
+                self._log(f"[direct] 这一档没成（{quant}/{off or 'none'}）：{type(exc).__name__}: {str(exc)[:180]}")
+                pipe = None
+
+        if pipe is None:
+            raise RuntimeError(f"{cls_name} 加载失败，所有显存档位都试过了：{last_err}")
 
         for opt in ("enable_attention_slicing", "enable_vae_slicing"):
             try:
                 getattr(pipe, opt)()
             except Exception:
                 pass
-
-        if offload == "sequential":
-            pipe.enable_sequential_cpu_offload()
-        elif offload == "model":
-            pipe.enable_model_cpu_offload()
-        else:
-            pipe.to("cuda")
         return pipe
 
     # ── 3D ────────────────────────────────────────────────────

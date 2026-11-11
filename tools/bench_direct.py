@@ -32,6 +32,8 @@ def main() -> int:
     ap.add_argument("--prompt", default="a red apple on a white background, single object")
     ap.add_argument("--offload", default="", choices=["", "model", "sequential"],
                     help="显存不够时用 CPU offload：model=按子模块换入换出")
+    ap.add_argument("--quant", default="auto", choices=["auto", "none", "fp8", "bnb8", "bnb4", "gguf"],
+                    help="量化档；auto=按显存自动选")
     ap.add_argument("--keep", action="store_true", help="保留产物目录")
     args = ap.parse_args()
 
@@ -52,6 +54,7 @@ def main() -> int:
             "width": args.size,
             "height": args.size,
             "offload": args.offload,
+            "quant": args.quant,
         }}},
     }
 

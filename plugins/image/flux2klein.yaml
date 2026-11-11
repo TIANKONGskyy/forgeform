@@ -4,8 +4,8 @@ label: FLUX.2 Klein 9B
 pipeline: Flux2KleinPipeline
 repo: black-forest-labs/FLUX.2-klein
 vram_hint: 32
-notes: 8 步蒸馏；模型本体约 33 GB，32G 卡必须开 offload
-offload: model
+notes: 8 步蒸馏；本体约 33 GB。放得下就整块进显存，放不下自动 offload
+quant: auto
 defaults:
   steps: 8
   guidance: 1.0
