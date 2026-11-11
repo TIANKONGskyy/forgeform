@@ -1,0 +1,72 @@
+# 运行产物（都会在首次启动时自动重建）
+outputs/
+logs/
+temp/
+tmp/
+projects/
+models/
+meshy_api/
+parts_cad/out/
+
+# 本地配置：含本机路径、端口、模型文件名。示例见 config.example.json
+config.json
+config.*.json
+!config.example.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 模型权重与大文件（绝不入库）
+*.safetensors
+*.gguf
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.bin
+*.glb
+*.gltf
+*.obj
+*.fbx
+*.stl
+*.3mf
+*.step
+*.stp
+*.mp4
+*.webm
+*.mov
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.wav
+*.mp3
+*.zip
+*.7z
+
+# 例外：文档里用的示意图
+!docs/assets/*.jpg
+!docs/assets/*.png
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 本地草稿与日志
+.tmp_mm/
+*.log
+!docs/*.log

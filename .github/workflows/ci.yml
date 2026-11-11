@@ -1,0 +1,43 @@
+name: tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest (windows / py3.11)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
+      PYTHONPATH: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run test suite
+        # 这些测试不加载模型、不连 ComfyUI；缺外部资源的用例会自己 skip
+        run: python -m pytest -q -p no:warnings
+
+      - name: Run repo guards
+        # 结构契约断言（按钮/返回值元数/路径不写死本机目录等）
+        run: python tools/verify.py --fast

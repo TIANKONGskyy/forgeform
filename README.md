@@ -1,0 +1,210 @@
+# 铸想 ForgeForm
+
+**一句话描述 → 可打印的 STL。** 一个跑在自己机器上的对话式 3D 建模工作流。
+
+<img src="docs/assets/hero.jpg" width="360" align="right" alt="铸想从一句话生成的产品图" />
+
+输入「一个能放手机的支架，带防滑纹」这样的需求，它会追问该问的、替你定好默认参数、出图、确认之后建模、修水密、导出毫米单位的 STL，直接丢进切片软件就能打。全程本地推理，不调用任何云端 API。
+
+右边这张是「一个骑士头盔，金属质感」跑出来的候选图，用来喂下游的 Hunyuan3D。
+
+<br clear="right" />
+
+```
+ ┌────────────────┐
+ │ 一句话描述零件  │
+ └───────┬────────┘
+         ▼
+   ┌───────────┐  本地 LLM：解析需求、定参数、追问
+   │  对话层    │◄────────── 改尺寸 / 换风格 / 加特征
+   └─────┬─────┘
+         ▼
+   ┌───────────┐  ComfyUI · Qwen-Image-2.1 / FLUX
+   │   出图     │  1024×1024，候选 1–4 张
+   └─────┬─────┘
+         │  （可选分支）ComfyUI · MiniMax H3 → 演示视频
+         ▼
+   ┌───────────┐  ComfyUI · Hunyuan3D 2.1
+   │  三维重建  │  GLB，约 10 万面
+   └─────┬─────┘
+         ▼
+   ┌───────────┐  pymeshlab + pymeshfix 补洞
+   │ 导出 STL  │  毫米单位、贴地居中、水密
+   └─────┬─────┘
+         ▼
+   Bambu Studio / OrcaSlicer / 任何切片器
+```
+
+## 它和「直接用 ComfyUI 装个图生 3D 节点」的区别
+
+ComfyUI 给你的是模型，铸想给你的是**流程**：
+
+- **对话即参数**。不用记 Prompt 模板，说「小一点，放桌上那种」它就改 `size_mm`，说「要能夹住」它就补结构约束。
+- **不该花 GPU 的时候不花**。你说的是补充需求而不是「出一版」，它就只回话不生成；出图 5 秒后还能自动接着建模（可关）。
+- **出图不是为了好看，是为了重建**。提示词层会强制加上「单体、纯色背景、无植物/道具」这类重建友好约束，避免模型学到一张漂亮的桌面摆拍却建不出壳。
+- **STL 是真的能打**。生成后的网格要过水密闸门：pymeshlab 修完再用 `is_watertight` 验一遍边界边，不合格的再走 pymeshfix —— 因为「pymeshlab 说修好了」和「切片器认为它是实心」是两件事。
+- **显存自己让**。对话大脑、出图、建模、视频分时占用同一张卡，切换前会主动把上一个模型卸掉；不会因为 Ollama 和 ComfyUI 抢显存把机器拖到 11% CPU。
+
+## 功能
+
+| 阶段 | 做什么 | 后端 |
+|---|---|---|
+| 对话 | 需求解析、参数补齐、多轮修改、拒答跑题请求 | 任意 OpenAI 兼容本地推理服务 / Ollama |
+| 出图 | 文本→图，1–4 张候选，参考图 i2i、局部修改 | ComfyUI（Qwen-Image-2.1 / FLUX.1 / FLUX.2 / Z-Image） |
+| 视频 | 首尾帧引导的产品演示片段 | ComfyUI（MiniMax H3 Ref2VA） |
+| 建模 | 单图→3D，多后端可切 | ComfyUI（Hunyuan3D 2.1 / V2 多视图 / TripoSplat） |
+| 导出 | GLB→STL，居中贴地，毫米单位，水密修复 + 减面 | 本地（trimesh / pymeshlab / pymeshfix） |
+| 打印 | 局域网发现拓竹打印机并直发 | bambu-cli（可选） |
+| 管理 | 对话组、项目归档、模型库、实时显存/温度监控 | 内置 |
+
+逆向入口也留着：上传视频抽帧建模、直接上传 GLB 转 STL。
+
+## 环境要求
+
+- **Windows 10/11**（脚本是 PowerShell；Python 部分本身跨平台，但 ComfyUI 侧和打印相关是照 Windows 写的）
+- **NVIDIA GPU**，实测 V100 32G（sm_70）。按显存选模型：
+  - 16G 以上：出图 + 建模串行跑，视频降到 832×480
+  - 24G 以上：可以试 1024 档视频
+  - 8G：只跑出图，3D 会 OOM
+- **Python 3.11+**
+- **ComfyUI**（独立安装，本仓库不打包）。需要一个带 Hunyuan3D 2.x 节点的工作流环境，实测用 `ComfyUI-3D-Pack`。
+- 一个本地 LLM 服务：任意 OpenAI 兼容端点（llama.cpp / vLLM / Ollama 均可）。不配也能跑，会降级成纯规则模式。
+
+### 实测耗时（V100 32G，单卡）
+
+| 动作 | 耗时 |
+|---|---|
+| 出图 1024×1024（Qwen-Image-2.1，20 步） | ≈ 56 s |
+| 建模快速档（Hunyuan3D 2.1，256 octree） | ≈ 160 s |
+| 建模高质量档（512 octree） | ≈ 11.7 min |
+| 视频 832×480 / 96 帧（H3 Ref2VA + Turbo） | ≈ 19 min |
+
+512 档和长视频是真的要等，不是卡死。
+
+## 安装
+
+```powershell
+git clone https://github.com/<you>/forgeform.git
+cd forgeform
+
+# 1. 依赖
+pip install -r requirements.txt
+
+# 2. 指向你机器上的 ComfyUI
+$env:COMFYUI_DIR   = "D:\ComfyUI"
+$env:COMFY_PYTHON  = "D:\ComfyUI\python_embeded\python.exe"   # 可选，默认用当前解释器
+
+# 3. 首次运行会自动从 config.example.json 生成 config.json，
+#    然后在里面把模型文件名改成你本地实际的文件名
+python app.py
+```
+
+打开 <http://127.0.0.1:7860>。
+
+默认 `127.0.0.1`，只监听本机；要局域网访问改 `config.json → app.host`，并且务必先看 [SECURITY.md](SECURITY.md)。
+
+### 模型放哪
+
+铸想不下载模型，只按 `config.json` 里写的**文件名**去 ComfyUI 的目录里找。需要准备（按你选的档位，不必全装）：
+
+| 用途 | 典型文件名 | ComfyUI 目录 |
+|---|---|---|
+| 出图（推荐） | `qwen_image_*.safetensors` + `qwen3vl_8b*.gguf` + `qwen_image_vae.safetensors` | `models/diffusion_models`、`models/text_encoders`、`models/vae` |
+| 出图（备选 FLUX） | `flux1-dev-*.safetensors` + `ae.safetensors` + `clip_l.safetensors` + `t5xxl_fp8*.safetensors` | 同上 |
+| 视频 | `minimax_h3_*.safetensors` 及配套 VAE / Turbo LoRA | `models/diffusion_models`、`models/vae`、`models/loras` |
+| 建模 | Hunyuan3D 2.1 权重（ComfyUI-3D-Pack 的安装脚本会拉） | 由该节点自己管 |
+
+具体文件名以 `config.json` 为准，改配置比改代码快。
+
+## 配置
+
+`config.json` 是唯一配置源（首次运行从 `config.example.json` 复制）。主要几块：
+
+```jsonc
+{
+  "app":   { "host": "127.0.0.1", "port": 7860 },
+  "paths": { "comfyui": "${COMFYUI_DIR}", "output": "./outputs" },  // 相对值按仓库根解析
+  "agent": { "provider": "strata", "strata_url": "http://127.0.0.1:8091/v1" },
+  "models": { "llm": {...}, "image": {...}, "video": {...}, "3d": {...} },
+  "stages": { "image": {"default_model": "qwen21_ref"}, "3d": {"default_model": "hunyuan21"} },
+  "autopilot": { "enabled": true, "delay_sec": 5 }
+}
+```
+
+`agent.provider` 三档：`strata`（OpenAI 兼容端点）、`ollama`、`off`（纯规则，不调 LLM）。
+
+### 环境变量
+
+| 变量 | 作用 | 默认 |
+|---|---|---|
+| `COMFYUI_DIR` | ComfyUI 安装目录 | `<仓库同级>/ComfyUI` |
+| `COMFY_PYTHON` | 启动 ComfyUI 用的解释器 | 当前解释器 |
+| `BAMBU_EXE` | `bambu` CLI 路径（打印功能用） | 从 `PATH` 找 |
+| `LLAMA_SERVER` / `LLAMA_MODEL` | 需要铸想自己拉起提示词扩写服务时用 | 只连不拉 |
+| `FOUNDRY_PORT` | Web 端口 | 7860 |
+| `CAD_PYTHON` | 装了 CadQuery 的解释器（跑 `parts_cad` 示例与相关测试） | 不设则跳过 |
+
+## 启动
+
+```powershell
+.\start-all.ps1      # 探测硬件 → 拉起 ComfyUI → 拉起 app
+python app.py        # 只起 app（ComfyUI 你自己起）
+```
+
+`start-all.ps1` 会按显卡数量决定起一个还是两个 ComfyUI 实例，并在单卡时**故意不加 `--lowvram`** —— 见下面的坑。
+
+## 测试
+
+```powershell
+python -m pytest              # 172 个用例，约 40 s，不需要 GPU
+python tools/verify.py        # 更全的守卫（结构契约 + 行为 + 上面那套）
+```
+
+测试不加载任何模型、不连 ComfyUI：它验证的是**流程契约**（按钮显隐和 phase 是否同步、`_update_ui` 返回值元数、自动建模会不会重复触发、跨对话组会不会串号、提示词里数字会不会被模型改写……）。这些 bug 在真机上表现为「点了没反应」，只在源码断言里抓得到。
+
+## 项目结构
+
+```
+app.py                 Gradio 界面 + 自定义路由（模型库 / 运维接口）
+backend/
+  env.py               唯一允许出现安装路径的地方（相对根 + 环境变量）
+  conversation.py      对话组状态机、自动建模、按钮阶段
+  agent.py             本地 LLM agent：决定这一轮做什么动作
+  describer.py         需求解析 / 提示词生成 / 显存让出
+  pipeline.py          出图·视频·建模·导出的编排器
+  comfy_client.py      ComfyUI HTTP 客户端 + 各模型工作流
+  mesh_optimizer.py    减面 / 补洞 / 水密闸门
+  stl_convert.py       GLB→STL，居中贴地，毫米
+  model_library.py     模型库（发布 / 预览 / 下载，带 token）
+  startup.py           自检与自愈：目录、端口、服务、依赖
+  ...
+tests/                172 个流程契约测试
+tools/verify.py       权威验证入口
+parts_cad/            CadQuery 参数化零件示例
+scripts/              启动 / 重启 / 功耗 / 温度守护脚本
+docs/                 架构与实测记录
+```
+
+## 已知限制与坑
+
+- **V100 / sm_70 不要用 `--lowvram`。** 它把层分到 CPU 再换入，采样阶段会报 `CUDA error: operation not supported`。改用 `--disable-cuda-malloc --use-pytorch-cross-attention`。
+- **Windows 上 ComfyUI 必须 `PYTHONIOENCODING=utf-8`。** 它的 logger 写 emoji 时按 GBK 抛 `UnicodeEncodeError`，进程在绑定端口**之前**就死了 —— 表现为「卡在启动 ComfyUI」。
+- **`.ps1` 里只用英文注释。** PowerShell 5.1 按 GBK 读 UTF-8 无 BOM 脚本会截断中文，变成 ParserError。
+- **单卡不要同时开对话模型和 ComfyUI**。大模型常驻 + 出图会一起掉到 CPU 上跑。
+- 自动建模由 Gradio Timer 驱动，纯 HTTP 调用测不出来，得真浏览器。
+- `http://` 经隧道暴露时，长任务会撞网关超时（约 100 s）。所以真正的长动作走「提交即返回 jobId + 轮询」，不要指望一个请求等完。
+
+## 开发约定
+
+见 [CONTRIBUTING.md](CONTRIBUTING.md)。核心一条：**改 UI 的按钮/返回值，必须同步改 `tests/`** —— 元数漂移不会报错，只会让按钮串位置。
+
+## 许可证
+
+Apache-2.0，见 [LICENSE](LICENSE)。
+
+第三方组件各自遵守自己的许可：ComfyUI（GPL-3.0，本仓库仅通过 HTTP 调用，不链接其代码）、Gradio（Apache-2.0）、trimesh（MIT）、pymeshlab（GPL-3.0，独立进程/库调用）、pymeshfix（AGPL-3.0）。**如果你要把本项目用于商业闭源分发，先确认 pymeshfix 的 AGPL 是否可接受，或把它换掉。**
+
+## 致谢
+
+- 名字来自「铸」与「想象」；最初是为了把自己打印出来的东西真的做出来。
+- 模型与工具都是别人的：Qwen-Image、FLUX、Hunyuan3D、MiniMax H3、ComfyUI、Gradio、trimesh。

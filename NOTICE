@@ -1,0 +1,24 @@
+铸想 ForgeForm
+Copyright 2026 YuKai and ForgeForm contributors
+
+本产品包含或通过接口使用下列第三方组件，各自遵守其原始许可：
+
+  Gradio                 Apache-2.0   https://github.com/gradio-app/gradio
+  ComfyUI                GPL-3.0      https://github.com/comfyanonymous/ComfyUI
+                         （本仓库不包含 ComfyUI 代码，仅通过 HTTP API 调用独立进程）
+  trimesh                MIT          https://github.com/mikedh/trimesh
+  pymeshlab              GPL-3.0      https://github.com/cnr-isti-vclab/PyMeshLab
+  pymeshfix              AGPL-3.0     https://github.com/pyvista/pymeshfix
+  fast-simplification    MIT / BSD    https://github.com/pyvista/fast-simplification
+  NumPy / SciPy          BSD-3-Clause
+  Pillow                 HPND
+  OpenCV                 Apache-2.0
+  matplotlib             PSF-based
+  fastapi / starlette    MIT / BSD
+  Bambu Studio / bambu-cli  AGPL-3.0（仅在你启用直发打印功能时使用）
+
+模型权重不在本仓库内，也不在 Apache-2.0 覆盖范围内。使用 Qwen-Image、FLUX、
+Hunyuan3D、MiniMax H3 等模型前请阅读各自的模型许可（部分模型对商用有限制）。
+
+注意：pymeshfix 是 AGPL-3.0。如果你要把本项目作为闭源网络服务分发，需自行评估
+该许可的影响，或改用其他补洞方案（例如仅依赖 pymeshlab）。

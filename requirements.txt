@@ -1,0 +1,33 @@
+# 铸想 ForgeForm 运行依赖
+#
+# ComfyUI 不算在内：它是独立安装的外部服务，本项目只通过 HTTP 调用。
+# 版本下限按 2026-11 实测环境写的（Python 3.11 / Windows）。
+
+# ── Web / 界面 ─────────────────────────────────────────────
+gradio>=5.50,<6
+fastapi>=0.115
+starlette>=0.40
+requests>=2.32
+psutil>=5.9
+
+# ── 数值 / 图像 ────────────────────────────────────────────
+numpy>=1.26
+scipy>=1.11
+Pillow>=10.0
+opencv-python>=4.9
+matplotlib>=3.8
+
+# ── 3D / 网格 ─────────────────────────────────────────────
+trimesh>=4.5
+pymeshlab>=2025.1
+pymeshfix>=0.17
+rtree>=1.2
+fast-simplification>=0.1.7
+websocket-client>=1.7
+
+# ── 可选：参数化零件示例（parts_cad/）─────────────────────
+# build123d>=0.13
+# cadquery>=2.8
+
+# ── 可选：拓竹直发（backend/bambu_print.py）───────────────
+# bambu-cli

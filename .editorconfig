@@ -1,0 +1,27 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.py]
+indent_style = space
+indent_size = 4
+max_line_length = 110
+
+[*.{md,json}]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = false
+
+# PowerShell: 保持 UTF-8（无 BOM）。注意 PS 5.1 按 GBK 读会截断中文，
+# 所以 .ps1 里只用英文注释 —— 见 CONTRIBUTING.md。
+[*.ps1]
+indent_style = space
+indent_size = 4
+end_of_line = crlf
+
+[*.cmd]
+end_of_line = crlf

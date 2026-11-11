@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dsh-forgeform"
+version = "3.0.0"
+description = "铸想 ForgeForm —— 对话式 3D 建模/打印工作流（Gradio + ComfyUI + 本地 LLM）"
+requires-python = ">=3.11"
+# 只做"声明"，好让工具链（含自动化验证）认得这个仓库的入口：
+#   python -m pytest            ← 标准入口，跑 tests/（unittest 用例同样被收集）
+#   python tools/verify.py      ← 权威入口，含守卫与工作流契约断言（更全，见该文件头部说明）
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+# 这个仓库的用例是 unittest 风格、且会起真实文件与线程：别开 xdist 并行，
+# 也别让 pytest 去收集 tools/ 下的临时验证脚本。
+norecursedirs = ["tools", "logs", "outputs", "projects", "finetune", ".git"]
