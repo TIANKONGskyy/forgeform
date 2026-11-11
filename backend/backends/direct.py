@@ -339,7 +339,8 @@ class DirectBackend:
                          or _PIPELINE_BY_BACKEND.get((cfg.get("backend") or "").lower(), "FluxPipeline"))
 
         def build():
-            return self._load_pipe(pipe_cls_name, ref, opts.get("dtype") or "bfloat16")
+            return self._load_pipe(pipe_cls_name, ref, opts.get("dtype") or "bfloat16",
+                                   str(cfg.get("offload") or opts.get("offload") or ""))
 
         pipe = self._keeper.get(f"image:{pipe_cls_name}:{ref}", build)
         gen = None
@@ -366,8 +367,16 @@ class DirectBackend:
         self._log(f"[direct] 出图完成 {round(time.time()-t0,1)}s → {name}")
         return [path]
 
-    def _load_pipe(self, cls_name: str, ref: str, dtype_name: str = "bfloat16"):
-        """按插件声明的类名从 diffusers 里拿 pipeline。适配器留给不兼容的模型。"""
+    def _load_pipe(self, cls_name: str, ref: str, dtype_name: str = "bfloat16",
+                  offload: str = ""):
+        """按插件声明的类名从 diffusers 里拿 pipeline。
+
+        `offload` 决定显存策略：
+          - 空（默认）：整模型 .to("cuda")
+          - "model"：enable_model_cpu_offload() —— 32 GB 的模型塞 32 GB 的卡必须用这个，
+            它按子模块换入换出（慢一点，但不会 OOM）
+          - "sequential"：最省显存、最慢
+        """
         import diffusers
         import torch
 
@@ -376,18 +385,25 @@ class DirectBackend:
         if cls is None:
             raise RuntimeError(f"diffusers 里没有 {cls_name}（版本 {diffusers.__version__}）"
                                f"—— 检查插件 YAML 的 pipeline 字段，或升级 diffusers")
-        self._log(f"[direct] 加载 {cls_name} ← {ref}")
+        self._log(f"[direct] 加载 {cls_name} ← {ref}  (offload={offload or 'none'})")
         try:
             pipe = cls.from_pretrained(ref, torch_dtype=dtype, use_safetensors=True)
         except Exception:
             # 有些社区模型只有 pytorch_model.bin（没转 safetensors）
             pipe = cls.from_pretrained(ref, torch_dtype=dtype, use_safetensors=False)
-        pipe.to("cuda")
+
         for opt in ("enable_attention_slicing", "enable_vae_slicing"):
             try:
                 getattr(pipe, opt)()
             except Exception:
                 pass
+
+        if offload == "sequential":
+            pipe.enable_sequential_cpu_offload()
+        elif offload == "model":
+            pipe.enable_model_cpu_offload()
+        else:
+            pipe.to("cuda")
         return pipe
 
     # ── 3D ────────────────────────────────────────────────────

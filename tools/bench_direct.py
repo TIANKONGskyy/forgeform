@@ -30,6 +30,8 @@ def main() -> int:
     ap.add_argument("--guidance", type=float, default=0.0)
     ap.add_argument("--size", type=int, default=512)
     ap.add_argument("--prompt", default="a red apple on a white background, single object")
+    ap.add_argument("--offload", default="", choices=["", "model", "sequential"],
+                    help="显存不够时用 CPU offload：model=按子模块换入换出")
     ap.add_argument("--keep", action="store_true", help="保留产物目录")
     args = ap.parse_args()
 
@@ -49,6 +51,7 @@ def main() -> int:
             "guidance": args.guidance,
             "width": args.size,
             "height": args.size,
+            "offload": args.offload,
         }}},
     }
 

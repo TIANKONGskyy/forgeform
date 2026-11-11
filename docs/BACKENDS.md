@@ -17,20 +17,44 @@
 
 ### 出图这条线的实测（2026-11-11，V100 32G）
 
-用 `segmind/tiny-sd`（990 MB，最小的真 SD 模型）跑 `tools/bench_direct.py`：
+**用本机真实的大模型跑的**（`D:\AI-Workshop\finetune\flux2klein-base`，32.3 GB，完整 diffusers 格式）：
 
 ```
-[direct] 出图 tiny_sd (StableDiffusionPipeline) 256x256 4步 …
+[direct] 加载 Flux2KleinPipeline ← D:\AI-Workshop\finetune\flux2klein-base  (offload=model)
+[direct] 出图 flux2klein (Flux2KleinPipeline) 512x512 8步 …
+[direct] 出图完成 166.3s → direct_1794382971_eec39f.png
+job=1c74e2d8  推理 193.6s
+http://127.0.0.1:60540/view?filename=images/direct_1794382971_eec39f.png
+HTTP 200  242670 字节
+✅ 端到端通过，总耗时 193.8s
+```
+
+逐步耗时（offload 模式）：
+
+```
+step 1: 68.95s   ← 第一次把 17 GB transformer 换进显存
+step 2: 29.96s
+step 3: 17.50s
+step 4: 11.64s
+step 5~8: 8.4s → 4.4s
+```
+
+也用小模型验证过一次更纯粹的链路（`segmind/tiny-sd`，990 MB）：
+
+```
 [direct] 出图完成 0.9s → direct_1794381220_b9625a.png
-job=72a7c48d  推理 40.5s          ← 含 39s 模型加载，真正采样 0.9s
-['direct-bench\images\direct_1794381220_b9625a.png']
-http://127.0.0.1:56550/view?filename=images/direct_1794381220_b9625a.png
+job=72a7c48d  推理 40.5s          ← 39s 是模型加载，真正采样 0.9s
 HTTP 200  64064 字节
-✅ 端到端通过
 ```
 
-这验证的不是画质（tiny-sd 本来就糊），而是**整条链成立**：
-插件/配置 → `DirectBackend` → diffusers 加载 → 采样 → 落盘 → 伪 `/view` 协议 → `requests` 拿回。
+两次验证的都是**整条链**：配置/插件 → `DirectBackend` → diffusers 加载 → 采样 → 落盘 →
+伪 `/view` 协议 → `requests` 拿回。ComfyUI 全程没参与。
+
+### 32 GB 模型塞 32 GB 卡：`offload`
+
+`FLUX.2 Klein` 本体 33 GB（transformer 17 + text_encoder 15 + vae 0.2），比显存还大。
+插件 YAML 里写 `offload: model`，`DirectBackend` 就会调 `enable_model_cpu_offload()`：
+按子模块换入换出，第一步慢（69 s），后面几步就正常了（4-8 s）。
 
 ---
 
@@ -109,27 +133,42 @@ ComfyUI 帮你换入换出模型，直连就得自己做。`DirectBackend` 里�
 
 ---
 
-## 真实成本：权重要重下
+## 真实成本：先翻一遍本地，别急着下
 
-这是最容易被忽略的一条。**你现有的 ComfyUI 权重，直连模式一个都用不了**：
+这是最容易被忽略的一条。**ComfyUI 的权重大多不能直接给 diffusers 用**：
 
 | 现有文件 | 为什么不行 |
 |---|---|
 | `qwen_image_2.1_int8_convrot.safetensors` | 自定义 int8 量化，`from_single_file` 不认 |
-| `flux-2-klein-9b-Q5_K_M.gguf` | GGUF，diffusers 不支持 |
+| `flux-2-klein-9b-Q5_K_M.gguf` | GGUF，diffusers 不支持这种布局 |
 | `z_image_turbo-Q8_0.gguf` | 同上 |
-| `hunyuan3d-dit-v2-1_fp16.ckpt` | 3D-Pack 的私有布局，`hy3dgen.from_pretrained` 要 diffusers 目录结构 |
+| `hunyuan3d-dit-v2-1_fp16.ckpt` | 3D-Pack 的私有布局 |
 
-要重下 diffusers 格式：
+**但有一类例外：你自己做过 LoRA 微调的话，本地多半躺着完整的 diffusers 格式 base 模型。**
+作者这台机器上就有 —— `D:\AI-Workshop\finetune\flux2klein-base`，**32.3 GB，完整可用**，
+一次都没重下。
+
+先花 10 秒翻一遍，比下 20 GB 划算：
 
 ```powershell
-# 例如 Z-Image Turbo（约 20 GB）
-$env:HF_ENDPOINT = "https://hf-mirror.com"
-hf download Tongyi-MAI/Z-Image-Turbo --local-dir D:\models\z-image-turbo-diffusers --exclude "assets/*"
-
-# Hunyuan3D-2mini（约 3 GB）
-hf download tencent/Hunyuan3D-2mini --local-dir D:\models\hunyuan3d-2mini
+# 找所有 diffusers 格式模型（有 model_index.json 的目录）
+Get-ChildItem D:\,C:\Users\$env:USERNAME -Recurse -File -Filter model_index.json -Depth 5 `
+  -ErrorAction SilentlyContinue | ForEach-Object {
+    $j = Get-Content $_.FullName -Raw | ConvertFrom-Json
+    $gb = [math]::Round((Get-ChildItem $_.Directory -Recurse -File -EA SilentlyContinue |
+          Measure-Object Length -Sum).Sum/1GB,1)
+    "{0,6} GB  {1,-28} {2}" -f $gb, $j._class_name, $_.Directory
+  }
 ```
+
+真没有，再下：
+
+```powershell
+python tools/fetch_model.py --repo Tongyi-MAI/Z-Image-Turbo \
+    --dest D:/models/z-image-turbo-diffusers --exclude "assets/" --threads 8
+```
+
+（`fetch_model.py` 自动挑镜像、8 线程分片、断点续传；实测峰值 4.97 MB/s。）
 
 ### 作者这台机器上的实测下载速度（2026-11，务必先测你自己的）
 
