@@ -1,0 +1,13 @@
+id: qwen_image
+kind: image
+label: Qwen-Image-2.1
+pipeline: QwenImagePipeline
+repo: Qwen/Qwen-Image
+vram_hint: 22
+notes: 20 步；中文提示词最准的一档，铸想默认
+defaults:
+  steps: 20
+  guidance: 4.0
+  width: 1024
+  height: 1024
+  dtype: bfloat16

@@ -38,6 +38,21 @@ from urllib.parse import quote
 from . import MODE_DIRECT
 
 
+# backend 字段 → diffusers 类名（插件没写 pipeline 时的兜底）
+_PIPELINE_BY_BACKEND = {
+    "flux": "FluxPipeline",
+    "flux2": "Flux2Pipeline",
+    "flux2klein": "Flux2KleinPipeline",
+    "flux2_klein": "Flux2KleinPipeline",
+    "qwen_image": "QwenImagePipeline",
+    "qwen": "QwenImagePipeline",
+    "z_image": "ZImagePipeline",
+    "sdxl": "StableDiffusionXLPipeline",
+    "sd": "StableDiffusionPipeline",
+    "sd_turbo": "StableDiffusionPipeline",
+}
+
+
 # ────────────────────────────────────────────────────────────────
 # 本地产物 HTTP 服务：伪造 ComfyUI 的 /view?filename=
 # ────────────────────────────────────────────────────────────────
@@ -262,42 +277,71 @@ class DirectBackend:
     def get_result_3d(self, outputs: dict) -> str:
         return self._first(outputs)
 
-    # ── 出图 ──────────────────────────────────────────────────
-    def _pick(self, stage: str, params: dict) -> tuple[str, dict]:
-        """按 config 找回这一轮该用哪个模型。"""
+    # ── 模型解析：config 优先，插件补默认 ────────────────────
+    def _resolve(self, stage: str, params: dict) -> tuple[str, dict, object]:
+        """返回 (key, 合并后的参数, 插件或 None)。
+
+        优先级：`config.json → models.<stage>.<key>` 显式字段 > 插件 YAML 的 defaults。
+        所以 config 里只写 `{"backend": "z_image", "path": "..."}` 就够，
+        步数/guidance/分辨率这些从插件继承 —— 换模型时不用把参数抄一遍。
+        """
+        from ..plugins.spec import resolve as find_plugin
+
+        kind = "mesh" if stage == "3d" else stage
         stages = self.config.get("stages") or {}
-        default_key = (stages.get(stage) or {}).get("default_model", "")
-        key = params.get("model_key") or default_key
+        key = params.get("model_key") or (stages.get(stage) or {}).get("default_model") or ""
         table = (self.config.get("models") or {}).get(stage) or {}
-        if key and key in table:
-            return key, table[key]
-        if default_key and default_key in table:
-            return default_key, table[default_key]
-        if table:
-            k = next(iter(table))
-            return k, table[k]
-        raise RuntimeError(f"config.models.{stage} 是空的，没法选模型")
+
+        cfg = dict(table.get(key) or {}) if key in table else {}
+        plugin = find_plugin(kind, key) if key else None
+
+        if plugin is None and not cfg and table:
+            key = next(iter(table))
+            cfg = dict(table[key])
+            plugin = find_plugin(kind, key)
+
+        if not key:
+            known = ", ".join(p.id for p in __import__("backend.plugins.spec",
+                                                       fromlist=["registry"]).registry().of_kind(kind))
+            raise RuntimeError(
+                f"没有可用的 {stage} 模型：config.models.{stage} 是空的，"
+                f"内置插件也没有匹配项（已知: {known or '无'}）")
+
+        merged = dict(plugin.params()) if plugin else {}
+        for k, v in cfg.items():
+            if v not in (None, "", 0):
+                merged[k] = v
+        return key, merged, plugin
+
+    def _pick(self, stage: str, params: dict) -> tuple[str, dict]:
+        key, merged, _plugin = self._resolve(stage, params)
+        return key, merged
 
     def _run_image(self, params: dict) -> list[Path]:
         import torch
-        key, cfg = self._pick("image", params)
-        model_ref = cfg.get("path") or cfg.get("repo") or cfg.get("model_id")
-        if not model_ref:
-            raise RuntimeError(
-                f"models.image.{key} 缺 path：DirectBackend 需要本地 diffusers 目录或 HF repo id")
 
-        kind = (cfg.get("backend") or "flux").lower()
-        steps = int(params.get("steps") or cfg.get("steps") or 20)
-        w = int(params.get("width") or 1024)
-        h = int(params.get("height") or 1024)
+        key, opts, plugin = self._resolve("image", params)
+        cfg = (self.config.get("models") or {}).get("image", {}).get(key, {}) or {}
+        ref = cfg.get("path") or cfg.get("repo") or (plugin.target if plugin else "")
+        if not ref:
+            raise RuntimeError(
+                f"模型 {key} 没给 path/repo：config.models.image.{key}.path 或插件的 repo 至少要有一个")
+
+        steps = int(params.get("steps") or opts.get("steps") or 20)
+        w = int(opts.get("width") or 1024)
+        h = int(opts.get("height") or 1024)
+        guidance = opts.get("guidance")
         prompt = params.get("prompt") or ""
         negative = params.get("negative") or ""
         seed = int(params.get("seed") or -1)
 
-        def build():
-            return self._load_image_pipe(kind, model_ref, cfg)
+        pipe_cls_name = (cfg.get("pipeline") or (plugin.pipeline if plugin else "")
+                         or _PIPELINE_BY_BACKEND.get((cfg.get("backend") or "").lower(), "FluxPipeline"))
 
-        pipe = self._keeper.get(f"image:{kind}:{model_ref}", build)
+        def build():
+            return self._load_pipe(pipe_cls_name, ref, opts.get("dtype") or "bfloat16")
+
+        pipe = self._keeper.get(f"image:{pipe_cls_name}:{ref}", build)
         gen = None
         if seed >= 0:
             gen = torch.Generator(device="cuda").manual_seed(seed)
@@ -305,13 +349,14 @@ class DirectBackend:
         kwargs = dict(prompt=prompt, num_inference_steps=steps, width=w, height=h)
         if gen is not None:
             kwargs["generator"] = gen
-        # turbo 系（z_image / klein）guidance 要低
-        if kind in ("z_image", "flux2klein", "flux2_klein"):
-            kwargs["guidance_scale"] = float(cfg.get("guidance") or 1.0)
-        elif negative:
+        if params.get("guidance_scale") is not None:
+            kwargs["guidance_scale"] = float(params["guidance_scale"])
+        elif guidance is not None:
+            kwargs["guidance_scale"] = float(guidance)
+        if negative and "guidance_scale" in kwargs and float(kwargs["guidance_scale"]) > 1.0:
             kwargs["negative_prompt"] = negative
 
-        self._log(f"[direct] 出图 {key} {w}x{h} {steps}步 …")
+        self._log(f"[direct] 出图 {key} ({pipe_cls_name}) {w}x{h} {steps}步 …")
         t0 = time.time()
         out = pipe(**kwargs)
         img = out.images[0]
@@ -321,53 +366,60 @@ class DirectBackend:
         self._log(f"[direct] 出图完成 {round(time.time()-t0,1)}s → {name}")
         return [path]
 
-    def _load_image_pipe(self, kind: str, ref: str, cfg: dict):
+    def _load_pipe(self, cls_name: str, ref: str, dtype_name: str = "bfloat16"):
+        """按插件声明的类名从 diffusers 里拿 pipeline。适配器留给不兼容的模型。"""
+        import diffusers
         import torch
-        dtype = torch.bfloat16
-        common = dict(torch_dtype=dtype, use_safetensors=True)
-        if kind == "z_image":
-            from diffusers import ZImagePipeline as P
-        elif kind in ("qwen_image", "qwen"):
-            from diffusers import QwenImagePipeline as P
-        elif kind in ("flux2klein", "flux2_klein"):
-            from diffusers import Flux2KleinPipeline as P
-        elif kind in ("flux2",):
-            from diffusers import Flux2Pipeline as P
-        else:
-            from diffusers import FluxPipeline as P
-        pipe = P.from_pretrained(ref, **common)
+
+        dtype = getattr(torch, dtype_name, torch.bfloat16)
+        cls = getattr(diffusers, cls_name, None)
+        if cls is None:
+            raise RuntimeError(f"diffusers 里没有 {cls_name}（版本 {diffusers.__version__}）"
+                               f"—— 检查插件 YAML 的 pipeline 字段，或升级 diffusers")
+        self._log(f"[direct] 加载 {cls_name} ← {ref}")
+        pipe = cls.from_pretrained(ref, torch_dtype=dtype, use_safetensors=True)
         pipe.to("cuda")
-        try:
-            pipe.enable_attention_slicing()
-        except Exception:
-            pass
+        for opt in ("enable_attention_slicing", "enable_vae_slicing"):
+            try:
+                getattr(pipe, opt)()
+            except Exception:
+                pass
         return pipe
 
     # ── 3D ────────────────────────────────────────────────────
     def _run_3d(self, params: dict) -> list[Path]:
+        import torch
         from PIL import Image
 
-        key, cfg = self._pick("3d", params)
-        ref = cfg.get("path") or cfg.get("repo") or cfg.get("model_id")
+        key, opts, plugin = self._resolve("3d", params)
+        cfg = (self.config.get("models") or {}).get("3d", {}).get(key, {}) or {}
+        ref = cfg.get("path") or cfg.get("repo") or (plugin.target if plugin else "")
         if not ref:
             raise RuntimeError(
-                f"models.3d.{key} 缺 path：DirectBackend 需要 hy3dgen 能认的目录或 repo id")
+                f"模型 {key} 没给 path/repo：config.models.3d.{key}.path 或插件的 repo 至少要有一个")
+
+        loader = str(cfg.get("loader") or (plugin.loader if plugin else "") or
+                     "hy3dgen.shapegen.Hunyuan3DDiTFlowMatchingPipeline")
 
         img_path = params.get("image_path") or ""
         if not img_path or not Path(img_path).exists():
             raise FileNotFoundError(f"输入图片不存在: {img_path}")
         image = Image.open(img_path).convert("RGBA")
 
-        steps = int(params.get("steps") or cfg.get("steps") or 30)
-        octree = int(params.get("octree_resolution") or cfg.get("octree") or 256)
-        guidance = float(cfg.get("guidance_scale") or 6.0)
+        steps = int(params.get("steps") or opts.get("steps") or 30)
+        octree = int(params.get("octree_resolution") or opts.get("octree") or 256)
+        guidance = float(opts.get("guidance") or 6.0)
+        dtype = getattr(torch, str(opts.get("dtype") or "float16"), torch.float16)
 
         def build():
-            from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline as P
-            self._log(f"[direct] 加载 hy3dgen {ref}")
-            return P.from_pretrained(ref, device="cuda", dtype=__import__("torch").float16)
+            mod, _, cls = loader.rpartition(".")
+            if not mod:
+                raise RuntimeError(f"loader 要写完整路径，例如 hy3dgen.shapegen.XXX: {loader}")
+            self._log(f"[direct] 加载 {cls} ← {ref}")
+            M = __import__(mod, fromlist=[cls])
+            return getattr(M, cls).from_pretrained(ref, device="cuda", dtype=dtype)
 
-        pipe = self._keeper.get(f"3d:{ref}", build)
+        pipe = self._keeper.get(f"3d:{loader}:{ref}", build)
         self._log(f"[direct] 3D 生成 {key} steps={steps} octree={octree} …")
         t0 = time.time()
         meshes = pipe(image=image, num_inference_steps=steps,

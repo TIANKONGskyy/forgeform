@@ -313,6 +313,7 @@ docs/
 |---|---|
 | [docs/MODELS.md](docs/MODELS.md) | 要装模型了 —— 每个权重下哪个、放哪、多大 |
 | [docs/BACKENDS.md](docs/BACKENDS.md) | 不想用 ComfyUI —— `backend.mode = "direct"` 直连 diffusers / hy3dgen |
+| [docs/PLUGINS.md](docs/PLUGINS.md) | **换模型** —— 一个 YAML 接一个新模型，不改代码 |
 | [docs/CONFIG.md](docs/CONFIG.md) | 想按自己的卡调参数、换模型、看三套开箱配置 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 想改代码，先搞清对话组 / 按钮 phase / 显存仲裁 |
 | [skills/forgeform/SKILL.md](skills/forgeform/SKILL.md) | 让 agent 接管安装和使用 |

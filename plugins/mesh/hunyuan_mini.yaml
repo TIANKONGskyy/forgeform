@@ -1,0 +1,12 @@
+id: hunyuan_mini
+kind: mesh
+label: Hunyuan3D 2mini
+loader: hy3dgen.shapegen.Hunyuan3DDiTFlowMatchingPipeline
+repo: tencent/Hunyuan3D-2mini
+vram_hint: 10
+notes: 3GB 权重，先在它上面跑通再换 2.1
+defaults:
+  steps: 30
+  octree: 256
+  guidance: 6.0
+  dtype: float16

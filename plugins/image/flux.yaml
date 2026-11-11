@@ -1,0 +1,13 @@
+id: flux
+kind: image
+label: FLUX.1-dev
+pipeline: FluxPipeline
+repo: black-forest-labs/FLUX.1-dev
+vram_hint: 20
+notes: 28 步；通用性最好，但中文理解不如 Qwen-Image
+defaults:
+  steps: 28
+  guidance: 3.5
+  width: 1024
+  height: 1024
+  dtype: bfloat16

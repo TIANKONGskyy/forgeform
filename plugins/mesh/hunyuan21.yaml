@@ -1,0 +1,12 @@
+id: hunyuan21
+kind: mesh
+label: Hunyuan3D 2.1
+loader: hy3dgen.shapegen.Hunyuan3DDiTFlowMatchingPipeline
+repo: tencent/Hunyuan3D-2.1
+vram_hint: 16
+notes: 质量天花板；512 octree 约 8-10 分钟
+defaults:
+  steps: 30
+  octree: 512
+  guidance: 6.0
+  dtype: float16

@@ -1,0 +1,13 @@
+id: z_image
+kind: image
+label: Z-Image Turbo 6B
+pipeline: ZImagePipeline
+repo: Tongyi-MAI/Z-Image-Turbo
+vram_hint: 20
+notes: 8 步出图；turbo 系 guidance 固定 1.0，调高会糊
+defaults:
+  steps: 8
+  guidance: 1.0
+  width: 1024
+  height: 1024
+  dtype: bfloat16
