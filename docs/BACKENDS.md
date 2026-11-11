@@ -11,9 +11,26 @@
 
 | 阶段 | 直连（direct） | 依赖 |
 |---|---|---|
-| 出图 | ✅ 可用 | `diffusers`（原生支持 Flux / Qwen-Image / Z-Image，实测 0.39.0 全有） |
+| 出图 | ✅ **端到端已验证** | `diffusers`（原生支持 Flux / Qwen-Image / Z-Image，实测 0.39.0 全有） |
 | 3D | ⚠️ 代码就绪，权重待装 | `hy3dgen`（PyPI 有 2.0.2，`pip install hy3dgen` 已通） |
 | 视频 | ❌ 不支持 | MiniMax H3 只有 ComfyUI 节点实现，没有独立 pipeline |
+
+### 出图这条线的实测（2026-11-11，V100 32G）
+
+用 `segmind/tiny-sd`（990 MB，最小的真 SD 模型）跑 `tools/bench_direct.py`：
+
+```
+[direct] 出图 tiny_sd (StableDiffusionPipeline) 256x256 4步 …
+[direct] 出图完成 0.9s → direct_1794381220_b9625a.png
+job=72a7c48d  推理 40.5s          ← 含 39s 模型加载，真正采样 0.9s
+['direct-bench\images\direct_1794381220_b9625a.png']
+http://127.0.0.1:56550/view?filename=images/direct_1794381220_b9625a.png
+HTTP 200  64064 字节
+✅ 端到端通过
+```
+
+这验证的不是画质（tiny-sd 本来就糊），而是**整条链成立**：
+插件/配置 → `DirectBackend` → diffusers 加载 → 采样 → 落盘 → 伪 `/view` 协议 → `requests` 拿回。
 
 ---
 
@@ -122,7 +139,18 @@ hf download tencent/Hunyuan3D-2mini --local-dir D:\models\hunyuan3d-2mini
 | hf-mirror.com | 0.40 MB/s | 1.28 MB/s |
 | modelscope.cn | 0.78 MB/s | — |
 
-**20 GB 按这个速度要 4–14 小时。** 网络好的时候再拉，别在线上下波动的时候指望它跑完。
+**速度波动非常大**：同一台机器、同一个镜像，下午测 1.6 MB/s，半小时后再测 **4.97 MB/s**（单个 617 MB 文件）。
+所以别在第一次测到慢的时候就放弃 —— 换个时段重试。
+
+用自带的下载器（多线程 + 断点续传 + 自动挑镜像）：
+
+```powershell
+python tools/fetch_model.py --repo Tongyi-MAI/Z-Image-Turbo \
+    --dest D:/models/z-image-turbo-diffusers --exclude "assets/" --threads 8
+```
+
+它会先探测 `huggingface.co` 和 `hf-mirror.com` 哪个更快，然后分片下。
+断了重跑会从 `.parts/` 续传，不用从头来。
 
 ---
 
@@ -142,20 +170,22 @@ hf download tencent/Hunyuan3D-2mini --local-dir D:\models\hunyuan3d-2mini
 
 ## 还没验证的部分（如实写）
 
-- **出图没跑过真模型**：本机只有 GGUF 和私有 int8 权重，没有 diffusers 格式的，网络又下不动 20 GB。
-  代码路径由 `tests/test_direct_backend.py` 的协议测试覆盖，但「Z-Image 直连出图到底多少秒」
-  这个数字还没有。
 - **3D 没跑过真模型**：`hy3dgen` 装好了、API 签名确认了
   （`Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(path, device='cuda', dtype=float16)`），
   但 `tencent/Hunyuan3D-2mini` 的 3 GB 权重没下完。
+- **铸想默认的那两个大模型（Qwen-Image-2.1 / Hunyuan3D 2.1）没在直连模式下跑过**：
+  它们要 20-30 GB 的 diffusers 格式权重，正在后台拉。出图链路由 tiny-sd 证明成立，
+  换上去只剩"加载哪个 repo + 给多少显存"的问题。
 - **hy3dgen 2.0.2 是 2.0 的包**：铸想默认的 Hunyuan3D 2.1 需要单独从源码装
   （`Tencent-Hunyuan/Hunyuan3D-2.1`），2.0.2 的 API 大概率兼容但没验。
 
-在能下到权重的网络里，验证只需两步：
+验证命令（出图已通，3D 等权重到位后同样跑）：
 
 ```powershell
-python -m pytest tests/test_direct_backend.py -q     # 协议（无权重也能跑）
-python tools/bench_direct.py --image z_image --3d hy_mini   # 真跑，出耗时和显存
-```
+# 协议 + 插件（不需要任何权重）
+python -m pytest tests/test_direct_backend.py tests/test_plugins.py -q
 
-（第二个脚本还没写 —— 权重没到位之前写它没意义。）
+# 真跑一轮，出耗时和产物路径
+python tools/bench_direct.py --model tiny_sd --path D:/models/tiny-sd \
+    --pipeline StableDiffusionPipeline --steps 4 --size 256
+```

@@ -80,3 +80,6 @@ desktop.ini
 
 # 本地预览服务的 pid
 .server.pid
+
+# bench_direct.py 的产物
+direct-bench/

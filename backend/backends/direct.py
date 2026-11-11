@@ -377,7 +377,11 @@ class DirectBackend:
             raise RuntimeError(f"diffusers 里没有 {cls_name}（版本 {diffusers.__version__}）"
                                f"—— 检查插件 YAML 的 pipeline 字段，或升级 diffusers")
         self._log(f"[direct] 加载 {cls_name} ← {ref}")
-        pipe = cls.from_pretrained(ref, torch_dtype=dtype, use_safetensors=True)
+        try:
+            pipe = cls.from_pretrained(ref, torch_dtype=dtype, use_safetensors=True)
+        except Exception:
+            # 有些社区模型只有 pytorch_model.bin（没转 safetensors）
+            pipe = cls.from_pretrained(ref, torch_dtype=dtype, use_safetensors=False)
         pipe.to("cuda")
         for opt in ("enable_attention_slicing", "enable_vae_slicing"):
             try:
