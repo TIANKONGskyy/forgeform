@@ -641,13 +641,32 @@ def check_agent_layer() -> None:
        "兜底到 Hunyuan3D 2.1，并用 _fallback_tried 防两模型互相递归")
     import time
     from backend import conversation as C
+
+    # 前面的检查会真的跑 pipeline 流程，可能留下 autopilot 的 5 秒 Timer 或后台预热线程。
+    # 不清干净的话，_WARM_INFLIGHT 会被那些遗留任务占着，这一项就必然红
+    # （实测：干净 clone 里就是因此 150/151，开发机上碰巧时序对得上才过）。
+    try:
+        C._WARM_INFLIGHT.clear()
+        for fn in ("cancel_autopilot", "_cancel_autopilot", "cancel_current"):
+            f = getattr(C, fn, None)
+            if callable(f):
+                try: f()
+                except Exception: pass
+    except Exception:
+        pass
+    time.sleep(0.2)
+
     with patch('requests.get', return_value=SimpleNamespace(json=lambda: {'queue_running':[[1]],'queue_pending':[]})), patch('backend.pipeline.Pipeline.generate_images') as generate:
         C._warm_image_model_async('qwen21_ref')
-        deadline=time.monotonic()+3
+        deadline=time.monotonic()+15          # 冷启动时 Pipeline() 初始化 + 线程调度要几秒，3 秒太紧
         while C._WARM_INFLIGHT.is_set() and time.monotonic()<deadline:
-            time.sleep(0.01)
-        ck("warmup_deduped", not C._WARM_INFLIGHT.is_set() and not generate.called,
-           "生成队列忙时不提交预热作业")
+            time.sleep(0.02)
+        ok = not C._WARM_INFLIGHT.is_set() and not generate.called
+        if not ok:
+            print(f"[warmup] inflight={C._WARM_INFLIGHT.is_set()} gen_called={generate.called}",
+                  flush=True)
+        C._WARM_INFLIGHT.clear()              # 别把状态留给后面的检查
+        ck("warmup_deduped", ok, "生成队列忙时不提交预热作业")
     ck("stl_button_needs_model",
        'has_model = bool((state or {}).get("glb_path"))' in src_a,
        "按有没有模型显示，而不是按阶段（改尺寸重导时也要能点到）")
