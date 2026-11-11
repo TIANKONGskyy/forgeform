@@ -160,7 +160,7 @@ clone 后本地打开 `docs/showcase/index.html`，或等 GitHub Pages 部署好
 ## 安装
 
 ```powershell
-git clone https://github.com/<you>/forgeform.git
+git clone https://github.com/TIANKONGskyy/forgeform.git
 cd forgeform
 pip install -r requirements.txt
 ```

@@ -4,7 +4,7 @@ description: 铸想 ForgeForm（ZYKT studio 出品）—— 用一句中文描�
 license: AGPL-3.0
 metadata:
   author: ZYKT studio
-  homepage: https://github.com/zykt-studio/forgeform
+  homepage: https://github.com/TIANKONGskyy/forgeform
   version: "3.0.0"
 ---
 
@@ -40,7 +40,6 @@ Invoke-WebRequest http://127.0.0.1:8188/system_stats -UseBasicParsing -TimeoutSe
 也可已从代码位置判断（常见安装点）：
 
 ```powershell
-Test-Path D:\AI-Workshop\app.py        # 作者本人的机器
 Test-Path .\app.py                     # 当前目录就是仓库根
 Get-ChildItem -Recurse -Filter app.py | Where-Object { Test-Path (Join-Path $_.Directory 'backend\pipeline.py') }
 ```
@@ -123,7 +122,7 @@ UI 之外还有一组 FastAPI 路由（挂在同一个端口）：
 生成动作本身走 Gradio 的队列 API。最稳的做法是**别猜 API，直接用 Python 调 Pipeline**：
 
 ```python
-import sys; sys.path.insert(0, r"D:\AI-Workshop")   # 换成仓库根
+import sys; sys.path.insert(0, r"<forgeform 仓库根>")   # 换成你的实际路径
 from backend.pipeline import Pipeline
 
 pipe = Pipeline()                                   # 读 config.json

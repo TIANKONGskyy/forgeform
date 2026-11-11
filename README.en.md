@@ -59,7 +59,7 @@ and a four-view render of the actual STL.
 ## Install
 
 ```powershell
-git clone https://github.com/<you>/forgeform.git
+git clone https://github.com/TIANKONGskyy/forgeform.git
 cd forgeform
 pip install -r requirements.txt
 

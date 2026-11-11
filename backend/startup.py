@@ -66,8 +66,14 @@ OLLAMA_URL = "http://127.0.0.1:11434"
 #   维护账本 —— 这些逻辑只有一份（在 ZYKT 仓库里），
 #   铸想只要"问一句""就够了。用 CLI 的退出码当判据最省事：
 #     0 = 可以跑   1 = 有任务在跑，要等   2 = 资源不足，要先释放
-RESOURCE_GUARD = Path(r"D:\ZYKT-studio\tools\resource-guard.mjs")
-ZYKT_DIR = Path(r"D:\ZYKT-studio")
+# 资源协调器是**可选**的：它是 ZYKT 仓库里的一个小 CLI，用来问"现在能不能起一个吃这么多
+# 资源的东西"。开源版没有这个仓库，所以：
+#   · 默认去 <仓库同级>/ZYKT-studio 找
+#   · 找不到 / 没装 tsx → _resource_plan() 返回 None，调用方视作"不检查"，不影响启动
+#   · 想接入就设环境变量 ZYKT_DIR 指向你自己的那份
+ZYKT_DIR = Path(os.environ.get("ZYKT_DIR") or
+                (Path(__file__).resolve().parent.parent.parent / "ZYKT-studio")).expanduser()
+RESOURCE_GUARD = ZYKT_DIR / "tools" / "resource-guard.mjs"
 TSX = ZYKT_DIR / "node_modules" / ".bin" / "tsx.cmd"
 
 # CLI 退出码 → action。★ 必须有这张表：
