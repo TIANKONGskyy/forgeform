@@ -65,9 +65,51 @@
 
 | 阶段 | 直连（direct） | 依赖 |
 |---|---|---|
-| 出图 | ✅ **端到端已验证** | `diffusers`（原生支持 Flux / Qwen-Image / Z-Image，实测 0.39.0 全有） |
-| 3D | ⚠️ 代码就绪，但**用不了 ComfyUI 那套权重** | `hy3dgen`（PyPI 有 2.0.2，`pip install hy3dgen` 已通） |
+| 出图 | ✅ **端到端已验证**（真模型出真图） | `diffusers`（原生支持 Flux / Qwen-Image / Z-Image，实测 0.39.0 全有） |
+| 3D | ✅ **端到端已验证**（比 ComfyUI 快 7.7 倍） | `hy3dgen` 2.0.2 + `tencent/Hunyuan3D-2mini`（3.96 GB） |
 | 视频 | ❌ 不支持 | MiniMax H3 只有 ComfyUI 节点实现，没有独立 pipeline |
+
+### 直连 3D 的实测（2026-11-11，V100 32G）
+
+下载 `tencent/Hunyuan3D-2mini`（**只挑 mini 版，3.96 GB** —— 整个仓库 23.5 GB 是因为还有
+fast/turbo 变体和 .ckpt 重复副本，用 `--include` 过滤掉）：
+
+```
+python tools/fetch_model.py --repo tencent/Hunyuan3D-2mini \
+    --dest D:/models/hy3dgen/hunyuan3d-2mini \
+    --include '^hunyuan3d-dit-v2-mini/' --include '^hunyuan3d-vae-v2-mini/' \
+    --exclude '\.ckpt$' --threads 8
+```
+
+跑 `tools/bench_hy3d.py`：
+
+```
+[1] 加载 hunyuan3d-2mini/hunyuan3d-dit-v2-mini      42.0s
+[2] 推理 steps=30 octree=256                         13.1s
+    faces=480024  vertices=240001  watertight=False
+[3] 产物 bench_hy3d.glb (8.2 MB)
+```
+
+**注意 `watertight=False`** —— hy3dgen 出的原始网格不闭合（48 万面）。
+交给铸想现成的修复链（`mesh_optimizer`，和 ComfyUI 模式完全同一套）：
+
+```
+输入: faces=480024 watertight=False
+优化耗时 10.8s
+输出: faces=199748 watertight=True  bbox=[119.95, 50.46, 107.43]
+```
+
+### 和 ComfyUI 模式的对比（同一张输入图，同一个物件）
+
+| 路径 | 加载 | 推理 | 面数 | 水密 | 修复 |
+|---|---|---|---|---|---|
+| ComfyUI + Hunyuan3D 2.1（512 octree） | — | **505 s** | 200,000 | ✅ 直接水密 | 5.8 s |
+| 直连 hy3dgen + 2mini（256 octree） | 42 s | **13.1 s** | 480,024 | ❌ | 10.8 s |
+
+**直连快 7.7 倍**（505+6 vs 42+13+11 ≈ 66 s）。原因是 2mini 比 2.1 小得多、octree 也低一档 ——
+质量上 2mini 的面更多但细节略糊，2.1 更干净。要质量用 ComfyUI 的 2.1，要速度用直连连 2mini。
+
+两个路径可以共存：`auto` 模式有 ComfyUI 就走 2.1，没有就走 2mini。
 
 ### 3D 这条线：auto 会用本地权重，direct 不会
 

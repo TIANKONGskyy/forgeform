@@ -167,18 +167,19 @@ def download_file(url: str, dest: Path, size: int, threads: int = 8,
     for t in ts:
         t.start()
 
-    # 进度
-    last = 0.0
+    # 进度：每 5% 打一行（每 2 秒打一次会把日志刷爆，用户看不下去）
+    last_bucket = -1
     while any(t.is_alive() for t in ts):
         time.sleep(0.6)
         done = sum((p.stat().st_size for p in part_dir.iterdir()), 0)
         now = time.time()
-        if now - last > 2:
+        pct = done / size * 100 if size else 0
+        bucket = int(pct // 5)
+        if bucket != last_bucket:
             sp = done / max(now - t0, 0.1) / 1024 / 1024
-            pct = done / size * 100 if size else 0
             print(f"    {pct:5.1f}%  {done/1024/1024:8.1f}/{size/1024/1024:.1f} MB  "
                   f"{sp:5.2f} MB/s  ({dest.name})", flush=True)
-            last = now
+            last_bucket = bucket
 
     stop.set()
     for t in ts:
