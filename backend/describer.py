@@ -363,6 +363,21 @@ def _strip_negations(prompt: str) -> str:
     if not prompt:
         return prompt
     out = prompt
+
+    # ⓪ 剥掉句首的祈使动词。
+    #
+    # ★ 实测：用户说「做一个六角法兰联轴器」→ 翻译给的是 "Create a hexagonal flange coupling..."，
+    #   而这两个兜底函数（_force_single_object / _reinforce_shape）都假定输入是**名词短语**，
+    #   于是拼成 "a single hexagonal create a hexagonal flange coupling..." —— 语法散架，
+    #   主体名词还重复了一次。用户说「一个...」时译成 "A hexagonal..." 就不会触发。
+    #   提示词本来就该是名词短语，动词是多余的，直接剥掉最省事。
+    # 只剥动词，**保留冠词** —— 剥掉 "a/an" 会让下面的 _force_single_object 以为
+    # 没有限定词又补一次，拼出 "a single single phone stand"。带 \b 避免 "an" 被吃成 "n"。
+    out = re.sub(
+        r"^\s*(?:please\s+)?(?:create|generate|make|draw|design|produce|build|render)\b\s*"
+        r"(?:me\b\s*)?",
+        "", out, flags=re.I)
+
     for pat in _NEG_PATTERNS:
         out = re.sub(pat, "", out, flags=re.I)
 
