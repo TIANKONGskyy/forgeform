@@ -62,6 +62,7 @@ htmlcov/
 # 例外：文档里用的示意图
 !docs/assets/*.jpg
 !docs/assets/*.png
+!docs/assets/*.gif
 # 例外：作品展示页的预览图（源图 image.png 不入库，只入库压缩后的 jpg）
 !docs/showcase/*/*.jpg
 

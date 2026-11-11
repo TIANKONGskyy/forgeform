@@ -15,6 +15,7 @@
   <a href="docs/CONFIG.md">配置与选型</a> ·
   <a href="docs/ARCHITECTURE.md">架构</a> ·
   <a href="skills/forgeform/SKILL.md">给 agent 的 Skill</a> ·
+  <a href="README.en.md">English</a> ·
   <span>AGPL-3.0</span>
 </p>
 
@@ -84,7 +85,11 @@ ComfyUI 给你的是模型，铸想给你的是**流程**：
 不是 bug，所以如实写在这里。判"能不能打印"看的是水密和壁厚，不是连通块数。
 
 完整展示页（含每个作品的 **STL 四视角渲染**，能看出模型真的建出来了）：
-clone 后本地打开 `docs/showcase/index.html`。
+clone 后本地打开 `docs/showcase/index.html`，或等 GitHub Pages 部署好后在线看。
+
+下面这个在转的是上面联轴器的 **STL 文件本身**，matplotlib 逐帧渲染的，不是概念图：
+
+![六角法兰联轴器的 STL 旋转](docs/assets/spin-coupling.gif)
 
 ## 使用边界
 
