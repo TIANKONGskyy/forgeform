@@ -11,7 +11,7 @@
 <br clear="right" />
 
 <p>
-  <a href="docs/showcase/index.html"><b>作品展示</b></a> ·
+  <a href="docs/showcase/"><b>作品展示</b></a> ·
   <a href="docs/CONFIG.md">配置与选型</a> ·
   <a href="docs/ARCHITECTURE.md">架构</a> ·
   <a href="skills/forgeform/SKILL.md">给 agent 的 Skill</a> ·
@@ -66,6 +66,25 @@ ComfyUI 给你的是模型，铸想给你的是**流程**：
 | 管理 | 对话组、项目归档、模型库、实时显存/温度监控 | 内置 |
 
 逆向入口也留着：上传视频抽帧建模、直接上传 GLB 转 STL。
+
+## 作品
+
+四个提示词，四件能打印的东西。全部在这台机器上跑完整链路，数字是实测的。
+
+![四个作品](docs/assets/showcase-grid.jpg)
+
+| 作品 | 出图 | 建模 | 面数 | 水密 | 连通块 | 尺寸 |
+|---|---|---|---|---|---|---|
+| 骑士头盔 | （复用） | 506 s | 200,000 | ✓ | 6 | 90 mm |
+| 六角法兰联轴器 | 150 s | 487 s | 200,000 | ✓ | 1 | 80 mm |
+| 龙头球形摆件 | 139 s | 523 s | 200,000 | ✓ | 1 | 100 mm |
+| 多面体花盆 | 168 s | 568 s | 200,000 | ✓ | 1 | 100 mm |
+
+头盔那件有 6 个连通块 —— 面甲和护鼻的缝隙把模型切成了几块。这是这类形态的常态，
+不是 bug，所以如实写在这里。判"能不能打印"看的是水密和壁厚，不是连通块数。
+
+完整展示页（含每个作品的 **STL 四视角渲染**，能看出模型真的建出来了）：
+clone 后本地打开 `docs/showcase/index.html`。
 
 ## 使用边界
 
@@ -290,7 +309,7 @@ docs/
 | [docs/CONFIG.md](docs/CONFIG.md) | 想按自己的卡调参数、换模型、看三套开箱配置 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 想改代码，先搞清对话组 / 按钮 phase / 显存仲裁 |
 | [skills/forgeform/SKILL.md](skills/forgeform/SKILL.md) | 让 agent 接管安装和使用 |
-| [docs/showcase/index.html](docs/showcase/index.html) | 看作品和真实耗时数据 |
+| [docs/showcase/](docs/showcase/README.md) | 看四个作品的实测数据和 STL 四视角渲染（clone 后本地打开 `index.html`） |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 提 PR 前必读的五条约定 |
 | [SECURITY.md](SECURITY.md) | 想暴露到局域网/公网 |
 
