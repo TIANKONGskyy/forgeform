@@ -311,10 +311,11 @@ docs/
 
 | 文档 | 什么时候看 |
 |---|---|
+| [docs/MODELS.md](docs/MODELS.md) | 要装模型了 —— 每个权重下哪个、放哪、多大 |
 | [docs/CONFIG.md](docs/CONFIG.md) | 想按自己的卡调参数、换模型、看三套开箱配置 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 想改代码，先搞清对话组 / 按钮 phase / 显存仲裁 |
 | [skills/forgeform/SKILL.md](skills/forgeform/SKILL.md) | 让 agent 接管安装和使用 |
-| [docs/showcase/](docs/showcase/README.md) | 看四个作品的实测数据和 STL 四视角渲染（clone 后本地打开 `index.html`） |
+| [docs/showcase/](docs/showcase/README.md) | 看四个作品的实测数据和 STL 四视角渲染（clone 后本地打开 `viewer.html` 可拖动看 3D） |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 提 PR 前必读的五条约定 |
 | [SECURITY.md](SECURITY.md) | 想暴露到局域网/公网 |
 

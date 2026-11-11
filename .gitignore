@@ -77,3 +77,6 @@ desktop.ini
 .tmp_mm/
 *.log
 !docs/*.log
+
+# 本地预览服务的 pid
+.server.pid

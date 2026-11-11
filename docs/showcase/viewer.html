@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>铸想 ForgeForm · 作品 3D 预览</title>
+<style>
+  :root{
+    --bg:#07080c; --panel:#0d1017; --line:#1c2130; --fg:#e8ecf5; --dim:#8b95ab;
+    --cyan:#35e6d0; --violet:#8b6cf6;
+    --grad:linear-gradient(120deg,#35e6d0,#6ea8ff 50%,#8b6cf6);
+    --mono:ui-monospace,"Cascadia Code",Consolas,monospace;
+    --sans:-apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:var(--sans);overflow:hidden}
+  #app{display:grid;grid-template-columns:264px 1fr;height:100%}
+
+  aside{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:18px 16px;gap:14px;overflow:auto}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.4px}
+  .mark{width:24px;height:24px;border-radius:6px;background:var(--grad);position:relative;box-shadow:0 0 18px rgba(110,168,255,.5)}
+  .mark::after{content:"";position:absolute;inset:5px;border-radius:2px;border:2px solid rgba(7,8,12,.85);transform:rotate(45deg)}
+  .sub{font:11px/1.6 var(--mono);color:var(--dim);letter-spacing:.06em}
+
+  .list{display:flex;flex-direction:column;gap:6px}
+  .item{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:9px;border:1px solid transparent;
+        background:transparent;color:var(--fg);cursor:pointer;font-size:14px;text-align:left;width:100%;font-family:inherit}
+  .item:hover{background:#11141c;border-color:var(--line)}
+  .item.active{background:#131a24;border-color:#2b3a52}
+  .item .dot{width:7px;height:7px;border-radius:50%;background:#39435a;flex:0 0 auto}
+  .item.active .dot{background:var(--cyan);box-shadow:0 0 10px var(--cyan)}
+  .item .n{font:11px var(--mono);color:#5d6880;margin-left:auto}
+
+  .info{margin-top:auto;border-top:1px solid var(--line);padding-top:14px;display:flex;flex-direction:column;gap:7px}
+  .kv{display:flex;justify-content:space-between;font-size:12.5px}
+  .kv span{color:#5d6880;font-family:var(--mono);font-size:11px;letter-spacing:.06em}
+  .kv b{font-weight:600;font-family:var(--mono);font-size:12.5px}
+
+  .toggles{display:flex;gap:8px;flex-wrap:wrap}
+  .tog{padding:7px 11px;border-radius:8px;border:1px solid var(--line);background:#0b0e14;color:var(--dim);
+       font-size:12.5px;cursor:pointer;font-family:inherit}
+  .tog.on{color:#05070a;background:var(--cyan);border-color:transparent;font-weight:600}
+
+  main{position:relative}
+  canvas{display:block;width:100%;height:100%}
+  .hint{position:absolute;left:20px;bottom:16px;font:11.5px/1.7 var(--mono);color:#5d6880;pointer-events:none}
+  .hint b{color:#8b95ab}
+  .title{position:absolute;left:20px;top:16px;pointer-events:none}
+  .title h1{margin:0;font-size:19px;font-weight:700}
+  .title p{margin:4px 0 0;font:12px/1.6 var(--mono);color:#5d6880}
+  .loading{position:absolute;inset:0;display:grid;place-items:center;font:13px var(--mono);color:var(--dim);background:var(--bg);transition:opacity .3s}
+  .loading.hide{opacity:0;pointer-events:none}
+  .err{color:#ff7a8a}
+  @media(max-width:820px){#app{grid-template-columns:1fr;grid-template-rows:auto 1fr}aside{flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid var(--line)}.info{display:none}}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <div class="brand"><span class="mark"></span>铸想 ForgeForm</div>
+    <div class="sub">showcase · 3D preview</div>
+    <div class="list" id="list"></div>
+    <div class="toggles">
+      <button class="tog on" id="togSpin">自动旋转</button>
+      <button class="tog" id="togWire">线框</button>
+      <button class="tog" id="togReset">复位</button>
+    </div>
+    <div class="info" id="info"></div>
+  </aside>
+  <main>
+    <div class="title"><h1 id="h1">—</h1><p id="p">—</p></div>
+    <div class="loading" id="loading">加载模型…</div>
+    <div class="hint"><b>拖拽</b> 旋转 · <b>滚轮</b> 缩放 · <b>右键拖拽</b> 平移</div>
+  </main>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://registry.npmmirror.com/three/0.160.0/files/build/three.module.js",
+  "three/addons/": "https://registry.npmmirror.com/three/0.160.0/files/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const WORKS = [
+  { slug:'helmet',   name:'骑士头盔',       mm:90,  note:'面甲缝隙导致 6 个连通块' },
+  { slug:'coupling', name:'六角法兰联轴器', mm:80,  note:'单体，1 个连通块' },
+  { slug:'dragon',   name:'龙头球形摆件',   mm:100, note:'单体，1 个连通块' },
+  { slug:'planter',  name:'多面体花盆',     mm:100, note:'单体，1 个连通块' },
+];
+
+const main = document.querySelector('main');
+const loading = document.getElementById('loading');
+const infoBox = document.getElementById('info');
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(main.clientWidth, main.clientHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+main.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07080c);
+scene.fog = new THREE.Fog(0x07080c, 6, 22);
+
+const camera = new THREE.PerspectiveCamera(38, main.clientWidth/main.clientHeight, 0.01, 200);
+camera.position.set(2.2, 1.7, 2.8);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.075;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 1.5;
+controls.minDistance = 0.6;
+controls.maxDistance = 14;
+
+// 灯：一个冷主光 + 一个暖补光 + 环境
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x0a0d14, 1.1));
+const key = new THREE.DirectionalLight(0xffffff, 2.1); key.position.set(3, 5, 4); scene.add(key);
+const rim = new THREE.DirectionalLight(0x7fd8ff, 1.5); rim.position.set(-4, 2, -3); scene.add(rim);
+const fill = new THREE.PointLight(0x8b6cf6, 22, 12); fill.position.set(-2, -3, 2); scene.add(fill);
+
+// 地面网格
+const grid = new THREE.GridHelper(14, 28, 0x1e2735, 0x121822);
+grid.position.y = -0.02;
+scene.add(grid);
+
+let current = null;
+let materialOverride = true;
+
+function disposeCurrent(){
+  if(!current) return;
+  scene.remove(current);
+  current.traverse(o=>{ if(o.isMesh){ o.geometry.dispose(); } });
+  current = null;
+}
+
+function fit(obj){
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  obj.position.sub(center);                        // 居中
+  obj.position.y += size.y/2;                      // 落地
+  grid.position.y = -0.01;
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const dist = maxDim * 2.1;
+  camera.position.set(dist*0.62, dist*0.52, dist*0.72);
+  controls.target.set(0, size.y*0.45, 0);
+  controls.minDistance = maxDim * 0.9;
+  controls.maxDistance = maxDim * 7;
+  controls.update();
+  return { size, maxDim };
+}
+
+function stats(obj){
+  let tris = 0, meshes = 0;
+  obj.traverse(o=>{ if(o.isMesh && o.geometry){ meshes++; const g=o.geometry;
+    tris += (g.index ? g.index.count : g.attributes.position.count)/3; }});
+  return { tris: Math.round(tris), meshes };
+}
+
+const loader = new GLTFLoader();
+let meta = {};
+
+function load(slug){
+  const work = WORKS.find(w=>w.slug===slug);
+  document.getElementById('h1').textContent = work.name;
+  document.getElementById('p').textContent = `prompt → image → mesh → STL · ${work.mm} mm`;
+  loading.textContent = '加载模型…';
+  loading.classList.remove('hide');
+  loading.classList.remove('err');
+
+  loader.load(`./${slug}/model.glb`, gltf=>{
+    disposeCurrent();
+    const root = gltf.scene;
+    root.traverse(o=>{
+      if(o.isMesh){
+        // 生成的 GLB 常有法线朝内 / 缺失的情况，直接用会整个渲染成黑的。
+        // 重算顶点法线 + 双面渲染兜住。
+        if(o.geometry){
+          o.geometry.computeVertexNormals();
+          o.geometry.computeBoundingSphere();
+        }
+        o.material = new THREE.MeshStandardMaterial({
+          color: 0xd8e2f2, metalness: 0.2, roughness: 0.5,
+          side: THREE.DoubleSide,
+          wireframe: document.getElementById('togWire').classList.contains('on')
+        });
+      }
+    });
+    const fitInfo = fit(root);
+    scene.add(root);
+    current = root;
+
+    let jm = {};
+    try {
+      jm = {
+        faces: undefined
+      };
+    } catch(e){}
+    const st = stats(root);
+
+    meta = { slug, tris: st.tris, meshes: st.meshes,
+             mm: work.mm, note: work.note,
+             dims: [fitInfo.size.x, fitInfo.size.y, fitInfo.size.z].map(v=>+v.toFixed(2)) };
+
+    infoBox.innerHTML = `
+      <div class="kv"><span>三角面</span><b>${st.tris.toLocaleString()}</b></div>
+      <div class="kv"><span>网格块</span><b>${st.meshes}</b></div>
+      <div class="kv"><span>打印尺寸</span><b>${work.mm} mm</b></div>
+      <div class="kv"><span>相对包围盒</span><b>${meta.dims.join(' × ')}</b></div>
+      <div class="kv" style="margin-top:6px"><span>质量闸</span><b style="color:${work.note.includes('6')?'#ffb547':'#35e6d0'}">${work.note}</b></div>`;
+
+    loading.classList.add('hide');
+  },
+  undefined,
+  err=>{
+    loading.textContent = `加载失败：${slug}/model.glb（GLB 不在仓库里，需本地有产物）`;
+    loading.classList.add('err');
+    console.error(err);
+  });
+}
+
+// 侧栏列表
+const list = document.getElementById('list');
+WORKS.forEach((w,i)=>{
+  const b = document.createElement('button');
+  b.className = 'item';
+  b.dataset.slug = w.slug;
+  b.innerHTML = `<span class="dot"></span>${w.name}<span class="n">0${i+1}</span>`;
+  b.onclick = ()=>{
+    [...list.children].forEach(c=>c.classList.remove('active'));
+    b.classList.add('active');
+    load(w.slug);
+  };
+  list.appendChild(b);
+});
+
+function activate(slug){
+  [...list.children].forEach(c=>c.classList.toggle('active', c.dataset.slug === slug));
+  load(slug);
+}
+
+document.getElementById('togSpin').onclick = e=>{
+  controls.autoRotate = !controls.autoRotate;
+  e.currentTarget.classList.toggle('on', controls.autoRotate);
+};
+document.getElementById('togWire').onclick = e=>{
+  const on = !e.currentTarget.classList.contains('on');
+  e.currentTarget.classList.toggle('on', on);
+  if(current) current.traverse(o=>{ if(o.isMesh) o.material.wireframe = on; });
+};
+document.getElementById('togReset').onclick = ()=>{
+  if(current) fit(current);
+};
+
+function resize(){
+  const w = main.clientWidth, h = main.clientHeight;
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+addEventListener('resize', resize);
+
+(function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+
+// ?m=coupling 直接打开指定作品（截图/分享用）
+const params = new URLSearchParams(location.search);
+const initial = params.get('m');
+activate(WORKS.some(w=>w.slug===initial) ? initial : WORKS[0].slug);
+</script>
+</body>
+</html>

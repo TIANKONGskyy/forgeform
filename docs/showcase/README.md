@@ -1,10 +1,24 @@
 # 作品展示
 
-`index.html` 是这个目录的入口，浏览器直接打开就行（纯静态，无外部依赖、不用起服务）。
+三个入口，按你要看的东西挑：
+
+| 文件 | 是什么 |
+|---|---|
+| `viewer.html` | **能拖动的 3D 预览**（three.js）。四个作品可切换，自动旋转、线框开关、实时面数 |
+| `index.html` | 静态宣传页：出图 + STL 四视角渲染 + 实测数据 |
+| `*/job.json` | 每个作品的原始运行记录（耗时/面数/水密/尺寸） |
+
+`viewer.html` 需要在仓库根起一个静态服务（`file://` 加载 GLB 会被 CORS 拦）：
 
 ```powershell
-start docs/showcase/index.html
+python -m http.server 8899 --bind 127.0.0.1 --directory docs/showcase
+# 然后打开 http://127.0.0.1:8899/viewer.html?m=coupling
 ```
+
+`?m=` 可以直接指定作品：`helmet` / `coupling` / `dragon` / `planter`。
+
+⚠️ `viewer.html` 依赖 `*/model.glb`，而这些 GLB **不在仓库里**（`.gitignore` 挡了）。
+在自己机器上跑一遍 `showcase` 生成流程之后才能看。
 
 ## 这里的数字是真的
 
