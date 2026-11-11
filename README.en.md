@@ -1,171 +1,122 @@
 # ForgeForm 铸想
 
-**One sentence in → one printable STL out.** A conversation-driven 3D modeling workflow that
-runs entirely on your own machine.
+One sentence in, one printable STL out.
 
-<img src="docs/assets/showcase-grid.jpg" width="620" alt="Four objects generated from four prompts" />
+Runs the whole chain locally: LLM parses the request → generate an image → image-to-3D → seal the mesh → export a millimetre-scale STL. No cloud API.
 
-Built by **[ZYKT studio](https://zykt.space)**. AGPL-3.0.
+<img src="docs/assets/showcase-grid.jpg" width="560" alt="Four objects generated from four prompts" />
 
-You describe a part in plain language. It asks only what it needs to ask, picks sensible
-defaults, generates a reference image, waits for your OK, reconstructs a mesh, seals it,
-scales it to millimetres, drops it on the print bed — and hands you an STL your slicer accepts.
+## What it does
 
-No cloud API. Local LLM for dialogue, local ComfyUI for diffusion and 3D reconstruction,
-local `trimesh` / `pymeshlab` / `pymeshfix` for mesh repair.
+| Stage | Does | Backend |
+|---|---|---|
+| Chat | Parses the request, fills in parameters, handles revisions | Local LLM (OpenAI-compatible endpoint / Ollama) |
+| Image | Text-to-image, 1–4 candidates, reference-image i2i, inpaint | ComfyUI or diffusers |
+| 3D | Single image to mesh | ComfyUI (Hunyuan3D 2.1) or hy3dgen |
+| Export | GLB → STL: decimate, fill holes, watertight, mm scale, snap to bed | trimesh / pymeshlab / pymeshfix |
+| Print | Discover Bambu printers on the LAN and send jobs | bambu-cli (optional) |
+| Manage | Conversation groups, project archive, model library, VRAM/temp monitor | built in |
 
----
+Reverse paths also work: upload a video to extract a frame, or upload a GLB to convert directly to STL.
 
-## Why not just wire up a ComfyUI graph?
-
-ComfyUI gives you models. ForgeForm gives you the **pipeline**:
-
-- **Conversation is the parameter panel.** "Make it smaller, the desk kind" becomes `size_mm=90`.
-  You never write a prompt template.
-- **It refuses to waste GPU.** A follow-up question does not trigger a render. Only "show me"
-  does. Autopilot can chain image → 3D after a 5-second grace period, and it can be cancelled.
-- **Images are generated for reconstruction, not for looks.** The prompt layer forces
-  single-object, plain-background, no-props constraints so the downstream model gets geometry,
-  not a pretty desk scene with a lamp in it.
-- **The STL is actually printable.** Every mesh passes a watertight gate: pymeshlab closes holes,
-  then `is_watertight` re-checks boundary edges, then pymeshfix runs if edges survive —
-  because "pymeshlab said it's closed" and "the slicer sees a solid" are different claims.
-- **VRAM yields itself.** Dialogue model, image model, 3D model and video model take turns on one
-  card. Each handoff unloads the previous one instead of OOM-ing.
-
-## Measured on a V100 32G (single card)
+## Measured (Tesla V100 32G, single card)
 
 | Step | Time |
 |---|---|
-| Image 1024², 20 steps | ≈ 56 s |
+| Image 1024², Qwen-Image-2.1, 20 steps | ≈ 56 s |
 | Image 1024², 30 steps (incl. zh→en translation) | ≈ 140–170 s |
-| 3D, fast / 256 octree | ≈ 160 s |
-| 3D, high / 512 octree | ≈ 8–10 min |
+| 3D Hunyuan3D 2.1, 256 octree | ≈ 160 s |
+| 3D Hunyuan3D 2.1, 512 octree | ≈ 8–10 min |
+| 3D Hunyuan3D 2mini (direct), 256 octree | 42 s load + 13 s inference |
 | STL export (200k → 80k faces) | ≈ 3–6 s |
-| Video 832×480 / 96 frames | ≈ 19 min |
 
-Four end-to-end runs (image → mesh → STL) are recorded in
-[`docs/showcase/`](docs/showcase/) — with per-object timings, face counts, watertightness,
-and a four-view render of the actual STL.
+Four end-to-end runs with per-object timings, face counts, watertightness and four-view STL renders:
+`docs/showcase/`
 
-## Requirements
-
-- **Windows 10/11** (PowerShell launchers; the Python side is portable, the print path is not)
-- **NVIDIA GPU** — 16 GB works with reduced settings, 24 GB+ recommended, 8 GB is image-only
-- **RAM** 32 GB+ (the video stage peaks around 46 GB)
-- **ComfyUI**, installed separately, with Hunyuan3D 2.x nodes for the 3D stage
-- A local LLM endpoint (llama.cpp / vLLM / Ollama) — optional, degrades to a rule-based mode
-
-## Install
+## Quick start
 
 ```powershell
 git clone https://github.com/TIANKONGskyy/forgeform.git
 cd forgeform
 pip install -r requirements.txt
 
-# point at your ComfyUI
-$env:COMFYUI_DIR  = "D:\ComfyUI"
-$env:COMFY_PYTHON = "D:\ComfyUI\python.exe"   # optional
+python tools/setup.py     # probes hardware and installed frameworks, recommends, installs
+python app.py             # → http://127.0.0.1:7860
+```
 
-# check what's missing (does not load models, takes seconds)
+`tools/setup.py` detects VRAM, RAM, disk, and any existing ComfyUI / Ollama / llama.cpp / vLLM /
+local diffusers models, then offers profiles:
+
+```
+Hardware: Tesla V100 32G (30 free) · 128 GB RAM · 166 GB disk
+Found:    ComfyUI(+3D), 2 local diffusers models, hy3dgen, chat service
+
+ ★ [1] Reuse existing ComfyUI (0 download)      0.0 GB · auto
+   [2] Minimal (SD1.5 + 3D 2mini)               8.2 GB · direct
+   [3] Recommended (Z-Image + 3D 2mini)        30.6 GB · auto
+```
+
+Also supports `--dry-run` (show only), `--custom` (pick models yourself), `--profile <name> --yes`.
+
+Then check the environment:
+
+```powershell
 python tools/doctor.py
-
-python app.py        # → http://127.0.0.1:7860
 ```
 
-`tools/doctor.py` checks Python, every dependency, the ComfyUI directory *and service*, your
-`config.json`, **whether each configured model file actually exists**, writable output dirs and
-the GPU — then prints a verdict. Run it first whenever something "doesn't work".
+## Requirements
 
-## Usage
+- Windows 10/11
+- NVIDIA GPU, 8 GB VRAM minimum, 16 GB+ for the full chain
+- 32 GB RAM recommended (direct 3D holds ~10.8 GB)
+- Python 3.11+
+- A local LLM endpoint (optional; falls back to rule-based mode)
 
-```python
-import sys; sys.path.insert(0, r"D:\forgeform")
-from backend.pipeline import Pipeline
+Per-VRAM capabilities and measured memory use: `docs/HARDWARE.md`
 
-pipe = Pipeline()
+## Models
 
-imgs = pipe.generate_images("a hexagonal flange coupling, single piece",
-                            count=1, model_key="qwen21_ref", quality_name="高质量")
-r    = pipe.generate_3d(model_key="hunyuan21", quality_name="高质量",
-                        image_path=imgs[0].output_path)
-s    = pipe.export_stl(r.output_path, target_size_mm=80)
-print(s.output_path)
-```
+Models are located by **filename** under the ComfyUI directory, or by `path` pointing at a local
+diffusers directory. Which file, where it goes, how big: `docs/MODELS.md`.
 
-`quality_name` is one of `快速` / `标准` / `高质量` / `极致`.
-`model_key` must match a key under `config.json → models.<stage>`.
+Swapping a model means editing one YAML under `plugins/image/*.yaml`, not code: `docs/PLUGINS.md`.
 
-## Swapping models
+## Backends
 
-Everything is configuration. `config.json → models.<stage>.<key>` holds per-model parameters;
-the `backend` field decides which workflow builder runs:
+Three modes via `config.json → backend.mode`:
 
-| Stage | `backend` | Notes |
-|---|---|---|
-| image | `flux` | FLUX family (flux1-dev / Klein / FLUX.2 / Z-Image all use this path) |
-| image | `qwen_image` | Qwen-Image, needs `clip_type: "qwen_image"`, supports reference-image i2i |
-| 3d | `hy21` | Hunyuan3D 2.1 — highest quality |
-| 3d | `multiview` | Hunyuan3D V2 multi-view — faster |
-| 3d | `comfy3d_pipeline` | ComfyUI-3D-Pack V2-Fast pipeline |
-| 3d | `native_comfyui` | TripoSplat and other native nodes |
-| video | `h3` | MiniMax H3 Ref2VA |
+| mode | Behaviour |
+|---|---|
+| `comfyui` | ComfyUI only (default) |
+| `direct` | diffusers / hy3dgen only, no ComfyUI |
+| `auto` | Probe the machine at startup, route each stage |
 
-Then set `stages.<stage>.default_model` to your new key. Weight files are referenced by
-**filename only**; put them where ComfyUI expects them and confirm the node's dropdown sees them
-before blaming ForgeForm.
+Details and measurements: `docs/BACKENDS.md`
 
-Full field-by-field documentation: [`docs/CONFIG.md`](docs/CONFIG.md) (Chinese).
+## Docs
 
-## What it can't do
-
-- **Parametric CAD.** Tolerances, threads and snap-fits need `parts_cad/` (CadQuery), not
-  image-to-3D. A flange that *looks* right is not a flange that *fits*.
-- **Thin shells, hair, cloth, openwork.** Single-image reconstruction breaks on these.
-- **Multi-part assemblies.** One object per run.
-- **One-shot success on hard shapes.** Expect 2–3 retries with a cleaner input image.
-- **Printer-ready guarantees.** The watertight gate fixes closure, not overhangs or thin walls.
-
-More on boundaries and per-VRAM recommended settings: [`docs/CONFIG.md`](docs/CONFIG.md).
-
-## For agents
-
-[`skills/forgeform/SKILL.md`](skills/forgeform/SKILL.md) is an
-[Agent Skills](https://agentskills.io)-compatible file that teaches an agent what this project is
-(and who made it), how to install it, how to drive it through `Pipeline`, how to swap models, and
-which failures have known root causes. Drop the folder into your agent's skills directory.
-
-```text
-Use skills/forgeform/SKILL.md. Start with python app.py → 127.0.0.1:7860;
-generate via backend.pipeline.Pipeline (generate_images / generate_3d / export_stl);
-model swaps are config-only — the backend field picks the workflow.
-```
+| File | Contents |
+|---|---|
+| `docs/HARDWARE.md` | Measured VRAM/RAM use, per-tier recommendations |
+| `docs/MODELS.md` | Download URLs, destinations, sizes |
+| `docs/CONFIG.md` | Configuration reference and per-VRAM profiles |
+| `docs/PLUGINS.md` | Model plugins (YAML) |
+| `docs/BACKENDS.md` | Three backends with measurements |
+| `docs/ARCHITECTURE.md` | Module responsibilities and core mechanisms |
+| `docs/DECISIONS.md` | D1–D10 design decisions |
+| `skills/forgeform/SKILL.md` | Agent skill file |
+| `CONTRIBUTING.md` / `SECURITY.md` | Contribution rules / security notes |
 
 ## Tests
 
 ```powershell
-python -m pytest          # 172 cases, ~40 s, no GPU, no ComfyUI
-python tools/verify.py    # 151 structural + behavioural assertions
+python -m pytest          # 207 cases, no GPU required
+python tools/verify.py    # 151 structural assertions
 ```
-
-The suite tests **pipeline contracts**, not pixels: button visibility vs. phase, output arity
-matching `ui_outputs`, autopilot not double-firing, state not leaking across conversations,
-numbers in the prompt not being rewritten by the LLM. Those bugs show up as "I clicked and
-nothing happened" — only source-level assertions catch them.
 
 ## License
 
-**AGPL-3.0**. Not a preference — a consequence. The watertight repair links `pymeshfix`
-(AGPL-3.0) and `pymeshlab` (GPL-3.0), both copyleft. Declaring a permissive license over that
-would be a sentence without legal effect.
+AGPL-3.0. The watertight repair step links `pymeshselab` (GPL-3.0) and `pymeshfix` (AGPL-3.0),
+which are copyleft. Models and prints you produce are yours; AGPL governs the software.
 
-Practical meaning: personal use, coursework, competitions, modifications, self-hosted team
-deployment — all fine, no permission needed. Exposing it as a paid public service requires
-publishing your modifications. Closed-source commercial distribution needs either a separate
-agreement or removal of those two dependencies (they are lazily imported behind try/except, so
-removing them degrades watertightness rather than breaking the app) — at which point the rest of
-the code can be relicensed under MIT/Apache-2.0.
-
-**Models and prints you make with it are yours.** AGPL governs the software, not its output.
-
-Third-party components and their licenses: [NOTICE](NOTICE).
+Third-party components: [NOTICE](NOTICE)
