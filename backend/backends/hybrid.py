@@ -22,6 +22,10 @@ import threading
 from . import MODE_HYBRID
 from . import detect as D
 
+# 探测结果只打印一次 —— 每次 `Pipeline()` 实例化都会新建一个 HybridBackend，
+# 一个进程里可能有 3-4 个（app 一个、脚本一个、自检一个），日志会刷好几遍同样五条。
+_LOGGED = False
+
 
 class HybridBackend:
     """按 stage 把请求分派给不同的实现。"""
@@ -42,8 +46,12 @@ class HybridBackend:
         # 探测（很快：只发 GET、2.5 秒超时、绝不拉起服务）
         self.frameworks = D.probe_all(comfy_dir=comfy_dir or None, hosts=self.hosts)
         self.plan = D.recommend(self.frameworks)
-        self._log("[hybrid] 探测结果:\n" + D.describe(self.frameworks))
-        self._log("[hybrid] 路由: " + ", ".join(f"{k}→{v}" for k, v in self.plan.items()))
+
+        global _LOGGED
+        if not _LOGGED:
+            _LOGGED = True
+            self._log("[hybrid] 探测结果:\n" + D.describe(self.frameworks))
+            self._log("[hybrid] 路由: " + ", ".join(f"{k}→{v}" for k, v in self.plan.items()))
 
         self._comfy = None
         self._direct = None
