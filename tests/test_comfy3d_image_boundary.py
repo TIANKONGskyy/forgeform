@@ -6,7 +6,10 @@ from PIL import Image
 
 class Comfy3DImageBoundaryTest(unittest.TestCase):
  def test_rgba_and_rgb_pixels_survive_tensor_to_pil(self):
-  import torch
+  try:
+   import torch
+  except Exception:
+   self.skipTest('torch not installed (CI)')
   import os
   base=os.environ.get('COMFYUI_DIR','')
   if not base:

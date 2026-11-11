@@ -104,7 +104,17 @@ class DirectBackendProtocolTest(unittest.TestCase):
         self.assertIn("ComfyUI", str(cm.exception))
 
     def test_is_running_true(self):
-        self.assertTrue(self.b.is_running())
+        """is_running() 的语义就是"torch 能否 import"。
+
+        CI 不装 torch（它有几个 GB，测试用不到），所以这里断言的是
+        "结果与实际环境一致"，而不是硬要求 True —— 硬要求会让 CI 永远红。
+        """
+        try:
+            import torch  # noqa: F401
+            has_torch = True
+        except Exception:
+            has_torch = False
+        self.assertEqual(self.b.is_running(), has_torch)
 
     def test_model_pick_falls_back_to_first(self):
         key, cfg = self.b._pick("image", {"model_key": "不存在的key"})
