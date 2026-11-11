@@ -66,8 +66,29 @@
 | 阶段 | 直连（direct） | 依赖 |
 |---|---|---|
 | 出图 | ✅ **端到端已验证** | `diffusers`（原生支持 Flux / Qwen-Image / Z-Image，实测 0.39.0 全有） |
-| 3D | ⚠️ 代码就绪，权重待装 | `hy3dgen`（PyPI 有 2.0.2，`pip install hy3dgen` 已通） |
+| 3D | ⚠️ 代码就绪，但**用不了 ComfyUI 那套权重** | `hy3dgen`（PyPI 有 2.0.2，`pip install hy3dgen` 已通） |
 | 视频 | ❌ 不支持 | MiniMax H3 只有 ComfyUI 节点实现，没有独立 pipeline |
+
+### 3D 这条线：auto 会用本地权重，direct 不会
+
+实测（2026-11-11）：用 `auto` 模式跑完整 3D，`plan = {'image': 'comfyui', 'mesh': 'comfyui', 'text': 'ollama'}`，
+走的是 ComfyUI + 本地 Hunyuan3D 2.1 权重，**没有下载任何东西**：
+
+```
+[hybrid] 路由: image→comfyui, mesh→comfyui, text→ollama
+[3d] success=True
+[3d] faces=200000 vertices=99988 watertight=True bbox=[1.99, 1.91, 0.75]
+[stl] success=True  → model_1794387020_optimized.stl (80000 faces, 80mm)
+[done] 总耗时 412.7s
+```
+
+**为什么不让 direct 也用它**：本机那两个 Hunyuan3D 权重是 ComfyUI 重打包格式
+（`conditioner.* / model.* / vae.*`，`model` 下是 `blocks.N.*`），而 hy3dgen 要的是
+`config.yaml` + `double_blocks.* / single_blocks.*`。层名和结构定义都对不上，
+不是改文件名能解决的 —— 详见 [MODELS.md](MODELS.md) 的「3D 权重不能跨框架互换」。
+
+所以 `auto` 的价值在这：**有 ComfyUI 就用它跑 3D，不重复下另一套 3 GB 权重**。
+真要走直连 3D，得下 `tencent/Hunyuan3D-2mini`（3 GB，hy3dgen 认的目录结构）。
 
 ### 出图这条线的实测（2026-11-11，V100 32G）
 

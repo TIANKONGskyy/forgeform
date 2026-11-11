@@ -183,3 +183,42 @@ python tools/doctor.py
 - **14B 以上的文本编码器不要把 `--lowvram` 当救命药**。V100/sm_70 上它会让采样阶段崩
   （`CUDA error: operation not supported`）。宁可换小一点的量化版。
 - **磁盘**：完整档 100 GB 只是权重，加上 ComfyUI 输出和 `projects/`，留 200 GB 才舒服。
+
+---
+
+## 3D 权重不能跨框架互换（实测）
+
+这条值得单独写，因为很容易想当然。
+
+**ComfyUI 那套 3D 权重，hy3dgen（直连模式）用不了。**
+
+| 文件 | 实际结构 | hy3dgen 期望 |
+|---|---|---|
+| `checkpoints/hunyuan_3d_v2.1.safetensors` | 1601 条：`conditioner.*`(439) + `model.*`(752) + `vae.*`(410) | `config.yaml` + `model.fp16.safetensors` |
+| `diffusion_models/hunyuan3d-dit-v2-1_fp16.ckpt` | 同样三个子 dict，`model` 下是 `blocks.N.*` | 顶层 `double_blocks.*` / `single_blocks.*` |
+| `models/diffusers/hunyuan3d-paintpbr/` | ✅ 真是 diffusers 格式，但只有 paint（贴图） | shapegen 用它跑不了 |
+
+具体对不上在哪：
+
+```
+ComfyUI 重打包            hy3dgen 原版
+model.blocks.0.attn.*  ≠  double_blocks.0.attn.*
+model.x_embedder.*     ≈  x_embedder.*        （名字对得上）
+```
+
+层名不同 + 缺 `config.yaml`（hy3dgen 从 yaml 读 hidden_size/depth 等结构参数，
+默认值是 `hidden_size=1024`，而 v2.1 的 `x_embedder.weight` 是 `(2048, 64)`，差一倍）。
+**不是改个文件名能解决的**，得做权重映射 + 结构推断，成本比下载还高。
+
+所以：
+
+- **想用 ComfyUI 的 3D 权重** → `backend.mode = comfyui`（或 `auto`，它会自动选 ComfyUI）
+- **想用直连 3D** → 必须下 `tencent/Hunyuan3D-2mini`（3 GB）或 `-2.1`（更大），
+  它们才是 hy3dgen 认的目录结构：
+
+```powershell
+python tools/fetch_model.py --repo tencent/Hunyuan3D-2mini `
+    --dest D:/models/hunyuan3d-2mini --threads 8
+```
+
+`auto` 模式的意义就在这：**有 ComfyUI 就用它跑 3D，不重复下载另一套权重**。
