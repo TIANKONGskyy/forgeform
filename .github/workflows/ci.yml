@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
       - name: Run test suite
         # 这些测试不加载模型、不连 ComfyUI；缺外部资源的用例会自己 skip

@@ -1,0 +1,5 @@
+# 开发/测试依赖（CI 和本地跑测试用）
+# 用法：pip install -r requirements-dev.txt
+-r requirements.txt
+
+pytest>=8.0
