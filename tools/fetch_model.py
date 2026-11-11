@@ -43,30 +43,55 @@ def _get(url: str, timeout: int = 30) -> bytes:
 
 
 def list_files(repo: str, base: str) -> list[tuple[str, int]]:
-    """返回 [(rfilename, size)]。HF 的 tree API 一次给 1000 个，够用。"""
+    """返回 [(rfilename, size)]。
+
+    HF 的 tree API 有的镜像不支持 expand / recursive 参数，会直接 400；
+    所以逐个降级，最后回落到 `/api/models/<repo>` 的 siblings（只有名字、没有大小）。
+    """
     api = f"{base}/api/models/{repo}/tree/main"
-    try:
-        data = json.loads(_get(f"{api}?recursive=true&expand=true"))
-    except Exception:
-        # 有些镜像不带 expand，退化成逐个 HEAD（慢但能用）
-        data = json.loads(_get(f"{api}?recursive=true"))
-    out = []
-    for item in data:
-        if item.get("type") != "file":
+    last = None
+    for qs in ("?recursive=true&expand=true", "?recursive=true", ""):
+        try:
+            data = json.loads(_get(f"{api}{qs}"))
+            if not isinstance(data, list):
+                raise ValueError("不是文件列表")
+            out = []
+            for item in data:
+                if item.get("type") != "file":
+                    continue
+                size = item.get("size") or (item.get("lfs") or {}).get("size") or 0
+                out.append((item["path"], int(size)))
+            if out:
+                return out
+        except Exception as exc:
+            last = exc
             continue
-        size = item.get("size") or (item.get("lfs") or {}).get("size") or 0
-        out.append((item["path"], int(size)))
-    return out
+
+    # 最后一条路：siblings（只有文件名，大小靠下载时 HEAD 补）
+    try:
+        info = json.loads(_get(f"{base}/api/models/{repo}"))
+        sib = info.get("siblings") or []
+        out = [(s["rfilename"], 0) for s in sib if s.get("rfilename")]
+        if out:
+            print(f"  (用 siblings 列表，{len(out)} 个文件，大小未知)")
+            return out
+    except Exception as exc:
+        last = exc
+
+    raise RuntimeError(f"列文件失败: {last}")
 
 
 def probe_mirrors(repo: str, timeout: int = 8) -> tuple[str, float]:
-    """挑一个能通、响应最快的镜像。返回 (base_url, 秒)。"""
-    probe = f"{repo}/resolve/main/model_index.json"
+    """挑一个能通、响应最快的镜像。返回 (base_url, 秒)。
+
+    探的是 `/api/models/<repo>`，不是某个具体文件 —— 仓库里不一定有 model_index.json
+    （hy3dgen 那种格式就没有），拿文件探测会把好镜像误判成不可用。
+    """
     best, best_t = "", 999.0
     for name, base in MIRRORS.items():
         t0 = time.time()
         try:
-            _get(f"{base}/{probe}", timeout=timeout)
+            _get(f"{base}/api/models/{repo}", timeout=timeout)
             dt = time.time() - t0
             print(f"  [{name}] {base}  {dt*1000:.0f} ms")
             if dt < best_t:
