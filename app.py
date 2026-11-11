@@ -631,6 +631,229 @@ textarea:focus, input[type="text"]:focus {
 *::-webkit-scrollbar-thumb { background: #1b2740; }
 *::-webkit-scrollbar-thumb:hover { background: #26385c; }
 
+
+
+/* ═══ APP 化布局：单列、顶部栏吸附、输入条固定底部 ═══
+   目标是把浏览器里的宽表格布局收成手机 App 的形状：
+   一个 480px 的内容列居中，头/输入条吸附，侧栏收成抽屉。
+   只动布局和尺寸，不动任何组件的显隐逻辑（_buttons_for_phase 仍然说了算）。 */
+
+html, body { height: 100%; }
+body, .gradio-container { min-height: 100vh; }
+.gradio-container {
+    max-width: 520px !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    min-height: 100vh;
+    position: relative;
+    box-shadow: 0 0 0 1px var(--line), 0 40px 120px -60px rgba(0,0,0,.95);
+}
+@media (max-width: 560px) {
+    .gradio-container { max-width: 100% !important; box-shadow: none; }
+}
+
+/* 顶部栏 */
+.navbar {
+    position: sticky !important; top: 0; z-index: 60;
+    margin: 0 !important; padding: 8px 12px !important;
+    border-bottom: 1px solid var(--line) !important;
+    background: rgba(7,11,22,.86) !important;
+    backdrop-filter: blur(14px);
+    align-items: center !important;
+}
+.navbar .nav-logo { font-size: 14px !important; }
+
+/* 主区：改成单列 */
+.main-wrap { flex-direction: column !important; gap: 0 !important; }
+.chat-col { min-width: 0 !important; width: 100% !important; max-width: 100% !important; gap: 0 !important; }
+.side-col {
+    display: none !important;      /* 窄屏先收起来，防止把主区挤窄 */
+}
+
+/* 对话区占满、可滚 */
+.chat-col > .block:first-of-type,
+#chatbox {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 6px 12px !important;
+}
+.chat-col { display: flex; flex-direction: column; height: calc(100vh - 56px); }
+
+/* 输入条固定底部 */
+.input-row-chat {
+    position: sticky !important; bottom: 0; z-index: 55;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom)) !important;
+    margin: 0 !important;
+    background: rgba(7,11,22,.9) !important;
+    backdrop-filter: blur(14px);
+    border-top: 1px solid var(--line) !important;
+    gap: 8px !important;
+}
+.input-row-chat textarea {
+    border-radius: 999px !important;
+    padding: 11px 16px !important;
+    min-height: 44px !important;
+    resize: none !important;
+}
+#send_btn {
+    border-radius: 999px !important;
+    min-width: 44px !important; width: 44px;
+    height: 44px !important; min-height: 44px !important;
+    font-size: 0 !important;             /* 藏掉文字，只留图形 */
+    position: relative;
+}
+#send_btn::after {
+    content: "↑"; font-size: 18px; font-weight: 700;
+    position: absolute; inset: 0; display: grid; place-items: center;
+}
+
+/* 动作条（生成图片 / 建模 / 导出 STL）做成胶囊 */
+.action-bar {
+    padding: 0 12px 8px !important;
+    margin: 0 !important;
+    gap: 8px !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+}
+.action-bar button {
+    border-radius: 999px !important;
+    padding: 9px 14px !important;
+    font-size: 12.5px !important;
+    white-space: nowrap;
+}
+
+/* 上传/改写那一行压低存在感 */
+.input-row-upload {
+    padding: 0 12px 6px !important;
+    margin: 0 !important;
+    gap: 8px !important;
+    opacity: .92;
+}
+.input-row-upload button {
+    border-radius: 999px !important; font-size: 12px !important; padding: 7px 12px !important;
+}
+
+/* 对话气泡圆角化 */
+#chatbox .message, #chatbox .bubble {
+    border-radius: 18px !important;
+    border: 1px solid var(--line) !important;
+    background: linear-gradient(180deg, rgba(16,25,43,.95), rgba(8,13,24,.96)) !important;
+}
+#chatbox .user, #chatbox .message.user {
+    border-color: rgba(86,224,255,.28) !important;
+    background: linear-gradient(135deg, rgba(34,200,245,.16), rgba(122,102,245,.16)) !important;
+}
+
+
+
+/* ── 修正：视口高度、侧栏彻底隐藏、顶部栏不截断 ── */
+body {
+    background-attachment: fixed;
+    min-height: 100dvh;
+}
+.gradio-container {
+    display: flex; flex-direction: column;
+    height: 100dvh; min-height: 100dvh;
+    overflow: hidden;
+}
+
+/* 顶部栏里的下拉要能被压缩，不然品牌名被挤掉 */
+.navbar > * { min-width: 0 !important; }
+.navbar .nav-logo { flex: 0 0 auto !important; white-space: nowrap; }
+.navbar #history_dd, .navbar .block:has(#history_dd) { flex: 1 1 auto !important; min-width: 0 !important; }
+.navbar #history_dd input, .navbar select { font-size: 12px !important; }
+
+/* 主区撑满剩余高度 */
+.main-wrap {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+    overflow: hidden !important;
+}
+.gradio-container .side-col { display: none !important; }
+
+.chat-col {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+}
+#chatbox {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+}
+.input-row-chat, .input-row-upload, .action-bar {
+    flex: 0 0 auto !important;
+    position: static !important;
+}
+
+
+
+/* ── 最终布局：底部输入用 fixed 钉死，主区留出等高的底部内边距 ──
+   为什么不用 sticky：Gradio 的 .contain / .wrap / .main 是三层 flex，
+   sticky 会被中间那层的 overflow 重置，表现是"输入条跑到屏幕外"。 */
+
+.input-row-chat {
+    position: fixed !important;
+    left: 50% !important; transform: translateX(-50%) !important;
+    bottom: 0 !important;
+    width: min(520px, 100vw) !important;
+    max-width: 520px !important;
+    margin: 0 !important;
+    padding: 10px 14px calc(12px + env(safe-area-inset-bottom)) !important;
+    background: rgba(7,11,22,.94) !important;
+    backdrop-filter: blur(16px);
+    border-top: 1px solid var(--line) !important;
+    z-index: 80 !important;
+    gap: 10px !important;
+}
+.input-row-upload {
+    position: fixed !important;
+    left: 50% !important; transform: translateX(-50%) !important;
+    bottom: calc(66px + env(safe-area-inset-bottom)) !important;
+    width: min(520px, 100vw) !important;
+    max-width: 520px !important;
+    margin: 0 !important;
+    padding: 6px 14px !important;
+    background: rgba(7,11,22,.9) !important;
+    backdrop-filter: blur(16px);
+    z-index: 79 !important;
+    gap: 8px !important;
+}
+.action-bar {
+    position: fixed !important;
+    left: 50% !important; transform: translateX(-50%) !important;
+    bottom: calc(108px + env(safe-area-inset-bottom)) !important;
+    width: min(520px, 100vw) !important;
+    max-width: 520px !important;
+    margin: 0 !important;
+    padding: 6px 14px !important;
+    background: linear-gradient(180deg, rgba(7,11,22,0) 0%, rgba(7,11,22,.9) 30%) !important;
+    z-index: 78 !important;
+}
+
+/* 给固定的三条让出高度，否则最后一条消息被盖住 */
+.chat-col { padding-bottom: 168px !important; }
+#chatbox { padding-bottom: 8px !important; }
+
+/* 顶部栏固定在顶，内容从它下面开始 */
+.navbar {
+    position: fixed !important; top: 0 !important; left: 50% !important;
+    transform: translateX(-50%) !important;
+    width: min(520px, 100vw) !important; max-width: 520px !important;
+    z-index: 90 !important;
+}
+.chat-col { padding-top: 58px !important; }
+
+/* 品牌名在窄屏只留两个字 */
+/* 品牌名已直接改成「铸想」，不再依赖 CSS 伪元素（伪元素在 flex 里不稳定） */
+
 """
 
 
@@ -1361,7 +1584,7 @@ def build():
         # ── 顶部导航条 ──────────────────────────────────
         with gr.Row(elem_classes="navbar"):
             gr.HTML(
-                '<div class="nav-logo"><span class="dot"></span>铸想 ForgeForm</div>'
+                '<div class="nav-logo"><span class="dot"></span>铸想</div>'
             )
             history_dd = gr.Dropdown(
                 choices=hist_choices,
