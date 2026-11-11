@@ -69,7 +69,7 @@ python tools/doctor.py
 - Windows 10/11
 - NVIDIA GPU, 8 GB VRAM minimum, 16 GB+ for the full chain
 - 32 GB RAM recommended (direct 3D holds ~10.8 GB)
-- Python 3.11+
+- Python 3.11–3.13
 - A local LLM endpoint (optional; falls back to rule-based mode)
 
 Per-VRAM capabilities and measured memory use: `docs/HARDWARE.md`

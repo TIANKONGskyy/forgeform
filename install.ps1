@@ -43,8 +43,10 @@ if (-not $py) {
 }
 $pyVer = (& python -c "import sys;print('%d.%d'%sys.version_info[:2])").Trim()
 Say "python $pyVer  ($($py.Source))"
-if ([version]$pyVer -lt [version]'3.11') {
-    Say "Python >= 3.11 required, got $pyVer" 'Red'
+# 3.14+ has no numpy/pymeshlab wheels yet -> pip dies with "No matching distribution".
+if (([version]$pyVer -lt [version]'3.11') -or ([version]$pyVer -ge [version]'3.14')) {
+    Say "Python $pyVer is not supported - need 3.11, 3.12 or 3.13." 'Red'
+    Say 'Install Python 3.12: https://www.python.org/downloads/release/python-3129/' 'Yellow'
     exit 1
 }
 

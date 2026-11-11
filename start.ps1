@@ -29,21 +29,46 @@ Say "folder: $root"
 Say ''
 
 # ── 1. python ──────────────────────────────────────────────
-$py = Get-Command python -ErrorAction SilentlyContinue
-if (-not $py) {
-    Say 'python not found on PATH.' 'Red'
-    Say 'Install Python 3.11 or newer first, tick "Add python.exe to PATH":' 'Yellow'
-    Say '  https://www.python.org/downloads/' 'Yellow'
+# Prefer the py launcher: a machine can have 3.15 on PATH and 3.12 installed beside it,
+# and only 3.12/3.13 have numpy/pymeshlab wheels. Trying `py -3.12` first saves the user
+# from having to fix PATH by hand.
+$pyExe = $null
+$pyVer = $null
+$launcher = Get-Command py -ErrorAction SilentlyContinue
+if ($launcher) {
+    foreach ($v in @('3.12', '3.13', '3.11')) {
+        $cand = & py "-$v" -c "import sys;print(sys.executable)" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $cand) {
+            $pyExe = $cand.Trim()
+            $pyVer = $v
+            Say "found python $v via py launcher: $pyExe" 'Green'
+            break
+        }
+    }
+}
+if (-not $pyExe) {
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) {
+        Say 'python not found.' 'Red'
+        Say 'Install Python 3.12 (tick "Add python.exe to PATH"):' 'Yellow'
+        Say '  https://www.python.org/downloads/release/python-3129/' 'Yellow'
+        Read-Host 'Press Enter to close'
+        exit 1
+    }
+    $pyExe = $py.Source
+    $pyVer = (& python -c "import sys;print('%d.%d'%sys.version_info[:2])").Trim()
+}
+# Upper bound matters: pymeshlab / numpy wheels stop at cp313, so a 3.14+ interpreter
+# fails at pip with "No matching distribution found for pymeshlab". Seen on a 3.15.
+if (([version]$pyVer -lt [version]'3.11') -or ([version]$pyVer -ge [version]'3.14')) {
+    Say "Python $pyVer is not supported - need 3.11, 3.12 or 3.13." 'Red'
+    Say 'Newer Pythons have no numpy/pymeshlab wheels yet.' 'Yellow'
+    Say 'Install 3.12 (tick "Add python.exe to PATH"), then run this again:' 'Yellow'
+    Say '  https://www.python.org/downloads/release/python-3129/' 'Yellow'
     Read-Host 'Press Enter to close'
     exit 1
 }
-$pyVer = (& python -c "import sys;print('%d.%d'%sys.version_info[:2])").Trim()
-if ([version]$pyVer -lt [version]'3.11') {
-    Say "Python 3.11+ required, got $pyVer" 'Red'
-    Read-Host 'Press Enter to close'
-    exit 1
-}
-Say "python $pyVer  ok" 'Green'
+Say "python $pyVer  ok  ($pyExe)" 'Green'
 
 # ── 2. venv + deps ─────────────────────────────────────────
 $venv = Join-Path $root '.venv'
@@ -58,7 +83,7 @@ if ($Reinstall -and (Test-Path $venv)) {
 if (-not (Test-Path $venvPy)) {
     Say ''
     Btn '[1/2] first run: creating .venv (about 10s)'
-    & python -m venv $venv
+    & $pyExe -m venv $venv
     if ($LASTEXITCODE -ne 0) { Say 'venv creation failed' 'Red'; Read-Host 'Enter'; exit 1 }
 }
 

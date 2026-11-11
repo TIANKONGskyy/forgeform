@@ -94,7 +94,7 @@ python tools/doctor.py
 - Windows 10/11
 - NVIDIA GPU，8 GB 显存起步，16 GB 以上能跑完整链路
 - 内存 32 GB 建议（直连 3D 时模型自身占 10.8 GB）
-- Python 3.11+
+- Python 3.11–3.13
 - 一个本地 LLM 端点（可选，没有则降级成规则模式）
 
 各显存档位能跑什么、实测占用多少：`docs/HARDWARE.md`
