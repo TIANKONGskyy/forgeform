@@ -222,3 +222,60 @@ python tools/bench_lowend.py --vram 6 --ram 10
 
 内存限制用 Windows Job Object（`ProcessMemoryLimit`），显存限制用
 `torch.cuda.set_per_process_memory_fraction`。
+
+---
+
+## TripoSR 0.5B —— 试过，不通
+
+思路：Hunyuan3D 2mini 的 3.6 GB 权重在 10 GB 内存限制下加载就崩。
+换一个更小的模型试试。TripoSR 是 0.5B（**1.56 GB 权重**），比 2mini 小一半多，
+而且是**直接输出网格**（不是高斯点云，不需要额外转换）。
+
+### 已经解决的障碍
+
+| 障碍 | 处理 |
+|---|---|
+| `torchmcubes` 装不上（PyPI 没有 wheel，要编译） | 用 `skimage.measure.marching_cubes` 顶替，接口兼容。已验证能跑（球体测试 1608 顶点 / 3212 面） |
+| 权重下载 | `stabilityai/TripoSR` 的 `model.ckpt`（1.6 GB）+ `config.yaml`（987 B） |
+| 图像编码器 | `facebook/dino-vitb16` 的 `pytorch_model.bin`（327 MB） |
+
+### 卡住的地方
+
+```
+RuntimeError: Error(s) in loading state_dict for TSR:
+    Missing key(s): "image_tokenizer.model.layers.0.attention.q_proj.weight", ...
+```
+
+**根因：transformers 版本不匹配。**
+
+TripoSR 的 ckpt 是 2024 年用 transformers 4.x 训的，参数名是：
+
+```
+image_tokenizer.model.encoder.layer.0.attention.attention.query.weight
+```
+
+本机 transformers 是 **v5.14**，DINO 的层名改成了：
+
+```
+image_tokenizer.model.layers.0.attention.q_proj.weight
+```
+
+两套命名完全不同（不只是前缀，是整个模块层级都改了）。
+
+### 为什么没继续修
+
+两条路都不划算：
+
+1. **降 transformers 到 4.x** —— 会连带影响 ComfyUI 和铸想自己的出图管线
+2. **手写 key 映射** —— 549 个参数要逐个映射，而且 DINO 的模块结构本身也变了（不只是改名），
+   映射完不一定能对上
+
+按"行不通的就不用"，这条路到此为止。
+
+### 结论
+
+**更小的 3D 模型这条路暂时走不通** —— 不是模型太大，是它的加载代码绑定了旧的 transformers。
+
+要用的话得把那套依赖单独隔离（独立虚拟环境），成本和收益不成比例。
+
+**8 GB 显存 / 16 GB 内存的机器，建模这条路当前没有可行方案。**
