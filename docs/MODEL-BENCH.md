@@ -79,9 +79,26 @@ hexagonal cross-section"），仍然不稳。这是扩散模型对几何形容�
   `D:\ComfyUI-New\models\facebook\dinov3-vitl16-pretrain-lvd1689m`（1.21 GB）。
 - ComfyUI 当前 0.37.2 正常，V100 32G 空闲约 32 GB。
 
-**仍未完成**：把 `example_workflows/MeshOnly.json`（UI 格式）转成
-`/prompt` API 格式并真跑一次，记录耗时、面数、连通块。  
-在跑完之前，TRELLIS.2 仍然只是"环境就绪，未验收"，不能写成已支持。
+**2026-11-12 端到端尝试（未成功）**
+
+用最小 API 图真跑：
+
+```text
+LoadImage → Trellis2LoadModel → Trellis2MeshWithVoxelGenerator
+→ Trellis2MeshWithVoxelToTrimesh → Trellis2ExportMesh
+```
+
+三次结果：
+
+| 后端 | 结果 |
+|---|---|
+| `backend=xformers` | `ModuleNotFoundError: No module named 'xformers'` |
+| `backend=sdpa` + `conv_backend=flex_gemm`（tiled decoder） | 跑到 decoder 后 `RuntimeError: Trying to create tensor with negative dimension -1292174453`，崩溃点在 `flex_gemm/ops/spconv/submanifold_conv3d.py` |
+| `backend=sdpa`，`use_tiled_decoder=false` | 更早失败：`CUDA error: no kernel image is available for execution on the device` |
+
+结论：**这台 V100（sm_70）跑不了当前安装的 FlexGEMM**。  
+不是权重问题，也不是参数问题；需要给 sm_70 重新编译 FlexGEMM，或换 spconv/torchsparse 后端后再测。  
+在解决之前，TRELLIS.2 仍然不能写成“已支持”。
 
 ---
 
