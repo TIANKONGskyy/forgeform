@@ -210,20 +210,29 @@ def _ollama_install_download() -> Download:
 # 但下载量不等于"这台机器能跑" —— 选型要同时看：有没有 ComfyUI、显存多少。
 _MESH_CHOICES = [
     # (id, 需要的最低显存, 需要的条件, 说明)
-    ("hunyuan21", 16, "comfyui", "复用已有 ComfyUI 3D-Pack"),
+    ("hunyuan21", 8, "comfyui", "复用已有 ComfyUI 3D-Pack（显存不够时它能自己 offload）"),
     ("trellis2", 16, "any", "尚未接入 TRELLIS 运行时，暂不可用"),
     ("trellis2_gguf", 8, "any", "尚未接入 GGUF 运行时，暂不可用"),
     ("hunyuan_mini", 7, "any", "Hunyuan3D-2mini，支持直连建模"),
 ]
 
 
-def pick_mesh(assets: dict, vram_gb: float) -> tuple[str, str]:
-    """按"有没有 ComfyUI + 显存"挑建模模型。返回 (id, 说明)。
+def pick_mesh(assets: dict, vram_gb: float, ram_gb: float = 0.0) -> tuple[str, str]:
+    """按"有没有 ComfyUI + 显存 + 内存"挑建模模型。返回 (id, 说明)。
 
     顺序是有意的：ComfyUI 已经装了 3D-Pack 就用它（零下载、最稳），
-    否则才考虑直连的 TRELLIS.2，最后退到 2mini。
+    否则才考虑直连，最后退到 2mini。
+
+    ⚠️ 内存 < 20 GB 时**不能**选直连：实测 2mini 加载峰值 RSS 10.8 GB，
+    限制到 10 GB 时直接 `DefaultCPUAllocator: not enough memory` 崩掉
+    （见 docs/MODEL-BENCH.md 的低配实测）。hy3dgen 的加载是
+    `load_file(device='cpu')` 一次性读整份权重，没有 offload 可用
+    —— 它的 pipeline 不是 diffusers 的 DiffusionPipeline，不吃 enable_model_cpu_offload。
+
+    TRELLIS.2 的 runtime adapter 还没实现，所以仍然排除。
     """
     has_comfy3d = bool(assets.get("comfyui_3d"))
+    small_ram = 0 < ram_gb < 20
     for mid, need_vram, need, why in _MESH_CHOICES:
         if mid.startswith("trellis"):
             continue  # Runtime adapters are not implemented.
@@ -231,7 +240,16 @@ def pick_mesh(assets: dict, vram_gb: float) -> tuple[str, str]:
             continue
         if vram_gb < need_vram:
             continue
+        if small_ram and need != "comfyui":
+            # 小内存机器只允许走 ComfyUI（分层加载，峰值低）。
+            # 注意别把这个条件写成无差别的 `if small_ram: continue` ——
+            # 那会把 ComfyUI 本身也跳过，结果 8G/16G 有 ComfyUI 的机器
+            # 反而被推荐直连的 2mini，正好是要避免的那条路。
+            continue
         return mid, why
+    if small_ram and not has_comfy3d:
+        return "hunyuan_mini", ("内存 < 20 GB 且没有 ComfyUI：直连建模会在加载阶段内存不足，"
+                                "建议先只做出图，或装 ComfyUI 再建模")
     return "hunyuan_mini", "显存有限，用最小的 2mini（3.6 GB 权重）"
 
 

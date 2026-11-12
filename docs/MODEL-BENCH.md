@@ -153,6 +153,24 @@ python tools/bench_mesh.py --image outputs/images/<最新那张>.png
 
 **别指望在 16 GB 内存的笔记本上跑通全链路** —— 这不是配置问题，是内存物理不够。
 
+### 试过的绕法（都行不通）
+
+| 思路 | 结果 |
+|---|---|
+| 把权重直接加载到显存（`load_file(device='cuda')`） | 进程崩（0xC0000005）。3.6 GB 权重 + CUDA context 在 6 GB 限制下放不下 |
+| 用 diffusers 的 `enable_model_cpu_offload` | 用不上 —— hy3dgen 的 pipeline 继承自 `object`，不是 `diffusers.DiffusionPipeline`，没有 offload 接口 |
+| 下 `OzzyGT/hunyuan3d_2mini_fast`（diffusers 格式） | 它缺 `model_index.json`，而且是给自定义 loader 用的，hy3dgen 不认 |
+| TRELLIS.2 GGUF q4（约 2 GB） | 包未接入（runtime adapter 没实现），`pick_mesh` 里已排除 |
+
+### 唯一可行的：ComfyUI
+
+ComfyUI 的加载是**分层**的，不会一次把整份权重读进内存。所以：
+
+- **8 GB 显存 + 16 GB 内存 + 有 ComfyUI** → 推荐 `hunyuan21`（它自己会 offload）
+- **8 GB 显存 + 16 GB 内存 + 没有 ComfyUI** → 推荐会直接告诉你「直连建模会内存不足，先只做出图」
+
+这个判断已经写进 `pick_mesh()`（内存 < 20 GB 时排除直连）。
+
 ### 复现
 
 ```powershell
