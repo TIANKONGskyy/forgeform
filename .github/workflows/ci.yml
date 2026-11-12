@@ -41,3 +41,11 @@ jobs:
       - name: Run repo guards
         # 结构契约断言（按钮/返回值元数/路径不写死本机目录等）
         run: python tools/verify.py --fast
+
+      - name: Audit dependencies
+        # 只报告已知 CVE，不阻断构建 —— 上游依赖的漏洞不该让这个仓库的 CI 变红。
+        # 想强制失败就把 --strict 挂上去。
+        continue-on-error: true
+        run: |
+          python -m pip install pip-audit
+          pip-audit -r requirements.txt

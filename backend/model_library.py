@@ -63,10 +63,40 @@ def publish(
     description: str = "",
     tags: str = "",
 ) -> dict:
-    """把 STL/GLB 文件发布到本地模型库"""
+    """把 STL/GLB 文件发布到本地模型库。
+
+    安全约束（2026-11-12 补）：
+      · 只允许发布 outputs/ 目录下的文件 —— 否则 publish 能把 C:\Windows\... 之类
+        的系统文件复制进模型库，再通过 /model-library/file/{id} 读出来。
+        这个接口有 token 保护，但 token 只该是"防误触"，不该是唯一一道门。
+      · 只允许 3D 模型扩展名 —— 免得把 .exe / .dll / .pem 塞进公开可下载的目录。
+      · 单文件上限 200 MB —— 防磁盘写满。
+    """
     p = Path(file_path)
     if not p.exists():
         return {"ok": False, "error": f"文件不存在: {file_path}"}
+    if not p.is_file():
+        return {"ok": False, "error": "只能发布文件，不能是目录"}
+
+    allowed_ext = {".stl", ".glb", ".gltf", ".3mf", ".obj", ".ply"}
+    if p.suffix.lower() not in allowed_ext:
+        return {"ok": False,
+                "error": f"不支持的类型 {p.suffix or '(无扩展名)'}，只允许 "
+                         f"{', '.join(sorted(allowed_ext))}"}
+
+    # 必须落在 outputs/ 里（resolve 后比较，符号链接和 ../ 都会露馅）
+    try:
+        outputs = (Path(__file__).parent.parent / "outputs").resolve()
+        real = p.resolve()
+        real.relative_to(outputs)
+    except (ValueError, OSError):
+        return {"ok": False,
+                "error": "只允许发布 outputs/ 目录下的文件"}
+
+    MAX_MB = 200
+    size_mb = p.stat().st_size / (1024 ** 2)
+    if size_mb > MAX_MB:
+        return {"ok": False, "error": f"文件 {size_mb:.0f} MB 超过 {MAX_MB} MB 上限"}
 
     fid = hashlib.md5(f"{p.name}{time.time()}".encode()).hexdigest()[:12]
     ext = p.suffix.lower()

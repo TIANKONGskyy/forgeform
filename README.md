@@ -4,6 +4,8 @@
 
 本地跑完整链路：LLM 解析需求 → 出图 → 图生 3D → 修水密 → 导出毫米级 STL。不调云端 API。
 
+**官网 / 在线试用**：[zykt.space/foundry](https://zykt.space/foundry) · 作者：[ZYKT studio](https://zykt.space)
+
 <img src="docs/assets/hero.jpg" width="340" align="right" alt="铸想生成的产品图" />
 
 <br clear="right" />

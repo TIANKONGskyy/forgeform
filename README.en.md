@@ -2,6 +2,8 @@
 
 One sentence in, one printable STL out.
 
+**Website / live demo**: [zykt.space/foundry](https://zykt.space/foundry) · By [ZYKT studio](https://zykt.space)
+
 Runs the whole chain locally: LLM parses the request → generate an image → image-to-3D → seal the mesh → export a millimetre-scale STL. No cloud API.
 
 <img src="docs/assets/showcase-grid.jpg" width="560" alt="Four objects generated from four prompts" />
