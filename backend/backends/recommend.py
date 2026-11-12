@@ -221,7 +221,13 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             est_gb=0.0,
             fits=True,
             reason="已有可用的出图 + 3D 能力，重新下载是浪费",
-            config_patch={"backend": {"mode": "auto"}},
+            # 必须把 image / 3d 的默认模型也写进去 —— 只写 backend.mode 的话
+            # config 里 stages.3d.default_model 是空的，界面进去点建模会不知道用哪个。
+            config_patch={
+                "backend": {"mode": "auto"},
+                "stages": {"image": {"default_model": "qwen21_ref"},
+                           "3d": {"default_model": "hunyuan21"}},
+            },
         ))
 
     # ── 按显存分档的直连方案 ──
