@@ -136,6 +136,40 @@ class _ArtifactServer:
 # ────────────────────────────────────────────────────────────────
 # 模型加载器：同一时刻只留一个，切换先卸载
 # ────────────────────────────────────────────────────────────────
+def _ram_gb() -> float:
+    """总内存（GB）。拿不到就返回 0（当无限）。"""
+    try:
+        import psutil
+        return psutil.virtual_memory().total / (1024 ** 3)
+    except Exception:
+        return 0.0
+
+
+def low_memory_mode(threshold_gb: float = 20.0) -> bool:
+    """内存小到需要特殊照顾吗。
+
+    16 GB 机器跑建模时进程 RSS 能到 10.8 GB，加上系统就贴着上限。
+    这种机器上每次阶段切换都要主动 gc + 清 CUDA 缓存，否则碎片会累积到换页。
+    """
+    total = _ram_gb()
+    return 0 < total < threshold_gb
+
+
+def purge(tag: str = "") -> None:
+    """把能放的全放掉：Python 垃圾 + CUDA 缓存。低内存机器上每阶段调用一次。"""
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+    except Exception:
+        pass
+    if tag:
+        print(f"[direct] 已回收内存/显存 {tag}", flush=True)
+
+
 class _ModelKeeper:
     """显存是分时的。这里保证任何时刻只有一个 diffusers / hy3dgen 模型在显存里。"""
 
@@ -155,6 +189,9 @@ class _ModelKeeper:
         self.log(f"[direct] 加载 {key}")
         self._obj = builder()
         self._key = key
+        # 加载刚结束时是内存峰值 —— safetensors 的原始 dict、按层缓存的中间对象
+        # 大多已经没用了，这里回收一次能把峰值压下来（16G 机器上差几百 MB）。
+        purge(f"（加载完 {key}）")
         return self._obj
 
     def unload(self) -> None:
@@ -171,6 +208,10 @@ class _ModelKeeper:
             import torch
             gc.collect()
             torch.cuda.empty_cache()
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
         except Exception:
             pass
         self.log(f"[direct] 已卸载 {key}")
