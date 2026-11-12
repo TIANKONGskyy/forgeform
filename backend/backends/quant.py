@@ -129,14 +129,26 @@ def _bnb_available() -> bool:
         return False
 
 
+def _fp8_available() -> bool:
+    """diffusers 的 PipelineQuantizationConfig 支持 fp8 吗。"""
+    try:
+        import diffusers
+        return hasattr(diffusers, "PipelineQuantizationConfig")
+    except Exception:
+        return False
+
+
 def _gguf_ref(ref: str) -> bool:
     return str(ref).lower().endswith(".gguf")
 
 
-def choose_quant(prefer: str, est_gb: float, free_gb: float) -> dict:
+def choose_quant(prefer: str, est_gb: float, free_gb: float,
+                 allow_bnb: bool = True, allow_fp8: bool = True) -> dict:
     """挑一种加载方式。返回 dict(quant=..., offload=..., why=...)。
 
     `prefer` 是用户/插件显式指定的：auto / none / fp8 / bnb8 / bnb4 / gguf。
+    `allow_bnb` / `allow_fp8`：auto 阶梯里是否允许这两档。
+      · 默认都允许（"自动量化"）；想要绝对保真可以传 False，退化成 none / offload
     """
     prefer = (prefer or "auto").lower()
     have_bnb = _bnb_available()
@@ -158,19 +170,37 @@ def choose_quant(prefer: str, est_gb: float, free_gb: float) -> dict:
         return {"quant": prefer, "offload": offload,
                 "why": f"指定 {prefer}：需约 {need:.1f} GB / 可用 {free_gb:.1f} GB"}
 
-    # auto：从最保真往下试。
-    # ⚠️ 故意**不自动选 bnb**：实测 bitsandbytes 8bit 量化 Flux2Transformer2DModel 后
-    # 出图是纯噪声（不报错、速度还更快，所以特别坑）。bnb 只保留为显式选项，
-    # 想试就写 quant: bnb8，但别指望它对所有模型都成立。
-    for q in ("none",):
+    # ── auto：从"最保真且最安全"往下试 ──
+    #
+    # 台阶顺序是踩出来的，不是拍的：
+    #   ① none   结果绝对正确，首选
+    #   ② fp8    官方支持、误差小；放不下原精度时优先它
+    #   ③ bnb8   有风险 —— 实测 bitsandbytes 8bit 量化 Flux2Transformer2DModel 后
+    #            出图是纯噪声，不报错、速度还快 2-3 倍，所以特别坑。
+    #            现在允许自动选，但**必须**有噪声闸门兜底（direct.py 里的 _noise_score，
+    #            阈值 0.015；正常图 0.002-0.003，噪声 0.04+）
+    #   ④ bnb4   同上，显存更省、质量更差
+    #   ⑤ offload 最后手段：慢，但结果对
+    ladder = ["none"]
+    if _fp8_available():
+        ladder.append("fp8")
+    if allow_bnb and have_bnb:
+        ladder += ["bnb8", "bnb4"]
+
+    tried = []
+    for q in ladder:
         need = est_gb * QUANT_RATIO[q]
+        tried.append(f"{q}={need:.1f}G")
         if need <= budget:
-            return {"quant": q, "offload": "",
-                    "why": f"{q}：约 {need:.1f} GB ≤ 预算 {budget:.1f} GB"}
+            why = f"{q}：约 {need:.1f} GB ≤ 预算 {budget:.1f} GB"
+            if q in ("bnb8", "bnb4"):
+                why += "（量化结果有不确定性，出图会过噪声闸门）"
+            return {"quant": q, "offload": "", "why": why}
 
     # 整块放不下 → CPU offload（慢，但结果是对的）
     return {"quant": "none", "offload": "model",
-            "why": f"显存不够（模型 {est_gb:.1f} GB > 预算 {budget:.1f} GB），改用 CPU offload"}
+            "why": (f"显存不够（模型 {est_gb:.1f} GB，预算 {budget:.1f} GB），改用 CPU offload；"
+                    f"试过 {', '.join(tried)}")}
 
 
 def summary(est_gb: float, free_gb: float, decision: dict) -> str:
