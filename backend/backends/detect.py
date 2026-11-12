@@ -155,7 +155,7 @@ def probe_comfyui(host: str = "127.0.0.1", port: int = 8188,
         found = _scan_model_dir(comfy)
         if found["image"]:
             fw.caps.add("image")
-        if found["mesh"] or (comfy / "custom_nodes" / "ComfyUI-3D-Pack-main").exists():
+        if found["mesh"]:
             fw.caps.add("mesh")
         n3d = comfy / "custom_nodes" / "ComfyUI-3D-Pack-main"
         bits = [f"出图权重 {len(found['image'])}", f"VAE {len(found['vae'])}"]
@@ -164,9 +164,20 @@ def probe_comfyui(host: str = "127.0.0.1", port: int = 8188,
         fw.models = found["image"][:12]
         fw.detail = (fw.detail + " · " if fw.detail else "") + "，".join(bits)
     else:
-        # 不知道目录就按"它能出图"乐观处理（ComfyUI 活着本身就有价值）
-        fw.caps = {"image", "mesh"}
-        fw.note = "未提供 ComfyUI 目录，按通用能力处理"
+        # A listening service is not evidence that weights or 3D nodes exist.
+        try:
+            info = _get_json(f"{fw.url}/object_info")
+            for node in ("CheckpointLoaderSimple", "UNETLoader", "UnetLoaderGGUF"):
+                required = info.get(node, {}).get("input", {}).get("required", {})
+                for value in required.values():
+                    if isinstance(value, list) and value and isinstance(value[0], list):
+                        fw.models.extend(str(x) for x in value[0])
+            if fw.models:
+                fw.caps.add("image")
+            fw.note = "已读取服务模型清单；3D 需提供模型目录以确认权重"
+        except Exception:
+            fw.note = "服务在线，但无法确认模型权重"
+
     return fw
 
 

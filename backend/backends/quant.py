@@ -50,7 +50,7 @@ def probe_vram() -> tuple[float, float, str]:
             if len(p) > 2 and p[2].isdigit():
                 f = float(p[2]) / 1024
                 if f > free:
-                    free, name = f, p[0]
+                    total, free, name = float(p[1]) / 1024, f, p[0]
         return total, free, name
     except Exception:
         return 0.0, 0.0, ""
@@ -133,7 +133,9 @@ def _fp8_available() -> bool:
     """diffusers 的 PipelineQuantizationConfig 支持 fp8 吗。"""
     try:
         import diffusers
-        return hasattr(diffusers, "PipelineQuantizationConfig")
+        from diffusers.models.modeling_utils import ModelMixin
+        import torch
+        return hasattr(ModelMixin, "enable_layerwise_casting") and hasattr(torch, "float8_e4m3fn")
     except Exception:
         return False
 
@@ -158,7 +160,7 @@ def choose_quant(prefer: str, est_gb: float, free_gb: float,
         return {"quant": "gguf", "offload": "", "why": "指定 GGUF"}
     if not est_gb:
         # 估不出来：保守走 bnb8（有就量化，没有就原样）
-        if prefer == "auto" and have_bnb:
+        if prefer == "auto" and allow_bnb and have_bnb:
             return {"quant": "bnb8", "offload": "", "why": "模型大小未知，保守用 8bit"}
         return {"quant": ("none" if prefer == "auto" else prefer), "offload": "",
                 "why": "模型大小未知"}
@@ -182,7 +184,7 @@ def choose_quant(prefer: str, est_gb: float, free_gb: float,
     #   ④ bnb4   同上，显存更省、质量更差
     #   ⑤ offload 最后手段：慢，但结果对
     ladder = ["none"]
-    if _fp8_available():
+    if allow_fp8 and _fp8_available():
         ladder.append("fp8")
     if allow_bnb and have_bnb:
         ladder += ["bnb8", "bnb4"]
@@ -286,7 +288,7 @@ def recommend_quant(model_gb: float, vram_gb: float, ram_gb: float,
                       min(ev, vram_budget), er, [])
         need = model_gb * QUANT_RATIO.get(prefer, 1.0)
         nv, nr = need * vm, need * rm
-        if nv <= vram_budget:
+        if nv <= vram_budget and nr <= ram_budget:
             return mk(prefer, "", True,
                       f"指定 {prefer}：实际需显存约 {nv:.1f} GB ≤ 预算 {vram_budget:.1f} GB",
                       nv, nr, [])
@@ -300,7 +302,7 @@ def recommend_quant(model_gb: float, vram_gb: float, ram_gb: float,
 
     # ── auto ──
     # 1) 原精度塞得进显存：最好，不量化、不 offload
-    if v_need <= vram_budget:
+    if v_need <= vram_budget and r_need <= ram_budget:
         return mk("none", "", True,
                   f"原精度权重 {model_gb:.1f} GB，实际需显存约 {v_need:.1f} GB"
                   f"（预算 {vram_budget:.1f} GB）", v_need, r_need,

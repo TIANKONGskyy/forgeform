@@ -82,6 +82,11 @@ class HybridBackend:
     def pick(self, stage: str):
         """返回该阶段实际要用的后端实例。"""
         kind = self._stage_kind(stage)
+        cfg_kind = "3d" if kind == "mesh" else kind
+        selected = self.config.get("stages", {}).get(cfg_kind, {}).get("default_model", "")
+        model_cfg = self.config.get("models", {}).get(cfg_kind, {}).get(selected, {})
+        if model_cfg.get("path") or model_cfg.get("backend") == "direct":
+            return self._get_direct()
         choice = self.plan.get(kind, "")
         if choice == "comfyui":
             return self._get_comfy()

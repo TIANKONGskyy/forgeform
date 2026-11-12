@@ -249,6 +249,9 @@ def main() -> int:
         return 1
 
     picked = [(p, s) for p, s in files if _match(p, args.include, args.exclude)]
+    if not picked:
+        print("未找到匹配的模型文件，请检查仓库与过滤条件。")
+        return 1
     total = sum(s for _, s in picked)
     print(f"待下载 {len(picked)} 个文件，合计 {total/1024**3:.2f} GB\n")
 

@@ -92,7 +92,8 @@ def _background_bootstrap():
 
 
 _bootstrap_thread = threading.Thread(target=_background_bootstrap, daemon=True)
-_bootstrap_thread.start()
+if __name__ == "__main__" and os.environ.get("FORGEFORM_SKIP_BOOTSTRAP") != "1":
+    _bootstrap_thread.start()
 
 
 # ─── 关铸梦时自动卸载对话大模型（释放内存/显存）───
@@ -231,630 +232,7 @@ def build_sidebar(state: dict) -> str:
 # ══════════════════════════════════════════════════════════════════
 # CSS
 # ══════════════════════════════════════════════════════════════════
-CSS = """
-/* ══════════════════════════════════════════════════════════════════
-   铸想 ForgeForm · UI
-   参考开源实现的主流做法：
-     · 布局/间距    —— Open WebUI（左栏会话 + 右主区）
-     · 配色/圆角    —— shadcn/ui（slate 中性色 + 单一品牌色 + 细边框）
-     · 对话/输入    —— ChatGPT（消息块 + 底部大圆角输入条）
-   ══════════════════════════════════════════════════════════════════ */
-:root {
-    --bg:        #04060d;
-    /* 配色对齐 ZYKT studio（深空 + 北斗/星图）：ink 底色 + aurora 青 + nova 紫 */
-    --panel:     #070b16;
-    --card:      #0b1120;
-    --card-hi:   #101a2e;
-    --line:      rgba(150,185,235,0.14);
-    --line-hi:   rgba(150,185,235,0.28);
-    --txt:       #e6ecf9;
-    --dim:       #8b9ac0;
-    --dimmer:    #55648a;
-    --brand:     #22c8f5;
-    --brand-hi:  #56e0ff;
-    --brand-soft:rgba(86,224,255,0.12);
-    --ok:        #6ee7b7;
-    --ok-soft:   rgba(110,231,183,0.13);
-    --warn:      #f5b544;
-    --r-lg: 14px; --r-md: 10px; --r-sm: 7px;
-    --shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 1px 0 rgba(2,4,9,.5), 0 20px 44px -34px rgba(0,0,0,.95);
-    /* ZYKT 签名：青→紫→粉流光 + 面板顶部高光 */
-    --aurora: #56e0ff;
-    --nova:   #9d8dff;
-    --pink:   #f472b6;
-    --grad:   linear-gradient(100deg, #56e0ff 0%, #9d8dff 52%, #f472b6 100%);
-    --grad-soft: linear-gradient(100deg, rgba(86,224,255,.16), rgba(157,141,255,.16));
-    --panel-topline: rgba(140,234,255,0.38);
-}
-* { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
-
-body, .gradio-container {
-    background: var(--bg) !important;
-    background-image:
-        radial-gradient(900px 520px at 12% -8%, rgba(86,224,255,.055), transparent 62%),
-        radial-gradient(760px 480px at 88% 0%, rgba(157,141,255,.06), transparent 64%) !important;
-    background-attachment: fixed !important;
-    color: var(--txt) !important;
-    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
-                 "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif !important;
-    font-size: 14px !important;
-    -webkit-font-smoothing: antialiased;
-}
-.gradio-container {
-    max-width: 100% !important; width: 100% !important;
-    padding: 0 !important; margin: 0 !important;
-}
-.contain { gap: 0 !important; max-width: 100% !important; }
-footer, .built-with, .show-api { display: none !important; }
-
-/* ── 细滚动条 ─────────────────────────────────────── */
-*::-webkit-scrollbar { width: 9px; height: 9px; }
-*::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,.11); border-radius: 99px;
-    border: 2px solid transparent; background-clip: content-box;
-}
-*::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.2); background-clip: content-box; }
-
-/* ── 顶部导航条 ───────────────────────────────────── */
-.navbar {
-    display: flex !important; align-items: center; gap: 14px;
-    height: 58px; padding: 0 20px;
-    background: rgba(18,21,28,.82);
-    backdrop-filter: saturate(180%) blur(14px);
-    border-bottom: 1px solid var(--line);
-    margin: 0 !important; position: sticky; top: 0; z-index: 50;
-}
-.nav-logo {
-    display: flex; align-items: center; gap: 9px;
-    font-size: 15px; font-weight: 650; color: var(--txt); white-space: nowrap;
-    letter-spacing: .2px;
-}
-.nav-logo .dot {
-    width: 9px; height: 9px; border-radius: 99px;
-    background: var(--brand); box-shadow: 0 0 12px var(--brand);
-    display: inline-block;
-}
-/* ── 主体两栏 ─────────────────────────────────────── */
-.main-wrap { gap: 0 !important; align-items: stretch !important; }
-.chat-col   { padding: 0 !important; }
-.side-col   { border-left: 1px solid var(--line); background: var(--panel); padding: 0 !important; }
-
-/* ── 对话区 ───────────────────────────────────────── */
-.chat-wrap { padding: 0 !important; gap: 0 !important; }
-#chatbox {
-    background: transparent !important; border: none !important;
-    padding: 8px 0 !important;
-}
-/* 3D 查看器（建模完成后展示 GLB） */
-#glb_viewer {
-    border: 1px solid var(--line) !important;
-    border-radius: var(--r-lg) !important;
-    background: var(--card) !important;
-    margin: 10px 0 4px 0 !important;
-    overflow: hidden;
-}
-#glb_viewer canvas { border-radius: var(--r-lg) !important; }
-#chatbox .message-row { gap: 10px; }
-#chatbox .message {
-    border-radius: var(--r-lg) !important;
-    padding: 12px 15px !important;
-    font-size: 14px !important; line-height: 1.65 !important;
-    border: 1px solid transparent !important;
-    box-shadow: none !important;
-}
-#chatbox .message.user {
-    background: var(--brand-soft) !important;
-    border-color: rgba(124,92,255,.22) !important;
-    color: var(--txt) !important;
-}
-#chatbox .message.bot {
-    background: var(--card) !important;
-    border-color: var(--line) !important;
-    color: var(--txt) !important;
-}
-#chatbox .message.bot p { margin: .35em 0; }
-#chatbox img { border-radius: var(--r-md) !important; margin-top: 8px; }
-
-/* ── 底部输入条（ChatGPT 风格）────────────────────── */
-/* 2026-09-25 精简：两行小而清晰 ── 输入区 */
-.input-row {
-    align-items: center !important; gap: 8px;
-    padding: 6px 18px !important;
-    background: linear-gradient(180deg, transparent, var(--bg) 35%);
-}
-.input-row-chat { padding-bottom: 4px !important; }
-.input-row-upload { padding-bottom: 12px !important; padding-top: 0 !important; }
-#chat_input textarea, #chat_input input {
-    border-radius: var(--r-md) !important;
-    background: var(--card) !important;
-    border: 1px solid var(--line-hi) !important;
-    padding: 8px 12px !important;
-    font-size: 13.5px !important;
-    color: var(--txt) !important;
-    box-shadow: var(--shadow);
-    transition: border-color .15s, box-shadow .15s;
-    resize: none;
-    min-height: 36px !important;
-}
-#chat_input textarea::placeholder { color: var(--dimmer) !important; }
-#chat_input textarea:focus, #chat_input input:focus {
-    border-color: var(--brand) !important;
-    box-shadow: 0 0 0 3px var(--brand-soft) !important;
-}
-#send_btn {
-    border-radius: var(--r-md) !important;
-    height: 36px; min-width: 72px;
-    background: var(--brand) !important; border: none !important;
-    color: #fff !important; font-weight: 600 !important; font-size: 13px !important;
-    box-shadow: 0 2px 12px -4px var(--brand);
-    transition: background .15s, transform .1s;
-}
-#send_btn:hover { background: var(--brand-hi) !important; }
-#send_btn:active { transform: translateY(1px); }
-
-/* ── 上传 / 按提示词改图行（修复暗底黑字、按钮被挤扁）── */
-:root {
-    --button-secondary-text-color: #e6ecf7 !important;
-    --button-secondary-background-fill: #141b2a !important;
-    --button-secondary-border-color: #2b3852 !important;
-}
-.input-row-upload {
-    align-items: stretch !important;
-    gap: 8px !important;
-    padding: 2px 18px 14px !important;
-}
-#ref_up, #ref_up button {
-    color: #0b1020 !important;
-    background: #e6ecf7 !important;
-    border: 1px solid #e6ecf7 !important;
-    border-radius: var(--r-md) !important;
-    height: 36px !important;
-    min-width: 108px !important;
-    font-size: 12.5px !important;
-    box-shadow: var(--shadow);
-    white-space: nowrap;
-}
-#ref_up:hover, #ref_up button:hover { background: #ffffff !important; border-color: #ffffff !important; }
-#ref_up * { color: #0b1020 !important; }
-#ref_up input[type="file"] { color: var(--txt) !important; }
-#edit_prompt {
-    flex: 1 1 260px !important;
-    min-width: 0 !important;
-}
-#edit_prompt textarea, #edit_prompt input {
-    background: var(--card) !important;
-    border: 1px solid var(--line-hi) !important;
-    border-radius: var(--r-md) !important;
-    color: var(--txt) !important;
-    font-size: 13px !important;
-    min-height: 36px !important;
-    padding: 8px 12px !important;
-    box-shadow: var(--shadow);
-}
-#edit_prompt textarea::placeholder { color: var(--dimmer) !important; }
-#edit_prompt textarea:focus { border-color: var(--brand) !important;
-    box-shadow: 0 0 0 3px var(--brand-soft) !important; }
-#btn_edit_submit {
-    height: 36px !important;
-    min-width: 118px !important;
-    white-space: nowrap;
-    border-radius: var(--r-md) !important;
-    background: var(--card) !important;
-    color: var(--txt) !important;
-    border: 1px solid var(--line-hi) !important;
-    font-size: 12.5px !important;
-}
-#btn_edit_submit:hover { border-color: var(--brand) !important; color: var(--brand-hi) !important; }
-@media (max-width: 720px) {
-    .input-row-upload { flex-wrap: wrap !important; }
-    #edit_prompt { flex: 1 1 100% !important; order: -1; }
-    #btn_edit_submit { flex: 1 1 auto !important; }
-}
-
-/* ── 动作按钮（按阶段出现）────────────────────────── */
-.action-bar {
-    display: flex; gap: 9px; padding: 4px 22px 2px;
-    flex-wrap: wrap; align-items: center;
-}
-.action-bar button {
-    border-radius: 99px !important;
-    height: 38px !important; padding: 0 18px !important;
-    font-size: 13px !important; font-weight: 550 !important;
-    border: 1px solid var(--line-hi) !important;
-    background: var(--card) !important; color: var(--txt) !important;
-    transition: background .15s, border-color .15s, transform .1s;
-    box-shadow: none !important;
-}
-.action-bar button:hover { background: var(--card-hi) !important; border-color: var(--line-hi) !important; }
-.action-bar button:active { transform: translateY(1px); }
-.action-bar button.primary {
-    background: var(--brand) !important; border-color: var(--brand) !important;
-    color: #fff !important; box-shadow: 0 2px 12px -5px var(--brand);
-}
-.action-bar button.primary:hover { background: var(--brand-hi) !important; }
-
-/* ── 侧边栏 ───────────────────────────────────────── */
-.sidebar { padding: 18px 16px 26px; border: none; background: transparent; margin: 0; }
-.sb-head {
-    display: flex; align-items: center; justify-content: space-between;
-    padding-bottom: 12px; margin-bottom: 4px; border-bottom: 1px solid var(--line);
-}
-.sb-title { font-size: 13.5px; font-weight: 650; color: var(--txt); letter-spacing: .2px; }
-.sb-body { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
-.sb-sec { padding: 13px 0; border-bottom: 1px solid var(--line); }
-.sb-sec:last-child { border-bottom: none; }
-.sb-label {
-    font-size: 10.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
-    color: var(--dimmer); margin-bottom: 9px;
-}
-.phase-badge {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 11px; border-radius: 99px;
-    font-size: 11.5px; font-weight: 600;
-    background: var(--brand-soft); color: var(--brand-hi);
-    border: 1px solid rgba(124,92,255,.22);
-}
-.phase-badge.done { background: var(--ok-soft); color: var(--ok); border-color: rgba(61,220,151,.26); }
-.kv { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; padding: 3px 0; }
-.kv .k { color: var(--dimmer); }
-.kv .v { color: var(--txt); text-align: right; }
-.folder-name {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px; color: var(--dimmer); word-break: break-all; line-height: 1.5;
-}
-.ok-badge { color: var(--ok); font-size: 12.5px; padding: 3px 0; display: flex; gap: 7px; align-items: center; }
-
-/* 链路进度：时间轴药丸 */
-.pipe-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-.pipe-step {
-    text-align: center; padding: 7px 10px; border-radius: 99px;
-    font-size: 11px; background: var(--card); min-width: 54px;
-    border: 1px solid var(--line); color: var(--dim);
-    transition: all .2s;
-}
-.pipe-step.done  { background: var(--ok-soft); border-color: rgba(61,220,151,.3); color: var(--ok); }
-.pipe-step.active{ background: var(--brand-soft); border-color: rgba(124,92,255,.4);
-                   color: var(--brand-hi); box-shadow: 0 0 0 3px rgba(124,92,255,.08); }
-.pipe-step small { display: block; font-size: 10px; margin-top: 1px; opacity: .85; }
-.pipe-arrow { color: var(--dimmer); font-size: 11px; }
-
-/* ── 硬件环形卡 ───────────────────────────────────── */
-.ring-card { display: inline-block; text-align: center; padding: 2px 6px; }
-
-/* ── 空状态（欢迎页）──────────────────────────────── */
-.empty-hero { padding: 46px 26px 26px; text-align: center; }
-.empty-hero h2 {
-    font-size: 25px; font-weight: 680; margin: 0 0 8px;
-    letter-spacing: -.02em; color: var(--txt);
-}
-.empty-hero h2 .accent { color: var(--brand-hi); }
-.empty-hero p { color: var(--dim); font-size: 13.5px; margin: 0 0 22px; }
-.chips { display: flex; gap: 9px; justify-content: center; flex-wrap: wrap; }
-.chip {
-    font-size: 12.5px; color: var(--dim); padding: 9px 15px;
-    border: 1px solid var(--line); border-radius: 99px; background: var(--card);
-    transition: all .15s;
-}
-.chip:hover { border-color: var(--brand); color: var(--txt); transform: translateY(-1px); }
-
-/* ── 通用 Gradio 收敛 ─────────────────────────────── */
-.block, .form { background: transparent !important; border: none !important; }
-label > span, .label-wrap span { color: var(--dim) !important; font-size: 12px !important; }
-
-/* ═══ ZYKT studio 风格：流光 / 面板高光 / 渐变按钮 ═══ */
-
-/* 面板的顶部高光线（ZYKT 每张卡顶部那一道细光） */
-.gradio-container .block,
-.gradio-container .form,
-.gradio-container .panel {
-    position: relative;
-    border-radius: var(--r-lg) !important;
-    border-color: var(--line) !important;
-    background: linear-gradient(180deg, rgba(16,25,43,.94), rgba(8,13,24,.96)) !important;
-    box-shadow: var(--shadow) !important;
-}
-.gradio-container .block::before {
-    content: "";
-    position: absolute; inset: 0 12% auto 12%; height: 1px;
-    background: linear-gradient(90deg, transparent, var(--panel-topline), transparent);
-    pointer-events: none;
-}
-
-/* 主按钮：青→紫渐变 */
-#send_btn, #btn_gen, #btn_model, #btn_stl,
-button.lg.primary, button.primary {
-    background: var(--grad) !important;
-    border: 0 !important;
-    color: #04060d !important;
-    font-weight: 650 !important;
-    letter-spacing: .01em;
-    box-shadow: 0 10px 26px -16px rgba(86,224,255,.85) !important;
-    transition: filter .18s ease, transform .12s ease;
-}
-#send_btn:hover, #btn_gen:hover, #btn_model:hover, #btn_stl:hover,
-button.primary:hover { filter: brightness(1.07) saturate(1.05); }
-#send_btn:active, button.primary:active { transform: translateY(1px); }
-
-/* 次按钮：ghost + 青色描边悬停 */
-button.secondary {
-    background: var(--ghost, rgba(19,29,49,.9)) !important;
-    border: 1px solid var(--line-hi) !important;
-    color: var(--txt) !important;
-}
-button.secondary:hover {
-    border-color: var(--brand-hi) !important;
-    color: var(--brand-hi) !important;
-    box-shadow: 0 0 0 1px rgba(86,224,255,.16), 0 10px 26px -22px rgba(86,224,255,.8);
-}
-
-/* 示例胶囊：细边框 + 悬停泛青 */
-.gradio-container .gr-button-secondary,
-.gradio-container .examples button {
-    background: linear-gradient(180deg, rgba(20,31,53,.96), rgba(10,16,30,.96)) !important;
-    border: 1px solid var(--line) !important;
-    border-radius: 999px !important;
-}
-
-/* 输入框：深一档的底 + 聚焦泛青 */
-textarea, input[type="text"], input[type="search"] {
-    background: rgba(5,8,15,.92) !important;
-    border: 1px solid var(--line) !important;
-    color: var(--txt) !important;
-    border-radius: var(--r-md) !important;
-}
-textarea:focus, input[type="text"]:focus {
-    border-color: rgba(86,224,255,.55) !important;
-    box-shadow: 0 0 0 3px rgba(86,224,255,.10) !important;
-    outline: none !important;
-}
-
-/* 标题流光（ZYKT 字标那套青→蓝→紫的扫光） */
-.gradio-container h1,
-.gradio-container .md h1 {
-    background: var(--grad);
-    -webkit-background-clip: text; background-clip: text;
-    color: transparent !important;
-    font-weight: 750 !important;
-    letter-spacing: -.01em;
-}
-
-/* 对话气泡：用户侧偏青、助手侧用卡片底 */
-.gradio-container .message.user,
-.gradio-container .bubble-wrap.user {
-    background: linear-gradient(135deg, rgba(34,200,245,.16), rgba(122,102,245,.16)) !important;
-    border: 1px solid rgba(86,224,255,.22) !important;
-}
-
-/* 滚动条也跟上（ZYKT 的 thumb 是 #1b2740） */
-*::-webkit-scrollbar-thumb { background: #1b2740; }
-*::-webkit-scrollbar-thumb:hover { background: #26385c; }
-
-
-
-/* ═══ APP 化布局：单列、顶部栏吸附、输入条固定底部 ═══
-   目标是把浏览器里的宽表格布局收成手机 App 的形状：
-   一个 480px 的内容列居中，头/输入条吸附，侧栏收成抽屉。
-   只动布局和尺寸，不动任何组件的显隐逻辑（_buttons_for_phase 仍然说了算）。 */
-
-html, body { height: 100%; }
-body, .gradio-container { min-height: 100vh; }
-.gradio-container {
-    max-width: 520px !important;
-    margin: 0 auto !important;
-    padding: 0 !important;
-    min-height: 100vh;
-    position: relative;
-    box-shadow: 0 0 0 1px var(--line), 0 40px 120px -60px rgba(0,0,0,.95);
-}
-@media (max-width: 560px) {
-    .gradio-container { max-width: 100% !important; box-shadow: none; }
-}
-
-/* 顶部栏 */
-.navbar {
-    position: sticky !important; top: 0; z-index: 60;
-    margin: 0 !important; padding: 8px 12px !important;
-    border-bottom: 1px solid var(--line) !important;
-    background: rgba(7,11,22,.86) !important;
-    backdrop-filter: blur(14px);
-    align-items: center !important;
-}
-.navbar .nav-logo { font-size: 14px !important; }
-
-/* 主区：改成单列 */
-.main-wrap { flex-direction: column !important; gap: 0 !important; }
-.chat-col { min-width: 0 !important; width: 100% !important; max-width: 100% !important; gap: 0 !important; }
-.side-col {
-    display: none !important;      /* 窄屏先收起来，防止把主区挤窄 */
-}
-
-/* 对话区占满、可滚 */
-.chat-col > .block:first-of-type,
-#chatbox {
-    flex: 1 1 auto !important;
-    min-height: 0 !important;
-    border: 0 !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
-    padding: 6px 12px !important;
-}
-.chat-col { display: flex; flex-direction: column; height: calc(100vh - 56px); }
-
-/* 输入条固定底部 */
-.input-row-chat {
-    position: sticky !important; bottom: 0; z-index: 55;
-    padding: 10px 12px calc(10px + env(safe-area-inset-bottom)) !important;
-    margin: 0 !important;
-    background: rgba(7,11,22,.9) !important;
-    backdrop-filter: blur(14px);
-    border-top: 1px solid var(--line) !important;
-    gap: 8px !important;
-}
-.input-row-chat textarea {
-    border-radius: 999px !important;
-    padding: 11px 16px !important;
-    min-height: 44px !important;
-    resize: none !important;
-}
-#send_btn {
-    border-radius: 999px !important;
-    min-width: 44px !important; width: 44px;
-    height: 44px !important; min-height: 44px !important;
-    font-size: 0 !important;             /* 藏掉文字，只留图形 */
-    position: relative;
-}
-#send_btn::after {
-    content: "↑"; font-size: 18px; font-weight: 700;
-    position: absolute; inset: 0; display: grid; place-items: center;
-}
-
-/* 动作条（生成图片 / 建模 / 导出 STL）做成胶囊 */
-.action-bar {
-    padding: 0 12px 8px !important;
-    margin: 0 !important;
-    gap: 8px !important;
-    flex-wrap: nowrap !important;
-    overflow-x: auto;
-}
-.action-bar button {
-    border-radius: 999px !important;
-    padding: 9px 14px !important;
-    font-size: 12.5px !important;
-    white-space: nowrap;
-}
-
-/* 上传/改写那一行压低存在感 */
-.input-row-upload {
-    padding: 0 12px 6px !important;
-    margin: 0 !important;
-    gap: 8px !important;
-    opacity: .92;
-}
-.input-row-upload button {
-    border-radius: 999px !important; font-size: 12px !important; padding: 7px 12px !important;
-}
-
-/* 对话气泡圆角化 */
-#chatbox .message, #chatbox .bubble {
-    border-radius: 18px !important;
-    border: 1px solid var(--line) !important;
-    background: linear-gradient(180deg, rgba(16,25,43,.95), rgba(8,13,24,.96)) !important;
-}
-#chatbox .user, #chatbox .message.user {
-    border-color: rgba(86,224,255,.28) !important;
-    background: linear-gradient(135deg, rgba(34,200,245,.16), rgba(122,102,245,.16)) !important;
-}
-
-
-
-/* ── 修正：视口高度、侧栏彻底隐藏、顶部栏不截断 ── */
-body {
-    background-attachment: fixed;
-    min-height: 100dvh;
-}
-.gradio-container {
-    display: flex; flex-direction: column;
-    height: 100dvh; min-height: 100dvh;
-    overflow: hidden;
-}
-
-/* 顶部栏里的下拉要能被压缩，不然品牌名被挤掉 */
-.navbar > * { min-width: 0 !important; }
-.navbar .nav-logo { flex: 0 0 auto !important; white-space: nowrap; }
-.navbar #history_dd, .navbar .block:has(#history_dd) { flex: 1 1 auto !important; min-width: 0 !important; }
-.navbar #history_dd input, .navbar select { font-size: 12px !important; }
-
-/* 主区撑满剩余高度 */
-.main-wrap {
-    flex: 1 1 auto !important;
-    min-height: 0 !important;
-    height: auto !important;
-    overflow: hidden !important;
-}
-.gradio-container .side-col { display: none !important; }
-
-.chat-col {
-    display: flex !important;
-    flex-direction: column !important;
-    height: 100% !important;
-    min-height: 0 !important;
-    overflow: hidden !important;
-}
-#chatbox {
-    flex: 1 1 auto !important;
-    min-height: 0 !important;
-    overflow-y: auto !important;
-}
-.input-row-chat, .input-row-upload, .action-bar {
-    flex: 0 0 auto !important;
-    position: static !important;
-}
-
-
-
-/* ── 最终布局：底部输入用 fixed 钉死，主区留出等高的底部内边距 ──
-   为什么不用 sticky：Gradio 的 .contain / .wrap / .main 是三层 flex，
-   sticky 会被中间那层的 overflow 重置，表现是"输入条跑到屏幕外"。 */
-
-.input-row-chat {
-    position: fixed !important;
-    left: 50% !important; transform: translateX(-50%) !important;
-    bottom: 0 !important;
-    width: min(520px, 100vw) !important;
-    max-width: 520px !important;
-    margin: 0 !important;
-    padding: 10px 14px calc(12px + env(safe-area-inset-bottom)) !important;
-    background: rgba(7,11,22,.94) !important;
-    backdrop-filter: blur(16px);
-    border-top: 1px solid var(--line) !important;
-    z-index: 80 !important;
-    gap: 10px !important;
-}
-.input-row-upload {
-    position: fixed !important;
-    left: 50% !important; transform: translateX(-50%) !important;
-    bottom: calc(66px + env(safe-area-inset-bottom)) !important;
-    width: min(520px, 100vw) !important;
-    max-width: 520px !important;
-    margin: 0 !important;
-    padding: 6px 14px !important;
-    background: rgba(7,11,22,.9) !important;
-    backdrop-filter: blur(16px);
-    z-index: 79 !important;
-    gap: 8px !important;
-}
-.action-bar {
-    position: fixed !important;
-    left: 50% !important; transform: translateX(-50%) !important;
-    bottom: calc(108px + env(safe-area-inset-bottom)) !important;
-    width: min(520px, 100vw) !important;
-    max-width: 520px !important;
-    margin: 0 !important;
-    padding: 6px 14px !important;
-    background: linear-gradient(180deg, rgba(7,11,22,0) 0%, rgba(7,11,22,.9) 30%) !important;
-    z-index: 78 !important;
-}
-
-/* 给固定的三条让出高度，否则最后一条消息被盖住 */
-.chat-col { padding-bottom: 168px !important; }
-#chatbox { padding-bottom: 8px !important; }
-
-/* 顶部栏固定在顶，内容从它下面开始 */
-.navbar {
-    position: fixed !important; top: 0 !important; left: 50% !important;
-    transform: translateX(-50%) !important;
-    width: min(520px, 100vw) !important; max-width: 520px !important;
-    z-index: 90 !important;
-}
-.chat-col { padding-top: 58px !important; }
-
-/* 品牌名在窄屏只留两个字 */
-/* 品牌名已直接改成「铸想」，不再依赖 CSS 伪元素（伪元素在 flex 里不稳定） */
-
-"""
+CSS = (ROOT / "ui" / "creative.css").read_text(encoding="utf-8")
 
 
 # Gradio 主题（字体/圆角/品牌色统一交给主题，CSS 只做细调）
@@ -957,7 +335,7 @@ def _buttons_for_phase(phase: str, state: dict = None) -> dict:
         # ★★ 2026-10-19 修「出图后按钮全消失」★★
         #
         # 现象（宇凯报的、我按官方启动入口复现）：
-        #   说需求 → 出图那一步 → 界面上「🔧 修改图片」「🧊 生成建模」都不见了，
+        #   说需求 → 出图那一步 → 界面上「修改图片」「生成 3D」都不见了，
         #   只剩「发送」。用户以为核心功能没了。
         #
         # 根因：`_do_generate_images` 一进来就把 phase 设成 "generating" 并落盘。
@@ -985,7 +363,7 @@ def _buttons_for_phase(phase: str, state: dict = None) -> dict:
         #   （实测组 2026-10-19_105832：phase=3d、glb=None、按钮全空）
         #
         # 修法：3d 阶段**只有真的还在建**才藏按钮；没有模型就当"选题"阶段处理，
-        #   让用户能重新点「🧊 生成建模」重试，而不是卡死在那里。
+        #   让用户能重新点「生成 3D」重试，而不是卡死在那里。
         if has_model:
             return with_stl(off)
         # 没有模型 → 说明这一步没成，给回可操作按钮（重试建模 / 改图 / 新建）
@@ -1203,17 +581,17 @@ def on_reference_uploaded(file_obj, state: dict):
         # （照图生成指定角色；纯文字生图对 IP 角色只能猜 ✗）
         state["ref_upload"] = str(dst)
         pm.save_selected_image(proj, dst.read_bytes())      # 落盘 selected.jpg，刷新后不丢
-        state["phase"] = "selecting"                        # → 按钮出「修改图片 / 🧊 生成建模」
+        state["phase"] = "selecting"                        # → 按钮出「修改图片 / 生成 3D」
         conv._append_conversation(
             state, "user", "（上传了一张参考图）", "", images=[str(dst)])
         conv._append_conversation(
             state, "assistant", "",
             "✅ 已收到参考图，作为本组的造型依据。\n\n"
-            "下一步：点 **🧊 生成建模** 就按这张图做 3D 模型（IP 角色/特定形象这条最稳 —— "
+            "下一步：点 **生成 3D** 就按这张图做 3D 模型（IP 角色/特定形象这条最稳 —— "
             "纯文字描述只能猜长相）。", images=[str(dst)])
         pm.save_project(state)
         yield state, *_update_ui_with_note(
-            state, f"🖼 参考图已就位（{Path(src).name}）→ 点「🧊 生成建模」按它建模")
+            state, f"🖼 参考图已就位（{Path(src).name}）→ 点「生成 3D」按它建模")
     except Exception as e:
         yield state, *_update_ui_with_note(state, f"参考图处理失败：{e!r}")
 
@@ -1264,7 +642,7 @@ def on_reference_search(query: str, state: dict):
                 f"🌐 联网找到了 1 张候选参考图（{dst.name}）。\n\n"
                 "**先看一眼是不是你想要的** —— IP 角色 Bing 不一定能拿到对的；\n"
                 "如果对，点 **🎯 采用为参考图**（点错就上传你自己的）；\n"
-                "如果**不对**（如搜熊大却看到动物/无关图），点 **🧊 生成建模** 改用纯文字生成。",
+                "如果**不对**（如搜熊大却看到动物/无关图），点 **生成 3D** 改用纯文字生成。",
             ), images=[str(dst)])
         pm.save_project(state)
         yield state, *_update_ui_with_note(
@@ -1291,8 +669,8 @@ def on_adopt_as_reference(state: dict):
     pm.save_project(state)
     conv._append_conversation(
         state, "assistant", "",
-        "✅ 已采纳为参考图。下一步点 **🧊 生成建模** 就按这张图做 3D 摆件。")
-    yield state, *_update_ui_with_note(state, "✅ 已采纳为参考图 → 点「🧊 生成建模」按它建模")
+        "✅ 已采纳为参考图。下一步点 **生成 3D** 就按这张图做 3D 摆件。")
+    yield state, *_update_ui_with_note(state, "✅ 已采纳为参考图 → 点「生成 3D」按它建模")
 
 
 def on_btn_generate(state: dict):
@@ -1485,8 +863,8 @@ HERO_HTML = """
 <div class="empty-hero">
   <h2>从一句话到<span class="accent">可打印的 3D 实体</span></h2>
   <p>描述你想要的物品 → 生成图片 → 一键重建 3D → 导出 STL 直接打印</p>
-  <div class="chips">
-    <div class="chip">我要一个熊大</div>
+  <div class="chips" aria-label="创作示例">
+    <div class="chip">桌面收纳</div>
     <div class="chip">帮我设计一个机械手臂底座</div>
     <div class="chip">画一个茶杯垫，直径 90mm</div>
     <div class="chip">做一个手机支架，蓝色</div>
@@ -1577,7 +955,6 @@ def build():
     _init_stl_ok = bool(_init_stl) and Path(_init_stl).is_file()
 
     with gr.Blocks(title="铸想 ForgeForm", css=CSS,
-                   head='<script>setInterval(function(){var e=document.querySelector("#ref_up");if(e){e.style.color="#e6ecf7";e.querySelectorAll("*").forEach(function(x){x.style.setProperty("color","#e6ecf7","important")})}},500)</script>',
                    theme=THEME) as app:
         state = gr.State(initial)
 
@@ -1595,12 +972,12 @@ def build():
                 scale=2,
                 min_width=220,
             )
-            btn_new_top = gr.Button("＋ 新建", variant="secondary", scale=1, min_width=96)
+            btn_new_top = gr.Button("＋ 新建作品", variant="secondary", scale=1, min_width=96)
 
         # ── 主体：左侧对话区（宽）+ 右侧侧边栏（窄）────
         with gr.Row(elem_classes="main-wrap"):
             # 对话区（宽，占主视觉）
-            with gr.Column(scale=7, min_width=460, elem_classes="chat-col"):
+            with gr.Column(scale=7, min_width=300, elem_classes="chat-col"):
                 # 欢迎页（空对话时显示）
                 hero = gr.HTML(HERO_HTML, visible=not bool(initial.get("conversation")),
                                elem_classes="hero-block")
@@ -1610,7 +987,7 @@ def build():
                     value=_chat_value(initial.get('conversation') or []) or [[None, initial_msg]],
                     show_label=False,
                     elem_id="chatbox",
-                    height=470,
+                    height=420,
                 )
 
                 # 3D 查看器（旧版同款 gr.Model3D，v3 改版漏移植）：
@@ -1625,12 +1002,12 @@ def build():
 
                 # 动作按钮行（对话里紧跟的交互按键，初始按阶段显示）
                 with gr.Row(elem_classes="action-bar"):
-                    btn_refine = gr.Button("💬 继续细化要求", variant="secondary", visible=_init_btns["refine"]["visible"], elem_id="btn_refine")
-                    btn_gen = gr.Button("🎨 生成图片", variant="primary", visible=_init_btns["gen"]["visible"], elem_id="btn_gen")
-                    btn_edit = gr.Button("🔧 修改图片", variant="secondary", visible=_init_btns["edit"]["visible"], elem_id="btn_edit")
-                    btn_model = gr.Button("🧊 生成建模", variant="primary", visible=_init_btns["model"]["visible"], elem_id="btn_model")
-                    btn_new = gr.Button("🏠 新建对话组", variant="secondary", visible=_init_btns["new"]["visible"], elem_id="btn_new")
-                    btn_stl = gr.Button("📦 导出 STL", variant="secondary", visible=_init_btns["stl"]["visible"], elem_id="btn_stl")
+                    btn_refine = gr.Button("继续细化", variant="secondary", visible=_init_btns["refine"]["visible"], elem_id="btn_refine")
+                    btn_gen = gr.Button("生成图片", variant="primary", visible=_init_btns["gen"]["visible"], elem_id="btn_gen")
+                    btn_edit = gr.Button("修改图片", variant="secondary", visible=_init_btns["edit"]["visible"], elem_id="btn_edit")
+                    btn_model = gr.Button("生成 3D", variant="primary", visible=_init_btns["model"]["visible"], elem_id="btn_model")
+                    btn_new = gr.Button("新建作品", variant="secondary", visible=_init_btns["new"]["visible"], elem_id="btn_new")
+                    btn_stl = gr.Button("导出 STL", variant="secondary", visible=_init_btns["stl"]["visible"], elem_id="btn_stl")
                     # 「🎯 采用为参考图」：联网找图后必须确认 → 端到端 bug A 修
                     btn_adopt = gr.Button("🎯 采用为参考图", variant="primary",
                                          visible=_init_btns.get("adopt", {"visible": False})["visible"],
@@ -1823,7 +1200,7 @@ def register_model_library(sa) -> None:
 if __name__ == "__main__":
     app = build()
     app.launch(
-        server_name="0.0.0.0",
+        server_name=os.environ.get("FOUNDRY_HOST", "127.0.0.1"),
         server_port=int(os.environ.get("FOUNDRY_PORT", "7860")),
         share=False,
         allowed_paths=[

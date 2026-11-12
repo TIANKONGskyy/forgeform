@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
   ForgeForm launcher - double-click 启动.bat, or run this file directly.
 
@@ -101,7 +101,7 @@ if (-not $found) {
     if (-not $got) {
         Say 'Download failed. Install Python 3.12 by hand, then run this again:' 'Red'
         Say '  https://www.python.org/downloads/release/python-3129/' 'Yellow'
-        Read-Host 'Press Enter to close'
+
         exit 1
     }
 
@@ -115,7 +115,7 @@ if (-not $found) {
     if (-not $found) {
         Say 'Still cannot find Python 3.11-3.13 after install.' 'Red'
         Say 'Open a NEW window and run 启动.bat again (PATH needs a refresh).' 'Yellow'
-        Read-Host 'Press Enter to close'
+
         exit 1
     }
 }
@@ -124,106 +124,9 @@ $pyExe = $found.exe
 $pyVer = $found.ver
 Say "python $pyVer  ok  ($pyExe, via $($found.how))" 'Green'
 
-# ── 2. venv + deps ─────────────────────────────────────────
-$venv = Join-Path $root '.venv'
-$venvPy = Join-Path $venv 'Scripts\python.exe'
-$stamp = Join-Path $venv '.deps-ok'
-
-if ($Reinstall -and (Test-Path $venv)) {
-    Say 'removing .venv (-Reinstall)'
-    Remove-Item $venv -Recurse -Force
-}
-
-if (-not (Test-Path $venvPy)) {
-    Say ''
-    Btn '[1/2] first run: creating .venv (about 10s)'
-    & $pyExe -m venv $venv
-    if ($LASTEXITCODE -ne 0) { Say 'venv creation failed' 'Red'; Read-Host 'Enter'; exit 1 }
-}
-
-if (-not (Test-Path $stamp)) {
-    Btn '[2/2] installing dependencies (3-5 min, one time only)'
-    & $venvPy -m pip install --upgrade pip -q
-    & $venvPy -m pip install -r (Join-Path $root 'requirements.txt')
-    if ($LASTEXITCODE -ne 0) {
-        Say 'pip install failed. Scroll up for the reason.' 'Red'
-        Read-Host 'Press Enter to close'
-        exit 1
-    }
-    New-Item -ItemType File -Path $stamp -Force | Out-Null
-    Say 'dependencies ok' 'Green'
-} else {
-    Say 'dependencies already installed (pass -Reinstall to redo)' 'DarkGray'
-}
-
-# ── 3. port check ──────────────────────────────────────────
-$listen = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-if ($listen) {
-    Say "port $Port already in use (pid $($listen[0].OwningProcess))." 'Yellow'
-    Say 'If ForgeForm is already running, just open http://127.0.0.1:'$Port 'Yellow'
-    Say 'Opening the page...'
-    Start-Process "http://127.0.0.1:$Port"
-    Read-Host 'Press Enter to close'
-    exit 0
-}
-
-# ── 3.5 first-run wizard ───────────────────────────────────
-# 没有 config.json = 第一次跑。先让向导探硬件、选方案、装模型，
-# 然后再起服务 —— 否则用户进到界面里点生成全是红叉，不知道缺什么。
-$cfg = Join-Path $root 'config.json'
-if (-not (Test-Path $cfg)) {
-    Say ''
-    Btn '[setup] first run - probing hardware and picking a profile'
-    Say '  (this decides which models to download; you can press Ctrl+C and'  'DarkGray'
-    Say '   edit config.json by hand later if you prefer)' 'DarkGray'
-    Say ''
-    & $venvPy (Join-Path $root 'tools\setup.py')
-    if ($LASTEXITCODE -ne 0) {
-        Say 'setup wizard did not finish. Starting the app anyway.' 'Yellow'
-    }
-}
-
-# ── 4. launch ──────────────────────────────────────────────
-Say ''
-Btn "starting ForgeForm on port $Port ..."
+# Open the graphical control center before installing dependencies or models.
 $env:PYTHONPATH = ''
 $env:PYTHONIOENCODING = 'utf-8'
 $env:PYTHONUTF8 = '1'
-$env:FOUNDRY_PORT = "$Port"
-
-$proc = Start-Process -FilePath $venvPy -ArgumentList 'app.py' -WorkingDirectory $root -PassThru -NoNewWindow
-
-# wait for the port, then open the browser
-$url = "http://127.0.0.1:$Port"
-$opened = $false
-for ($i = 0; $i -lt 120; $i++) {
-    Start-Sleep -Milliseconds 800
-    $ok = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    if ($ok) {
-        Start-Sleep -Seconds 2
-        Say ''
-        Say "  ready: $url" 'Green'
-        Say '  (this window is the server - closing it stops ForgeForm)' 'DarkGray'
-        Say ''
-        Start-Process $url
-        $opened = $true
-        break
-    }
-    if ($proc.HasExited) {
-        Say ''
-        Say "app exited with code $($proc.ExitCode) - see the errors above." 'Red'
-        Read-Host 'Press Enter to close'
-        exit 1
-    }
-    if ($i % 5 -eq 0) { Write-Host '.' -NoNewline }
-}
-
-if (-not $opened) {
-    Say ''
-    Say "port $Port did not open within 90s. Open $url manually to check." 'Yellow'
-}
-
-# keep this window alive as the server console
-Wait-Process -Id $proc.Id
-Say 'ForgeForm stopped.'
-Read-Host 'Press Enter to close'
+& $pyExe (Join-Path $root 'tools\studio.py') --port ($Port + 1) --app-port $Port
+exit $LASTEXITCODE

@@ -1,0 +1,13 @@
+id: sd15
+kind: image
+label: Stable Diffusion 1.5 · 轻量出图
+pipeline: StableDiffusionPipeline
+repo: stable-diffusion-v1-5/stable-diffusion-v1-5
+vram_hint: 7
+notes: 轻量方案，中文提示词需扩写翻译；推荐 512 像素。
+defaults:
+  steps: 25
+  width: 512
+  height: 512
+  guidance: 7.5
+  dtype: float16

@@ -6,6 +6,7 @@ repo: tencent/Hunyuan3D-2mini
 vram_hint: 10
 notes: 3GB 权重，先在它上面跑通再换 2.1
 defaults:
+  subfolder: hunyuan3d-dit-v2-mini
   steps: 30
   octree: 256
   guidance: 6.0

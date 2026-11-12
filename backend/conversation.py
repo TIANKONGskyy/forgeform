@@ -50,6 +50,10 @@ def _rewarm_tuned_async() -> None:
     还占着，这时硬加载会装不下，Windows 的 WDDM 会把它分页到系统内存
     （显存看着满了、对话反而更慢）。余量不够就跳过，宁可下一轮懒加载一次。
     """
+    # Keep the UI online without speculative model loads on small machines.
+    from .backends.direct import low_memory_mode
+    if low_memory_mode():
+        return
     from .gpu_state import is_generating
     if is_generating():
         return
@@ -96,6 +100,10 @@ def _warm_image_model_async(model_key: str) -> None:
     去重（2026-09-23 修）：GPU 忙时每一次预热都会在 ComfyUI 队列里排一个新作业，
     实测堆积过 5 个 warmup 在偷 GPU。同一时刻只允许一个在飞，且队列里已有 warmup 就跳过。
     """
+    # Keep the UI online without speculative model loads on small machines.
+    from .backends.direct import low_memory_mode
+    if low_memory_mode():
+        return
     if _WARM_INFLIGHT.is_set():
         return
     _WARM_INFLIGHT.set()

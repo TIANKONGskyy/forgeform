@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
+import os
 
 GB = 1024 ** 3
 
@@ -74,6 +76,7 @@ class Profile:
     fits: bool = True
     reason: str = ""
     config_patch: dict = field(default_factory=dict)
+    quant_hints: list[dict] = field(default_factory=list)
 
     def total_gb(self) -> float:
         return round(sum(d.size_gb for d in self.downloads) + self.est_gb * 0, 2)
@@ -86,7 +89,7 @@ class Profile:
                 "downloads": [{"kind": d.kind, "plugin": d.plugin_id, "repo": d.repo,
                                "gb": d.size_gb, "cmd": d.command()} for d in self.downloads],
                 "fits": self.fits, "reason": self.reason,
-                "config_patch": self.config_patch}
+                "config_patch": self.config_patch, "quant_hints": self.quant_hints}
 
 
 # ────────────────────────────────────────────────────────────────
@@ -101,7 +104,14 @@ def probe_hardware(disk_path: str = ".") -> Hardware:
         import psutil
         hw.ram_gb = psutil.virtual_memory().total / GB
     except Exception:
-        pass
+        if os.name == "nt":
+            import ctypes
+            class Memory(ctypes.Structure):
+                _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [(n, ctypes.c_ulonglong) for n in ("total", "avail", "page", "availpage", "virtual", "availvirtual", "extended")]
+            mem = Memory()
+            mem.length = ctypes.sizeof(mem)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(mem)):
+                hw.ram_gb = mem.total / GB
     hw.disk_free_gb = disk_free_gb(disk_path)
     return hw
 
@@ -127,8 +137,10 @@ def summarize_assets(frameworks) -> dict:
         "diffusers": bool(diffusers and diffusers.alive),
         "diffusers_models": (diffusers.models if diffusers else [])[:8],
         "hy3dgen": bool(hy3d and hy3d.alive),
-        "chat": bool(ollama) or bool(first_alive("llama")) or bool(first_alive("vllm"))
+        "ollama": bool(ollama),
+        "chat": bool(ollama and ollama.models) or bool(first_alive("llama")) or bool(first_alive("vllm"))
                 or bool(first_alive("lmstudio")),
+        "chat_endpoints": [f.to_dict() for f in frameworks if f.alive and "text" in f.caps and f.models],
     }
 
 
@@ -149,6 +161,8 @@ _LLM_TIERS = [
 
 def pick_llm(vram_gb: float, ram_gb: float) -> tuple[str, float, str]:
     """按显存挑对话模型。没 GPU 时也能退到 1.5B 跑 CPU。"""
+    if ram_gb < 20:
+        return ("qwen2.5:3b-instruct-q4_K_M", 2.0, "低内存模式：3B Q4，按阶段加载")
     for need, name, gb, why in _LLM_TIERS:
         if vram_gb >= need:
             return name, gb, why
@@ -172,8 +186,9 @@ def _ollama_install_download() -> Download:
 # ────────────────────────────────────────────────────────────────
 # 方案生成
 # ────────────────────────────────────────────────────────────────
-def build_profiles(hw: Hardware, assets: dict) -> list[Profile]:
+def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Profile]:
     out: list[Profile] = []
+    model_root = str(Path(model_root or os.environ.get("FORGEFORM_MODELS") or (Path(__file__).resolve().parents[2] / "models")).resolve())
 
     # 对话模型：机器上没有可用聊天端点时才需要装。
     # 这一步经常被忽略 —— 用户以为装了出图/建模就完事，结果第一句话就没人解析。
@@ -281,7 +296,7 @@ def build_profiles(hw: Hardware, assets: dict) -> list[Profile]:
         ))
 
     # 完整：用已有的 ComfyUI 补 3D 大模型
-    if assets.get("comfyui") and vram >= 16:
+    if assets.get("comfyui") and assets.get("comfyui_3d") and vram >= 16:
         out.append(Profile(
             key="full-comfy",
             name="全量（ComfyUI + Hunyuan3D 2.1）",
@@ -357,6 +372,52 @@ def build_profiles(hw: Hardware, assets: dict) -> list[Profile]:
             reason="diffusers / hy3dgen 都要 CUDA",
         ))
 
+    from .quant import recommend_quant
+    import json
+    for p in out:
+        # All installed assets belong to the chosen directory, never a fixed drive.
+        p.config_patch = json.loads(json.dumps(p.config_patch).replace("D:/models", model_root.replace("\\", "/")))
+        for d in p.downloads:
+            d.dest = d.dest.replace("D:/models", model_root.replace("\\", "/"))
+        if p.key in ("reuse", "full-comfy") and no_chat:
+            p.downloads = with_llm(p.downloads, not assets.get("ollama"))
+        if p.key in ("minimal", "standard"):
+            if not any(d.plugin_id == "pydeps" for d in p.downloads):
+                p.downloads.insert(0, Download("framework", "pydeps", "Python 推理环境", size_gb=4,
+                    note="在铸想独立环境安装推理依赖"))
+            if not any(d.kind == "mesh" for d in p.downloads):
+                p.downloads.append(Download("mesh", "hunyuan_mini", "tencent/Hunyuan3D-2mini",
+                    str(Path(model_root) / "hy3dgen" / "hunyuan3d-2mini"),
+                    ["^hunyuan3d-dit-v2-mini/", "^hunyuan3d-vae-v2-mini/", "^config\\.json$"], ["\\.ckpt$"], 3.96))
+        llm = next((d for d in p.downloads if d.kind == "llm"), None)
+        if llm:
+            p.config_patch["agent"] = {"enabled": True, "provider": "ollama"}
+            p.config_patch.setdefault("models", {})["llm"] = {"default_model": llm.repo,
+                "fallback_model": llm.repo, "think": False, "models": {llm.repo: {"num_ctx": 2048 if hw.ram_gb < 20 else 4096}}}
+        elif assets.get("chat_endpoints"):
+            ep = assets["chat_endpoints"][0]
+            p.config_patch["agent"] = {"enabled": True, "provider": "strata", "strata_url": ep["url"].rstrip("/") + ("/v1" if ep["key"] == "ollama" else ""), "strata_model": ep["models"][0]}
+        for d in p.downloads:
+            if d.kind not in ("image", "mesh", "llm"):
+                continue
+            size = 3.6 if d.plugin_id == "hunyuan_mini" else d.size_gb
+            hint = recommend_quant(size, hw.vram_gb, hw.ram_gb, kind=d.kind)
+            p.quant_hints.append({"model": d.plugin_id, "kind": d.kind, **hint})
+        if p.key in ("starter", "minimal") and hw.vram_gb >= 7 and hw.ram_gb >= 15.5:
+            p.fits = True
+            p.reason = "低内存模式：按阶段加载；建模前需至少 11 GB 空闲内存，先关闭其他大型应用。16 GB 实机待验证。" if hw.ram_gb < 20 else "按阶段加载"
+            p.config_patch.setdefault("runtime", {})["low_memory"] = hw.ram_gb < 20
+            p.config_patch["runtime"]["keep_models"] = False
+        total = sum(d.size_gb for d in p.downloads)
+        if total and hw.disk_free_gb < total * 1.2 + 5:
+            p.fits = False
+            p.reason = f"磁盘不足：下载及临时文件预计需 {total * 1.2 + 5:.1f} GB"
+        if p.key == "standard" and any(not h["fits"] for h in p.quant_hints):
+            p.fits = False
+            p.reason = "原精度加载峰值超出内存/显存预算，请选轻量方案或复用已有量化模型"
+        for kind in ("image", "3d"):
+            for cfg in p.config_patch.get("models", {}).get(kind, {}).values():
+                cfg.setdefault("quant", "auto")
     return out
 
 

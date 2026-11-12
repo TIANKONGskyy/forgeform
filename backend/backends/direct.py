@@ -55,6 +55,7 @@ _PIPELINE_BY_BACKEND = {
 # 噪声判定阈值。实测：正常出图 0.0022–0.0029，量化坏掉的噪声 0.041–0.044，
 # 差 7-10 倍，所以中间留很宽的余量。
 NOISE_THRESHOLD = 0.015
+_INFERENCE_LOCK = threading.Lock()
 
 
 def _noise_score(img) -> float:
@@ -293,6 +294,7 @@ class DirectBackend:
         self._current = {"stage": stage_name, "params": params}
 
         job_id = uuid.uuid4().hex
+        _INFERENCE_LOCK.acquire()
         try:
             if stage_name == "image":
                 produced = self._run_image(params)
@@ -305,7 +307,12 @@ class DirectBackend:
             else:
                 raise ValueError(f"未知阶段: {stage_name}")
         finally:
-            self._current = None
+            try:
+                if low_memory_mode() or not self.config.get("runtime", {}).get("keep_models", False):
+                    self._keeper.unload()
+            finally:
+                self._current = None
+                _INFERENCE_LOCK.release()
 
         with self._lock:
             self._jobs[job_id] = produced
@@ -402,7 +409,7 @@ class DirectBackend:
                                    str(cfg.get("offload") or opts.get("offload") or ""),
                                    str(cfg.get("quant") or opts.get("quant") or "auto"))
 
-        pipe = self._keeper.get(f"image:{pipe_cls_name}:{ref}", build)
+        pipe = self._keeper.get(f"image:{pipe_cls_name}:{ref}:{cfg.get('quant', 'auto')}:{cfg.get('offload', '')}", build)
         gen = None
         if seed >= 0:
             gen = torch.Generator(device="cuda").manual_seed(seed)
@@ -459,7 +466,13 @@ class DirectBackend:
         _total, free, gpu = probe_vram()
         if free <= 0:
             free = torch_free_vram()
-        dec = choose_quant(quant_pref, est, free)
+        # Known-bad model/backend pairs are not automatic fallback candidates.
+        allow_bnb = "Flux2" not in cls_name
+        dec = choose_quant(quant_pref, est, free, allow_bnb=allow_bnb)
+        import psutil
+        ram_free = psutil.virtual_memory().available / (1024 ** 3)
+        if est and est * 1.2 > ram_free:
+            raise RuntimeError(f"加载需要约 {est * 1.2:.1f} GB 空闲内存，目前 {ram_free:.1f} GB。请关闭其他应用或选择更小的预量化模型。")
         if offload:                       # 插件显式写了就听插件的
             dec["offload"] = offload
         self._log(summary(est, free, dec) + (f"  [{gpu}]" if gpu else ""))
@@ -495,19 +508,23 @@ class DirectBackend:
                     )
                 return cls.from_pretrained(ref, quantization_config=cfg,
                                            device_map="cuda", **kw)
+            if quant == "fp8":
+                pipe = cls.from_pretrained(ref, use_safetensors=True, low_cpu_mem_usage=True, **kw)
+                component = getattr(pipe, "transformer", None) or getattr(pipe, "unet", None)
+                if component is None or not hasattr(component, "enable_layerwise_casting"):
+                    raise RuntimeError(f"{cls_name} 的模型组件不支持 FP8 分层存储")
+                component.enable_layerwise_casting(storage_dtype=torch.float8_e4m3fn, compute_dtype=dtype)
+                return pipe
             try:
-                return cls.from_pretrained(ref, use_safetensors=True, **kw)
+                return cls.from_pretrained(ref, use_safetensors=True, low_cpu_mem_usage=True, **kw)
             except Exception:
                 return cls.from_pretrained(ref, use_safetensors=False, **kw)
 
-        # 逐步降级：按决策 → 更狠的量化 → 加 offload
+        # Respect an explicit choice; auto may fall back to CPU offload only.
         chain = [(dec["quant"], dec["offload"])]
-        if dec["quant"] == "none":
-            chain += [("bnb8", dec["offload"]), ("bnb4", "model")]
-        elif dec["quant"] == "bnb8":
-            chain += [("bnb4", "model")]
-        elif dec["quant"] == "bnb4" and not dec["offload"]:
-            chain += [("bnb4", "model")]
+        if quant_pref == "auto" and dec != {"quant": "none", "offload": "model"}:
+            if ("none", "model") not in chain:
+                chain.append(("none", "model"))
 
         pipe = None
         last_err = None
@@ -526,6 +543,7 @@ class DirectBackend:
                 last_err = exc
                 self._log(f"[direct] 这一档没成（{quant}/{off or 'none'}）：{type(exc).__name__}: {str(exc)[:180]}")
                 pipe = None
+                purge("加载失败后释放")
 
         if pipe is None:
             raise RuntimeError(f"{cls_name} 加载失败，所有显存档位都试过了：{last_err}")
@@ -563,19 +581,26 @@ class DirectBackend:
         dtype = getattr(torch, str(opts.get("dtype") or "float16"), torch.float16)
 
         def build():
+            import psutil
+            available = psutil.virtual_memory().available / (1024 ** 3)
+            if low_memory_mode() and available < 11:
+                raise RuntimeError(f"建模前需要至少 11 GB 空闲内存，目前 {available:.1f} GB。请先关闭大型应用、卸载对话模型后重试。")
             mod, _, cls = loader.rpartition(".")
             if not mod:
                 raise RuntimeError(f"loader 要写完整路径，例如 hy3dgen.shapegen.XXX: {loader}")
             self._log(f"[direct] 加载 {cls} ← {ref}")
             M = __import__(mod, fromlist=[cls])
-            return getattr(M, cls).from_pretrained(ref, device="cuda", dtype=dtype)
+            load_kw = {"device": "cuda", "dtype": dtype}
+            if opts.get("subfolder"):
+                load_kw["subfolder"] = opts["subfolder"]
+            return getattr(M, cls).from_pretrained(ref, **load_kw)
 
         pipe = self._keeper.get(f"3d:{loader}:{ref}", build)
         self._log(f"[direct] 3D 生成 {key} steps={steps} octree={octree} …")
         t0 = time.time()
         meshes = pipe(image=image, num_inference_steps=steps,
                       guidance_scale=guidance, octree_resolution=octree,
-                      num_chunks=8000, output_type="trimesh")
+                      num_chunks=2000 if low_memory_mode() else 8000, output_type="trimesh")
         mesh = meshes[0] if isinstance(meshes, (list, tuple)) else meshes
         name = f"direct3d_{int(time.time())}_{uuid.uuid4().hex[:6]}.glb"
         path = self.out_root / "3d" / name

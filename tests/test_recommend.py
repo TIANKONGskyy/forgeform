@@ -33,7 +33,9 @@ class ProfileTest(unittest.TestCase):
         keys = {p.key: p for p in ps}
         # assets() 全空 = 没有 ComfyUI/diffusers/hy3dgen → 只剩从零开始那套
         self.assertIn("starter", keys)
-        self.assertFalse(keys["starter"].fits, "16G 内存不该被判为舒适可用")
+        self.assertTrue(keys["starter"].fits)
+        self.assertTrue(keys["starter"].config_patch["runtime"]["low_memory"])
+        self.assertIn("11 GB", keys["starter"].reason)
         self.assertIn("内存", keys["starter"].reason)
         # 8G 显存连 standard 都不进列表（阈值 12G）
         self.assertNotIn("standard", keys)
@@ -66,7 +68,7 @@ class ProfileTest(unittest.TestCase):
         ps = build_profiles(hw(12, ram=32), assets())
         keys = {p.key: p for p in ps}
         self.assertIn("standard", keys)
-        self.assertTrue(keys["standard"].fits)
+        self.assertFalse(keys["standard"].fits, "30.6 GB 原精度模型不能只看显存宣称适合 32 GB 内存")
 
     def test_24g_gets_comfy_full(self):
         ps = build_profiles(hw(24, ram=64), assets(comfy=True, comfy3d=True))

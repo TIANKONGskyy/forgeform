@@ -118,7 +118,7 @@ def run_downloads(p, yes: bool) -> bool:
             if not exe:
                 print(f"\n  跳过 {d.repo}：没找到 ollama 命令。")
                 print("  先装 Ollama（https://ollama.com/download），装完再跑一次。")
-                continue
+                return False
             cmd = [exe, "pull", d.repo]
             print(f"\n$ ollama pull {d.repo}")
             rc = subprocess.call(cmd)
@@ -130,7 +130,8 @@ def run_downloads(p, yes: bool) -> bool:
         if d.kind == "framework":
             print(f"\n  需要手动装（{d.size_gb:.1f} GB）：{d.repo}")
             print(f"    {d.note}")
-            continue
+            print("请使用图形化安装入口：python tools/studio.py")
+            return False
 
         cmd = [sys.executable, str(ROOT / "tools" / "fetch_model.py"),
                "--repo", d.repo, "--dest", d.dest, "--threads", "8"]
@@ -293,7 +294,8 @@ def main() -> int:
 
     ok = run_downloads(picked, yes=args.yes)
     if not ok and picked.downloads:
-        print("\n下载没完成，配置还是写进去了 —— 补下之后重跑一次即可。")
+        print("\n下载未完成，保留原配置。请使用图形化安装入口重试。")
+        return 1
 
     cfg = write_config(picked.config_patch, Path(args.config))
     print(f"\n配置已写入 {cfg}")
