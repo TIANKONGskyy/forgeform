@@ -602,9 +602,14 @@ class DirectBackend:
             low_ram = low_memory_mode() or available < 20
             patch_safetensors()
             prev_default = torch.empty(0).device.type
+            prev_dtype = torch.get_default_dtype()
             if low_ram:
-                self._log("[direct] 低内存模式：权重逐层搬显存 + 结构在显存里构建")
+                self._log("[direct] 低内存模式：权重逐层搬显存 + 结构在显存里构建（fp16）")
                 torch.set_default_device("cuda")
+                # 构建时就用半精度 —— conditioner/VAE 的参数直接省一半。
+                # 实测（6 GB 显存限制）：只设 device 会崩在 DINO 的 nn.Linear(20 MB)，
+                # 加上 dtype 之后显存峰值从 7.15 GB 降到 3.88 GB。
+                torch.set_default_dtype(dtype)
             try:
                 mod, _, cls = loader.rpartition(".")
                 if not mod:
@@ -618,6 +623,8 @@ class DirectBackend:
             finally:
                 if low_ram and prev_default != "cuda":
                     torch.set_default_device(prev_default)
+                if low_ram and torch.get_default_dtype() != prev_dtype:
+                    torch.set_default_dtype(prev_dtype)
                 unpatch_safetensors()
 
         pipe = self._keeper.get(f"3d:{loader}:{ref}", build)
