@@ -107,3 +107,58 @@ python tools/bench_mesh.py --image outputs/images/<最新那张>.png
 
 出图数据存 `outputs/bench_models.json` + 拼图 `outputs/bench_models.png`；
 建模数据存 `outputs/bench_mesh.json` + `outputs/bench_mesh.png`。
+
+---
+
+## 低配实测：6 GB 显存 / 10 GB 内存
+
+为了回答「8 GB 显存 / 16 GB 内存的笔记本到底行不行」，我在本机用代码把进程限制到
+**显存 6 GB、内存 10 GB**，再跑完整流程。限制只作用于当前进程，不影响机器上别的服务。
+
+### 结果：直连建模加载就失败
+
+```
+[1] 加载 hy3dgen 2mini（权重 3.6 GB）
+  ✗ 28.2s 失败: RuntimeError: DefaultCPUAllocator: not enough memory:
+      you tried to allocate 12582912 bytes
+  RSS 4.47 GB
+  torch 已分配 0.00 GB
+```
+
+失败在**加载阶段**，还没进推理。原因是加载要先把 safetensors 解到系统内存、
+再转 fp16、再搬到显存 —— 峰值需要 10 GB 以上，10 GB 限制下不够。
+
+**这不是代码能优化掉的开销**，是"权重必须完整过一遍内存"这个事实。
+
+### 各项的判断
+
+| 环节 | 6G/10G 能不能跑 | 依据 |
+|---|---|---|
+| 对话 | ✓ | LLM 是外部服务（Ollama），不占本进程内存 |
+| 出图（直连 diffusers） | 取决于模型 | SD1.5（4.2 GB 权重）大概率能跑；6.8 GB 以上的不行 |
+| 出图（ComfyUI） | ✓ | ComfyUI 是另一个进程，本进程限制管不到它 |
+| **建模（直连 hy3dgen）** | **✗** | 实测加载失败，10 GB 内存不够 |
+| 建模（ComfyUI） | 可能 | ComfyUI 自己的显存管理能 offload，但要装几十 GB |
+
+### 结论
+
+**8 GB 显存 / 16 GB 内存的笔记本，跑不通"直连模式"的完整流程。**
+卡在建模这一步，而且是在加载阶段就挂，不是跑慢了。
+
+可行的是两条：
+
+1. **只做出图**：笔记本当出图机用，模型选 SD1.5 级别；建模交给有显卡的机器。
+2. **装 ComfyUI**：让 ComfyUI 在自己的进程里管显存（它能 offload 到内存/磁盘）。
+   代价是要多装几十 GB 依赖和权重，而且 16 GB 内存下会频繁换页。
+
+**别指望在 16 GB 内存的笔记本上跑通全链路** —— 这不是配置问题，是内存物理不够。
+
+### 复现
+
+```powershell
+# 显存 6 GB + 内存 10 GB
+python tools/bench_lowend.py --vram 6 --ram 10
+```
+
+内存限制用 Windows Job Object（`ProcessMemoryLimit`），显存限制用
+`torch.cuda.set_per_process_memory_fraction`。
