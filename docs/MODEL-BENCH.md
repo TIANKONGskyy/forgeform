@@ -162,6 +162,26 @@ python tools/bench_mesh.py --image outputs/images/<最新那张>.png
 | 下 `OzzyGT/hunyuan3d_2mini_fast`（diffusers 格式） | 它缺 `model_index.json`，而且是给自定义 loader 用的，hy3dgen 不认 |
 | TRELLIS.2 GGUF q4（约 2 GB） | 包未接入（runtime adapter 没实现），`pick_mesh` 里已排除 |
 
+### ComfyUI 的显存峰值（实测）
+
+用 `nvidia-smi` 每 0.4 秒采一次，跑一次 2.1（256 octree）：
+
+```
+hunyuan21  134.9 s  峰值显存 15.9 GB
+```
+
+**15.9 GB > 8 GB** —— 8 GB 卡必须让 ComfyUI 开 `--lowvram`（激进 offload），
+速度会掉到分钟级的几倍。这不是"能不能跑"的问题，是"跑完要等多久"。
+
+对照：直连 2mini 的峰值是 **6.4 GB 显存 / 10.8 GB 内存** —— 显存够，内存不够。
+
+所以 8 GB 显存 / 16 GB 内存的机器，两条路都卡在某个上限：
+
+| 路径 | 卡在 | 需要 |
+|---|---|---|
+| ComfyUI + 2.1 | 显存 15.9 GB | 16 GB 显存 |
+| 直连 + 2mini | 内存 10.8 GB | 20 GB 内存 |
+
 ### 唯一可行的：ComfyUI
 
 ComfyUI 的加载是**分层**的，不会一次把整份权重读进内存。所以：
