@@ -65,18 +65,23 @@ hexagonal cross-section"），仍然不稳。这是扩散模型对几何形容�
 2mini 的优势是**推理只要 13 秒**；算上加载 105 秒 vs 2.1 的 136 秒，
 差距没数字看起来那么大，除非模型常驻显存做批量。
 
-### TRELLIS.2 —— 没测
+### TRELLIS.2 —— 环境已具备，尚未端到端跑
 
-`plugins/mesh/trellis2.yaml` 和 `trellis2_gguf.yaml` 里的 `loader`
-（`trellis2.pipelines.Trellis2ImageTo3DPipeline`）**是按包结构猜的，没验证**：
+2026-11-12 重新核对（之前这条写的是旧状态）：
 
-- `trellis2` 包未安装（`ModuleNotFoundError`）
-- 权重未下载（两个 repo 各约 8.5 GB）
+- ComfyUI 自定义节点 `ComfyUI-Trellis2` 已安装；
+  `/object_info` 实测暴露 85 个 Trellis 节点，包括
+  `Trellis2LoadModel`、`Trellis2PreProcessImage`、`Trellis2ShapeStage`、
+  `Trellis2MeshWithVoxelGenerator`、`Trellis2ExportMesh`。
+- 权重已在 `D:\ComfyUI-New\models\microsoft\TRELLIS.2-4B`，
+  实测合计 **16.37 GB**，不是"未下载"。
+- DINOv3 依赖已在
+  `D:\ComfyUI-New\models\facebook\dinov3-vitl16-pretrain-lvd1689m`（1.21 GB）。
+- ComfyUI 当前 0.37.2 正常，V100 32G 空闲约 32 GB。
 
-要验证得：装 `trellis2`（可能要编译 CUDA 扩展）→ 下权重 →
-`python tools/bench_mesh.py --models trellis2`。
-
-**在验证之前，把它当成"推荐里有、但没跑过"的选项。**
+**仍未完成**：把 `example_workflows/MeshOnly.json`（UI 格式）转成
+`/prompt` API 格式并真跑一次，记录耗时、面数、连通块。  
+在跑完之前，TRELLIS.2 仍然只是"环境就绪，未验收"，不能写成已支持。
 
 ---
 
