@@ -30,3 +30,39 @@
   .brand{font-size:20px;letter-spacing:1px}
   .brand small{white-space:nowrap;letter-spacing:1px}
 }
+
+
+/* ── 顶部署名（by ZYKT studio）与电脑屏幕适配 ──
+   这个工具主要在桌面上用：1366/1440/1920 三档是主战场，窄屏只是"能打开"。
+   所以大屏优先把字号和留白放大，而不是无脑铺满 —— 一行字拉到 1920 宽反而难读。 */
+
+.header-right{display:flex;align-items:center;gap:16px}
+.byline{font-size:11px;letter-spacing:.06em;color:var(--muted);text-decoration:none;
+  transition:color .15s}
+.byline b{color:var(--accent);font-weight:650;letter-spacing:.02em}
+.byline:hover{color:var(--text)}
+.byline:hover b{color:var(--accent);filter:brightness(1.15)}
+
+/* 1920 及以上：内容别无限拉宽，字号上调一档 */
+@media(min-width:1680px){
+  .page{max-width:1460px;padding:56px 64px}
+  h1{font-size:64px}
+  .small-title{font-size:38px}
+  .flow article,.panel,.plan{padding:27px}
+  .hardware{grid-template-columns:repeat(4,1fr);gap:14px}
+  header{padding:0 64px}
+  .job,footer{margin-left:64px;margin-right:64px}
+}
+/* 1366 这类笔记本屏：rail 收窄，主区多留一点 */
+@media(min-width:1051px) and (max-width:1360px){
+  .rail{width:206px;padding:26px 16px}
+  main{margin-left:206px}
+  .page{padding:38px 34px}
+  header{padding:0 34px}
+  h1{font-size:48px}
+  .job,footer{margin-left:34px;margin-right:34px}
+}
+/* 触屏/小桌面：把 hover 效果去掉，免得点完还挂着 */
+@media(hover:none){
+  .plan:hover,.flow article:hover{transform:none}
+}
