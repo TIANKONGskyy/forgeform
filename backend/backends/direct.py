@@ -373,6 +373,8 @@ class DirectBackend:
                 f"没有可用的 {stage} 模型：config.models.{stage} 是空的，"
                 f"内置插件也没有匹配项（已知: {known or '无'}）")
 
+        if plugin and plugin.unavailable_reason:
+            raise ValueError(plugin.unavailable_reason)
         merged = dict(plugin.params()) if plugin else {}
         for k, v in cfg.items():
             if v not in (None, "", 0):

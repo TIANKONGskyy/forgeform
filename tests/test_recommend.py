@@ -68,9 +68,10 @@ class ProfileTest(unittest.TestCase):
         ps = build_profiles(hw(12, ram=32), assets())
         keys = {p.key: p for p in ps}
         self.assertIn("standard", keys)
-        # 2026-11：standard 换成了 FLUX.2 Klein 4B（8.5 GB），12 GB 显存 / 32 GB 内存够用。
-        # 换成 9B（32 GB）时这条会变成 False —— 断言跟着模型走，不是永久结论。
-        self.assertTrue(keys["standard"].fits)
+        # Base 4B 的完整 diffusers 权重约 15 GB，32 GB RAM 不满足加载峰值预算。
+        self.assertFalse(keys["standard"].fits)
+        roomy = {p.key: p for p in build_profiles(hw(24, ram=64), assets())}
+        self.assertTrue(roomy['standard'].fits)
 
     def test_24g_gets_comfy_full(self):
         ps = build_profiles(hw(24, ram=64), assets(comfy=True, comfy3d=True))

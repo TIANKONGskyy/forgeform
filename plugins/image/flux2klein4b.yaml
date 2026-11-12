@@ -3,12 +3,12 @@ kind: image
 label: FLUX.2 Klein 4B
 pipeline: Flux2KleinPipeline
 repo: black-forest-labs/FLUX.2-klein-base-4B
-vram_hint: 10
-notes: 4B 参数版，约为 9B 的一半显存；diffusers 原生支持，不需要 GGUF。实测数据以 tools/bench_models.py 为准
+vram_hint: 13
+notes: 未蒸馏 Base 版本，默认 50 步；原精度下载约 15 GB。显存为估算，实际取决于卸载策略与分辨率。
 quant: auto
 defaults:
-  steps: 8
-  guidance: 3.5
+  steps: 50
+  guidance: 4.0
   width: 1024
   height: 1024
   dtype: bfloat16

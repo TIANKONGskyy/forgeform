@@ -52,6 +52,8 @@ def merge(src: Path, dst: Path, dry: bool = False) -> dict:
             skipped_type.append(str(rel))
             continue
         target = dst / rel
+        if not f.resolve().is_relative_to(src.resolve()) or not target.resolve().is_relative_to(dst.resolve()):
+            raise ValueError(f'更新路径超出安装目录：{rel}')
         if target.exists():
             try:
                 if target.read_bytes() == f.read_bytes():

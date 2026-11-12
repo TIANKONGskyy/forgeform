@@ -171,10 +171,10 @@ _LLM_CHOICES = [
 ]
 
 
-def list_llm_choices(vram_gb: float) -> list[dict]:
+def list_llm_choices(vram_gb: float, ram_gb: float = float("inf")) -> list[dict]:
     """这台机器上能装的对话模型清单（装不下的也列出来，标 fits=False）。"""
     return [{"model": name, "size_gb": gb, "min_vram_gb": need,
-             "label": why, "fits": vram_gb >= need}
+             "label": why, "fits": vram_gb >= need and ram_gb >= gb * 2 + 6}
             for name, gb, need, why in _LLM_CHOICES]
 
 
@@ -210,10 +210,10 @@ def _ollama_install_download() -> Download:
 # 但下载量不等于"这台机器能跑" —— 选型要同时看：有没有 ComfyUI、显存多少。
 _MESH_CHOICES = [
     # (id, 需要的最低显存, 需要的条件, 说明)
-    ("hunyuan21", 16, "comfyui", "ComfyUI 3D-Pack 已装时最省事，512 octree 质量最高"),
-    ("trellis2", 16, "any", "2026 用得最多；输出含 PBR，几何与 2.1 同级"),
-    ("trellis2_gguf", 8, "any", "量化版，8G 卡可跑；质量差异未实测"),
-    ("hunyuan_mini", 7, "any", "3.6 GB 权重，跑得最快，但正视图容易出薄片"),
+    ("hunyuan21", 16, "comfyui", "复用已有 ComfyUI 3D-Pack"),
+    ("trellis2", 16, "any", "尚未接入 TRELLIS 运行时，暂不可用"),
+    ("trellis2_gguf", 8, "any", "尚未接入 GGUF 运行时，暂不可用"),
+    ("hunyuan_mini", 7, "any", "Hunyuan3D-2mini，支持直连建模"),
 ]
 
 
@@ -225,6 +225,8 @@ def pick_mesh(assets: dict, vram_gb: float) -> tuple[str, str]:
     """
     has_comfy3d = bool(assets.get("comfyui_3d"))
     for mid, need_vram, need, why in _MESH_CHOICES:
+        if mid.startswith("trellis"):
+            continue  # Runtime adapters are not implemented.
         if need == "comfyui" and not has_comfy3d:
             continue
         if vram_gb < need_vram:
@@ -238,7 +240,7 @@ def list_mesh_choices(assets: dict, vram_gb: float) -> list[dict]:
     has_comfy3d = bool(assets.get("comfyui_3d"))
     out = []
     for mid, need_vram, need, why in _MESH_CHOICES:
-        ok = vram_gb >= need_vram and (need != "comfyui" or has_comfy3d)
+        ok = not mid.startswith("trellis") and vram_gb >= need_vram and (need != "comfyui" or has_comfy3d)
         out.append({"id": mid, "min_vram_gb": need_vram, "label": why,
                     "requires": ("ComfyUI 3D-Pack" if need == "comfyui" else ""),
                     "fits": ok})
@@ -259,8 +261,8 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
     has_diffusers = bool(assets.get("diffusers"))
     has_hy3d = bool(assets.get("hy3dgen"))
 
-    # 建模模型：按"有没有 ComfyUI 3D-Pack + 显存"选，不再硬编码 2mini/2.1
-    mesh_pick, mesh_why = pick_mesh(assets, hw.vram_gb)
+    # 直连方案必须匹配已实现的加载器、下载文件与配置。
+    mesh_pick = "hunyuan_mini"  # Direct plans install and run the Hunyuan adapter.
 
     def with_llm(dls: list[Download], need_ollama: bool,
                  vram_cap: float | None = None) -> list[Download]:
@@ -317,7 +319,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
     if hw.has_gpu and (has_diffusers or has_hy3d):
         sd15 = Download("image", "sd15", "stable-diffusion-v1-5/stable-diffusion-v1-5",
                         "D:/models/sd15", ["model_index.json", "vae/", "unet/", "text_encoder/",
-                                           "tokenizer/", "scheduler/"], ["*.ckpt"], 4.2,
+                                           "tokenizer/", "scheduler/"], [r"\.ckpt$"], 4.2,
                         "SD1.5 全精度，8G 显存够")
         mini = Download("mesh", "hunyuan_mini", "tencent/Hunyuan3D-2mini",
                         "D:/models/hy3dgen/hunyuan3d-2mini",
@@ -346,31 +348,23 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             },
         ))
 
-    # 标准：Z-Image + 2mini
+    # 标准：FLUX.2 Klein Base 4B + 2mini
     if hw.has_gpu and vram >= 12:
-        # 2026-11：FLUX.2 Klein 出了 4B 版（约 9B 的一半显存），12–16 GB 卡上
-        # 比推 Z-Image 更划算。Z-Image 仍保留，它 8 步出图更快。
         klein4b = Download("image", "flux2klein4b", "black-forest-labs/FLUX.2-klein-base-4B",
                            "D:/models/flux2klein4b",
                            ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/",
-                            "transformer/", "vae/"], ["*.ckpt"], 8.5,
-                           "4B 参数，diffusers 原生支持，约 10 GB 显存")
-        zi = Download("image", "z_image", "Tongyi-MAI/Z-Image-Turbo",
-                      "D:/models/z-image-turbo-diffusers", ["^model_index\\.json$", "^scheduler/",
-                      "^text_encoder/", "^tokenizer/", "^transformer/", "^vae/"],
-                      ["assets/"], 30.6, "8 步出图，中文理解好")
+                            "transformer/", "vae/"], [r"\.ckpt$"], 15.0,
+                           "Base 4B 原精度权重约 15 GB，加载另需内存余量")
         out.append(Profile(
             key="standard",
             name="标准（FLUX.2 Klein 4B + 3D 2mini）",
-            desc="出图 FLUX.2 Klein 4B（约 10 GB 显存），建模 2mini。",
+            desc="出图 FLUX.2 Klein Base 4B（默认 50 步），建模 2mini。",
             backend_mode="auto",
-            # 2026-11：这一档默认换成 FLUX.2 Klein 4B —— 10 GB 显存就够，
-            # 比 Z-Image 省一半，12–16 GB 的卡不用挤。Z-Image 保留为备选（8 步更快）。
             image_model="flux2klein4b", mesh_model=mesh_pick,
             downloads=with_llm([klein4b], need_ollama=not assets.get("ollama"), vram_cap=12),
-            est_gb=8.5,
+            est_gb=15.0,
             fits=vram >= 12 and fits_by_ram(11) and hw.disk_free_gb >= 40,
-            reason=("显存 12 GB+ / 内存 16 GB+ / 磁盘 40 GB+"
+            reason=("显存 12 GB+；内存按完整权重加载峰值检查；磁盘 40 GB+"
                     if vram >= 12 else f"显存只有 {vram:.0f} GB，不够"),
             config_patch={
                 "backend": {"mode": "auto"},
@@ -408,7 +402,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
         sd15_boot = Download("image", "sd15", "stable-diffusion-v1-5/stable-diffusion-v1-5",
                              "D:/models/sd15",
                              ["model_index.json", "vae/", "unet/", "text_encoder/",
-                              "tokenizer/", "scheduler/"], ["*.ckpt"], 4.2,
+                              "tokenizer/", "scheduler/"], [r"\.ckpt$"], 4.2,
                              "SD1.5 全精度，8G 显存够")
         mini_boot = Download("mesh", "hunyuan_mini", "tencent/Hunyuan3D-2mini",
                              "D:/models/hy3dgen/hunyuan3d-2mini",

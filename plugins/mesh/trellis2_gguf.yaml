@@ -12,3 +12,5 @@ defaults:
   guidance: 7.5
   octree: 192
   dtype: float16
+
+unavailable_reason: 尚未接入对应运行时，暂不能安装或切换使用

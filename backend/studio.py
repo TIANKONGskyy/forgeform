@@ -163,7 +163,7 @@ class Studio:
 
     def scan(self, model_root=''):
         from backend.backends.detect import probe_all, probe_local_diffusers
-        from backend.backends.recommend import probe_hardware, summarize_assets, build_profiles, pick_default
+        from backend.backends.recommend import probe_hardware, summarize_assets, build_profiles, pick_default, list_llm_choices
         if model_root:
             self.model_root = str(Path(model_root).expanduser().resolve())
         config = self.config()
@@ -180,7 +180,7 @@ class Studio:
         default = pick_default(profiles)
         self.snapshot = {'hardware': hardware.to_dict(), 'frameworks': [f.to_dict() for f in fws],
             'profiles': [p.to_dict() for p in profiles], 'default': default.key if default and default.fits else '',
-            'model_root': self.model_root, 'scanned_at': time.time()}
+            'model_root': self.model_root, 'llm_choices': list_llm_choices(hardware.vram_gb, hardware.ram_gb), 'scanned_at': time.time()}
         self.log('环境扫描完成，不加载模型')
 
     def config(self):
@@ -195,12 +195,29 @@ class Studio:
         self.command([self.python, '-c', 'import gradio,fastapi,trimesh; print("基础环境验证通过")'])
         (venv / '.deps-ok').touch()
 
-    def install(self, key):
+    def install(self, key, llm=""):
         if key not in self.plans:
             raise ValueError('请先重新扫描，再选择方案')
         plan = copy.deepcopy(self.plans[key])
         if not plan.fits:
             raise ValueError(plan.reason)
+        if llm:
+            from backend.backends.recommend import Download, list_llm_choices, _ollama_install_download
+            if not self.snapshot:
+                raise ValueError('请重新扫描硬件')
+            hw = self.snapshot['hardware']
+            choice = next((c for c in list_llm_choices(hw['vram_gb'], hw['ram_gb']) if c['model'] == llm), None)
+            if not choice or not choice['fits']:
+                raise ValueError('所选对话模型不适合当前硬件或不在支持清单中')
+            plan.downloads = [d for d in plan.downloads if d.kind != 'llm']
+            if not any(d.plugin_id == 'ollama' for d in plan.downloads):
+                plan.downloads.insert(0, _ollama_install_download())
+            plan.downloads.append(Download('llm', 'chat', llm, size_gb=choice['size_gb']))
+            if hw['disk_free_gb'] < sum(d.size_gb for d in plan.downloads) * 1.2 + 5:
+                raise ValueError('磁盘空间不足以安装所选对话模型与方案')
+            plan.config_patch['agent'] = {'enabled': True, 'provider': 'ollama'}
+            plan.config_patch.setdefault('models', {})['llm'] = {'default_model': llm,
+                'fallback_model': llm, 'think': False, 'models': {llm: {'num_ctx': 2048 if hw['ram_gb'] < 20 else 4096}}}
         if not (self.root / '.venv' / '.deps-ok').exists():
             self.runtime_install()
         self.job['total'] = len(plan.downloads) + 1
@@ -261,7 +278,7 @@ class Studio:
             cfg = config.get('models', {}).get(kind, {}).get(p.id, {})
             ref = cfg.get('path') or p.path
             entries.append({'id': p.id, 'kind': kind, 'label': p.label, 'repo': p.repo,
-                'path': ref, 'installed': bool(ref and Path(ref).exists()), 'vram_hint': p.vram_hint})
+                'unavailable_reason': p.unavailable_reason, 'path': ref, 'installed': bool(ref and Path(ref).exists()), 'vram_hint': p.vram_hint})
         return entries
 
     def configure(self, data):
@@ -283,6 +300,8 @@ class Studio:
             existing = self.config().get('models', {}).get(kind, {})
             if not plugin and pid not in existing:
                 raise ValueError('未知模型：' + pid)
+            if plugin and plugin.unavailable_reason:
+                raise ValueError(plugin.unavailable_reason)
             path = data.get(kind + '_path', '').strip()
             if path and not Path(path).exists():
                 raise ValueError('模型路径不存在：' + path)
@@ -347,27 +366,36 @@ class Studio:
 
     def _deletable_roots(self):
         """铸想自己拥有的、可以安全删除的目录。"""
-        roots = []
-        m = self.root / 'models'                    # 铸想默认模型目录
-        if m.exists():
-            roots.append(m)
-        cfg = self.config()
-        for key in ('model_root',):
-            v = cfg.get(key) or (cfg.get('paths') or {}).get(key)
-            if v and Path(os.path.expandvars(str(v))).exists():
-                roots.append(Path(os.path.expandvars(str(v))))
-        # 也认 D:/models 这种环境变量指过去的目录
-        env_models = os.environ.get('FOUNDRY_MODELS')
-        if env_models and Path(env_models).exists():
-            roots.append(Path(env_models))
-        # 去重
-        seen, out = set(), []
-        for r in roots:
-            k = str(r.resolve()).lower()
-            if k not in seen:
-                seen.add(k)
-                out.append(r)
-        return out
+        m = self.root / 'models'
+        return [m] if m.exists() and self._safe_local(m) else []
+
+    def _safe_local(self, path):
+        """Only physical children of this installation; never follow reparse points."""
+        try:
+            relative = path.absolute().relative_to(self.root.absolute())
+            if not relative.parts:
+                return False
+            current = self.root
+            for part in relative.parts:
+                current = current / part
+                if current.is_symlink() or getattr(current.lstat(), 'st_file_attributes', 0) & 0x400:
+                    return False
+            path.resolve().relative_to(self.root.resolve())
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def _check_delete(self, path):
+        if not self._safe_local(path):
+            raise ValueError('拒绝删除外部目录或链接：' + str(path))
+        if path.is_dir():
+            for child in path.rglob('*'):
+                if not self._safe_local(child):
+                    raise ValueError('目录包含链接，需手动检查：' + str(child))
+
+    def _check_app_stopped(self):
+        if self.app and self.app.poll() is None:
+            raise ValueError('请先关闭创作进程，再删除数据')
 
     def _under_deletable(self, path: Path) -> bool:
         """这个路径是否落在铸想可删范围内（resolve 后比较，防 ../ 与符号链接）。"""
@@ -377,8 +405,8 @@ class Studio:
             return False
         for root in self._deletable_roots():
             try:
-                real.relative_to(root.resolve())
-                return True
+                relative = real.relative_to(root.resolve())
+                return bool(relative.parts) and self._safe_local(path)
             except ValueError:
                 continue
         return False
@@ -405,6 +433,13 @@ class Studio:
         return False, '没有这个模型'
 
     def remove_model(self, model_id: str):
+        with self.lock:
+            return self._remove_model(model_id)
+
+    def _remove_model(self, model_id: str):
+        if self.job['status'] == 'running':
+            raise ValueError('请等待当前任务完成后再删除模型')
+        self._check_app_stopped()
         ok, why = self.model_removable(model_id)
         if not ok:
             raise ValueError(why)
@@ -417,6 +452,7 @@ class Studio:
             node = (cfg.get('models') or {}).get(kind, {}).get(p.id, {})
             ref = node.get('path') or p.path
             path = Path(os.path.expandvars(str(ref)))
+            self._check_delete(path)
             freed = self._dir_size(path)
             self.log(f'删除模型 {model_id}: {path}')
             if path.is_dir():
@@ -475,26 +511,33 @@ class Studio:
 
         **不删**：ComfyUI 目录、用户指定的外部模型目录、仓库源码本身。
         """
+        self._check_app_stopped()
         scope = (scope or 'all').lower()
+        if scope not in ('all', 'runtime', 'models', 'outputs'):
+            raise ValueError('未知清理范围')
+        selected = {'all': None, 'runtime': {'venv'}, 'models': {'models'}, 'outputs': {'outputs', 'logs', 'temp', 'projects'}}[scope]
+        for item in self.purge_plan()['items']:
+            if selected is None or item['key'] in selected:
+                self._check_delete(Path(item['path']))
         removed = []
         if scope in ('all', 'runtime'):
             venv = self.root / '.venv'
             if venv.exists():
                 freed = self._dir_size(venv)
-                shutil.rmtree(venv, ignore_errors=True)
+                shutil.rmtree(venv)
                 removed.append(('venv', round(freed / 1024 ** 3, 2)))
         if scope in ('all', 'models'):
             for r in self._deletable_roots():
                 if r.exists():
                     freed = self._dir_size(r)
-                    shutil.rmtree(r, ignore_errors=True)
+                    shutil.rmtree(r)
                     removed.append((str(r), round(freed / 1024 ** 3, 2)))
         if scope in ('all', 'outputs'):
             for key in ('outputs', 'logs', 'temp', 'projects'):
                 d = self.root / key
                 if d.exists():
                     freed = self._dir_size(d)
-                    shutil.rmtree(d, ignore_errors=True)
+                    shutil.rmtree(d)
                     removed.append((key, round(freed / 1024 ** 3, 2)))
         if scope == 'all':
             cfg = self.root / 'config.json'
@@ -556,7 +599,7 @@ def make_server(studio, port=7861):
                 if size > 16384: raise ValueError('请求过大')
                 data = json.loads(self.rfile.read(size) or b'{}')
                 if self.path == '/api/scan': result = studio.start_job('检测硬件与已有环境', lambda: studio.scan(data.get('model_root', '')))
-                elif self.path == '/api/install': result = studio.start_job('准备安装方案', lambda: studio.install(data.get('key', '')))
+                elif self.path == '/api/install': result = studio.start_job('准备安装方案', lambda: studio.install(data.get('key', ''), data.get('llm', '')))
                 elif self.path == '/api/runtime': result = studio.start_job('安装基础环境', studio.runtime_install)
                 elif self.path == '/api/launch': result = studio.start_job('启动创作空间', studio.launch)
                 elif self.path == '/api/cancel': result = studio.cancel()

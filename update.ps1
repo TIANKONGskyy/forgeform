@@ -36,27 +36,27 @@ Say ''
 # ── download ───────────────────────────────────────────────
 if ($Version -eq 'latest') {
     $api = "https://api.github.com/repos/$Repo/releases/latest"
-    try {
-        $rel = Invoke-RestMethod -Uri $api -UseBasicParsing -TimeoutSec 30
-        $tag = $rel.tag_name
-    } catch {
-        Say "cannot read latest release ($($_.Exception.Message))" 'Yellow'
-        Say 'falling back to tag v3.0.0' 'Yellow'
-        $tag = 'v3.0.0'
-    }
 } else {
-    $tag = $Version
+    $api = "https://api.github.com/repos/$Repo/releases/tags/$([uri]::EscapeDataString($Version))"
 }
+$rel = Invoke-RestMethod -Uri $api -UseBasicParsing -TimeoutSec 30
+$tag = $rel.tag_name
+if ($tag -notmatch '^v\d+\.\d+\.\d+(?:[-.][A-Za-z0-9.-]+)?$') { throw 'Invalid release tag' }
 Say "target release: $tag"
 
-$zipName = 'forgeform-v3.0.0.zip'
+$zipName = "forgeform-$tag.zip"
+$asset = @($rel.assets | Where-Object { $_.name -eq $zipName })
+if ($asset.Count -ne 1) { throw "Release has no unique $zipName asset" }
+$asset = $asset[0]
+$downloadUrl = $asset.browser_download_url
+if ($downloadUrl -ne "https://github.com/$Repo/releases/download/$tag/$zipName") { throw 'Unexpected release asset URL' }
 $sources = @(
-    "https://github.com/$Repo/releases/download/$tag/$zipName",
-    "https://gh-proxy.com/https://github.com/$Repo/releases/download/$tag/$zipName",
-    "https://ghfast.top/https://github.com/$Repo/releases/download/$tag/$zipName"
+    $downloadUrl
 )
 
 $tmp = Join-Path $env:TEMP ('forgeform-update-' + [guid]::NewGuid().ToString('N').Substring(0,8))
+$tempRoot = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
+if (-not [IO.Path]::GetFullPath($tmp).StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid temporary path' }
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 $zip = Join-Path $tmp $zipName
 $got = $false
@@ -66,7 +66,10 @@ foreach ($src in $sources) {
         $sw = [Diagnostics.Stopwatch]::StartNew()
         Invoke-WebRequest -Uri $src -OutFile $zip -UseBasicParsing -TimeoutSec 180
         $mb = [math]::Round((Get-Item $zip).Length / 1MB, 2)
-        if ($mb -lt 1) { throw "file too small ($mb MB)" }
+        if ((Get-Item $zip).Length -ne $asset.size) { throw 'Asset size mismatch' }
+        if ($asset.digest -match '^sha256:(.+)$') {
+            if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash -ne $Matches[1]) { throw 'Asset checksum mismatch' }
+        }
         Say ("  ok  {0} MB in {1:N1}s" -f $mb, $sw.Elapsed.TotalSeconds) 'Green'
         $got = $true
         break
@@ -93,6 +96,7 @@ $newVer = 'unknown'
 $nvf = Join-Path $newRoot.FullName 'VERSION'
 if (Test-Path $nvf) { $newVer = (Get-Content $nvf -Raw).Trim() }
 Say "package version: $newVer"
+if ($newVer -ne $tag.Substring(1)) { throw 'Package version does not match requested release' }
 
 if ($newVer -ne 'unknown' -and $newVer -eq $localVer) {
     Say ''

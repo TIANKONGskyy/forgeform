@@ -120,23 +120,36 @@ def _fetch_range(url: str, start: int, end: int, part: Path, stop: threading.Eve
     """下 [start, end] 到 part，支持从 part 已有长度续传。"""
     have = part.stat().st_size if part.exists() else 0
     want = end - start + 1
-    if have >= want:
+    if have > want:
+        part.unlink()
+        have = 0
+    if have == want:
         return
     rng = f"bytes={start + have}-{end}"
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Range": rng})
-    with urllib.request.urlopen(req, timeout=60) as r, open(part, "ab") as f:
-        while not stop.is_set():
-            chunk = r.read(1 << 20)      # 1 MB
-            if not chunk:
-                break
-            f.write(chunk)
+    with urllib.request.urlopen(req, timeout=60) as r:
+        if r.status == 206:
+            if not r.headers.get('Content-Range', '').startswith(f'bytes {start + have}-{end}/'):
+                raise RuntimeError('服务器返回了错误的分片范围')
+        elif r.status != 200 or start + have != 0 or r.headers.get('Content-Length') != str(want):
+            raise RuntimeError('服务器不支持此断点范围，保留分片等待重试')
+        with open(part, "ab") as f:
+            remaining = want - have
+            while remaining and not stop.is_set():
+                chunk = r.read(min(1 << 20, remaining))
+                if not chunk:
+                    break
+                f.write(chunk)
+                remaining -= len(chunk)
+            if remaining:
+                raise RuntimeError('分片传输提前结束')
 
 
 def download_file(url: str, dest: Path, size: int, threads: int = 8,
                   retries: int = 3) -> bool:
     """多线程分片下载一个文件。断点续传靠 .part/<index> 目录里的小块。"""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists() and size and dest.stat().st_size >= size:
+    if dest.exists() and size and dest.stat().st_size == size:
         print(f"    skip  {dest.name} (已完整)")
         return True
 
@@ -192,7 +205,9 @@ def download_file(url: str, dest: Path, size: int, threads: int = 8,
         t.join(timeout=5)
 
     done = sum((p.stat().st_size for p in part_dir.iterdir()), 0)
-    if done < size * 0.999:
+    if any(not (part_dir / f'{i:03d}').exists() or
+           (part_dir / f'{i:03d}').stat().st_size != min(chunk, size - i * chunk)
+           for i in range(threads) if i * chunk < size):
         print(f"    ✗ 不完整 {done}/{size} 字节，保留 .parts 下次续传")
         return False
 
@@ -234,6 +249,13 @@ def main() -> int:
                     help="auto=自动挑最快的镜像")
     ap.add_argument("--dry-run", action="store_true", help="只列文件，不下")
     args = ap.parse_args()
+    if not 1 <= args.threads <= 16:
+        ap.error('--threads 必须在 1 到 16 之间')
+    try:
+        for pattern in args.include + args.exclude:
+            re.compile(pattern)
+    except re.error as exc:
+        ap.error(f'过滤规则不是有效的正则表达式：{exc}')
 
     dest = Path(args.dest)
     print(f"仓库: {args.repo}\n目标: {dest}\n")
@@ -255,6 +277,11 @@ def main() -> int:
         return 1
 
     picked = [(p, s) for p, s in files if _match(p, args.include, args.exclude)]
+    for path, _ in picked:
+        target = dest / path
+        if ':' in path or '\\' in path or '..' in Path(path).parts or not target.resolve().is_relative_to(dest.resolve()) or target.resolve() == dest.resolve():
+            print(f'拒绝不安全的仓库文件路径：{path}')
+            return 1
     if not picked:
         print("未找到匹配的模型文件，请检查仓库与过滤条件。")
         return 1

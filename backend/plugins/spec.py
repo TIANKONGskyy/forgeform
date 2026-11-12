@@ -110,6 +110,7 @@ class ModelPlugin:
     adapter: str = ""              # 可选：同目录下的 .py，做参数转接
     defaults: dict = field(default_factory=dict)
     vram_hint: float = 0.0
+    unavailable_reason: str = ""
     notes: str = ""
     source: str = ""               # 来自哪个文件
 
@@ -177,6 +178,7 @@ class Registry:
                     defaults=dict(data.get("defaults") or {}),
                     vram_hint=float(data.get("vram_hint") or 0),
                     notes=str(data.get("notes") or ""),
+                    unavailable_reason=str(data.get("unavailable_reason") or ""),
                     source=str(f),
                 )
                 if plugin.adapter:
