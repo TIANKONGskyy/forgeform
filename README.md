@@ -39,7 +39,7 @@
 
 ## 快速开始
 
-### 方式一：解压后双击（推荐）
+### 方式一：解压后双击
 
 1. 下载 [`forgeform-v3.0.0.zip`](https://github.com/TIANKONGskyy/forgeform/releases/latest) 并解压
 2. 双击 **`启动.bat`**
@@ -57,7 +57,7 @@
 
  ★ [1] 复用现有 ComfyUI（零下载）        0.0 GB · auto
    [2] 最小可用（SD1.5 + 3D 2mini）       8.2 GB · direct
-   [3] 推荐（Z-Image Turbo + 3D 2mini）  30.6 GB · auto
+   [3] 标准（Z-Image Turbo + 3D 2mini）  30.6 GB · auto
 ```
 
 ### 方式二：命令行
@@ -67,7 +67,7 @@ git clone https://github.com/TIANKONGskyy/forgeform.git
 cd forgeform
 pip install -r requirements.txt
 
-python tools/setup.py     # 探测本机硬件与已装框架，推荐方案，回车一键装
+python tools/setup.py     # 探测本机硬件与已装框架，列出可装方案
 python app.py             # → http://127.0.0.1:7860
 ```
 
@@ -80,7 +80,7 @@ vLLM / 本地 diffusers 模型，然后给出可选方案：
 
  ★ [1] 复用现有 ComfyUI（零下载）        0.0 GB · auto
    [2] 最小可用（SD1.5 + 3D 2mini）       8.2 GB · direct
-   [3] 推荐（Z-Image Turbo + 3D 2mini）  30.6 GB · auto
+   [3] 标准（Z-Image Turbo + 3D 2mini）  30.6 GB · auto
 ```
 
 也可以 `--dry-run`（只看方案）、`--custom`（自己选模型）、`--profile <名字> --yes`（直接装）。
@@ -124,7 +124,7 @@ python tools/doctor.py
 
 | 文件 | 内容 |
 |---|---|
-| `docs/HARDWARE.md` | 实测显存/内存占用、各档硬件推荐 |
+| `docs/HARDWARE.md` | 实测显存/内存占用、各档配置对照 |
 | `docs/MODELS.md` | 模型下载地址、放哪、多大 |
 | `docs/CONFIG.md` | 配置项与按显存分档的方案 |
 | `docs/PLUGINS.md` | 模型插件（YAML） |

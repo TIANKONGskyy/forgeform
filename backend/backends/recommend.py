@@ -282,7 +282,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
                       ["assets/"], 30.6, "8 步出图，中文理解好")
         out.append(Profile(
             key="standard",
-            name="推荐（Z-Image Turbo + 3D 2mini）",
+            name="标准（Z-Image Turbo + 3D 2mini）",
             desc="出图 Z-Image（8 步、1024²、中文提示词准），建模 2mini。"
                  "作者本人日常用的就是这一档。",
             backend_mode="auto",

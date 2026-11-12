@@ -861,13 +861,13 @@ def refresh_history():
 
 HERO_HTML = """
 <div class="empty-hero">
-  <h2>从一句话到<span class="accent">可打印的 3D 实体</span></h2>
+  <h2>一句话到<span class="accent">可打印模型</span></h2>
   <p>描述你想要的物品 → 生成图片 → 一键重建 3D → 导出 STL 直接打印</p>
   <div class="chips" aria-label="创作示例">
-    <div class="chip">桌面收纳</div>
-    <div class="chip">帮我设计一个机械手臂底座</div>
-    <div class="chip">画一个茶杯垫，直径 90mm</div>
-    <div class="chip">做一个手机支架，蓝色</div>
+    <div class="chip">直径 80mm 的法兰盘</div>
+    <div class="chip">带四个安装孔的底座</div>
+    <div class="chip">茶杯垫，直径 90mm</div>
+    <div class="chip">手机支架</div>
   </div>
 </div>
 """
