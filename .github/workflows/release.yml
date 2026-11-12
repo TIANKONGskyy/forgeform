@@ -1,0 +1,112 @@
+name: release
+
+# 打 tag（v*）时自动：
+#   1. 把仓库里的 VERSION 写成 tag 名（去掉前缀 v）
+#   2. 打一个 forgeform-<tag>.zip
+#   3. 建 / 更新 Release 并挂上 zip
+#
+# 这样发版只需要 `git tag v3.0.1 && git push --tags`，不用手动改 VERSION、
+# 手动打包、手动传附件。手动做这三步很容易漏（漏了 VERSION 的话，
+# 更新.bat 会以为还是旧版，反复重下）。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（如 v3.0.1）'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VER="${TAG#v}"
+          echo "tag=$TAG"   >> "$GITHUB_OUTPUT"
+          echo "ver=$VER"   >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG  version=$VER"
+
+      - name: Sync VERSION
+        # 仓库里的 VERSION 是给人看的，真正要保证的是"打出来的包里它等于 tag"
+        run: echo "${{ steps.ver.outputs.ver }}" > VERSION
+
+      - name: Package
+        # 用 git archive：它只打**已提交**的文件，天然尊重 .gitignore。
+        # 千万别用 `zip -r .` —— 工作区里的 STL/GLB 产物会被一起打包，
+        # 实测 2.5 MB 能涨到 77 MB（docs/showcase 下的 model.stl 每个就 9 MB）。
+        # VERSION 是刚写、还没提交的，单独补进 zip。
+        run: |
+          NAME="forgeform-${{ steps.ver.outputs.tag }}.zip"
+          PREFIX="forgeform-${{ steps.ver.outputs.tag }}"
+          git archive --format=zip --prefix="$PREFIX/" HEAD -o "$NAME"
+          python3 - "$NAME" "$PREFIX/VERSION" <<'PY'
+          import sys, zipfile, shutil, tempfile, pathlib
+          zp, arc = sys.argv[1], sys.argv[2]
+          body = pathlib.Path("VERSION").read_bytes()
+          tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip").name
+          with zipfile.ZipFile(zp) as src, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as dst:
+              for item in src.infolist():
+                  if item.filename == arc:
+                      continue
+                  dst.writestr(item, src.read(item.filename))
+              dst.writestr(arc, body)
+          shutil.move(tmp, zp)
+          print("VERSION ->", arc)
+          PY
+          ls -lh "$NAME"
+          echo "ASSET=$NAME" >> "$GITHUB_ENV"
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: 铸想 ForgeForm ${{ steps.ver.outputs.tag }}
+          files: ${{ env.ASSET }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            一句话生成可打印的 STL。
+
+            ## 怎么用
+
+            下载下面的 `${{ env.ASSET }}`，**解压后双击 `启动.bat`**。
+
+            已经装过旧版的话，把压缩包解压到**现有安装目录**、双击 **`更新.bat`**，
+            它会只覆盖源码，`config.json` / `outputs` / `models` / `.venv` 全部保留。
+
+            ## 要求
+
+            - Windows 10/11
+            - Python 3.11 / 3.12 / 3.13（没有会自动装 3.12.9）
+            - NVIDIA GPU，8 GB 显存起
+            - 内存 32 GB 建议
+
+            国内下载慢就在链接前加 `https://gh-proxy.com/`。
+
+      - name: Commit VERSION back
+        # 只回写 tag 对应的版本号；失败不阻断发布（可能是 fork 或只读 token）
+        continue-on-error: true
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet VERSION; then
+            git add VERSION
+            git commit -m "chore: VERSION -> ${{ steps.ver.outputs.ver }}"
+            # tag 触发时是 detached HEAD，推到 tag 名会失败 —— 回写主分支
+            git push origin "HEAD:main" || true
+          fi
