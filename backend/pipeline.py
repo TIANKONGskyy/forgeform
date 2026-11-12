@@ -650,6 +650,7 @@ class Pipeline:
         params = {
             "model_config": model_cfg,
             "input_image": uploaded_name,
+            "image_path": str(input_image),
             "prompt": prompt or getattr(self.state, "base_prompt", "") or getattr(self.state, "user_prompt", "") or "",
             "seed": -1,
         }
@@ -831,16 +832,26 @@ class Pipeline:
         self._wait_gpu_cool()
         
         # 上传图片到 ComfyUI（3d 阶段 → 8189 实例/GPU1）
+        #
+        # ★ 2026-11-13 修：直连后端（hy3dgen）吃的是**本地绝对路径**，不是 ComfyUI
+        #   上传后的文件名。原来无条件 upload 并把结果塞进 params["input_image"]，
+        #   而 direct.py 读的是 params["image_path"] → 永远是空串，每次都报
+        #   "输入图片不存在"，直连建模从来没被真正调通过。
+        uploaded_name = ""
         try:
             uploaded_name = self.comfy.upload_image(input_image, stage="3d")
         except Exception as e:
-            return StageResult(False, error=f"上传图片失败: {e}")
+            if self.backend_mode != "direct":
+                return StageResult(False, error=f"上传图片失败: {e}")
+            self._log(f"[直连] ComfyUI 上传失败，忽略: {e}")
         
         output_path = str(Path(self.config["paths"]["output"]) / "3d" / f"model_{int(time.time())}.glb")
         
         params = {
             "model_config": model_cfg,
+            "model_key": model_key,   # 后端靠它选模型；缺了会落到 stages.default_model
             "input_image": uploaded_name,
+            "image_path": str(input_image),   # 直连后端读这个（ComfyUI 后端读 input_image）
             "output_path": output_path,
             "seed": -1,
             # TexGen 需要 custom_rasterizer CUDA 扩展编译（缺 nvcc+MSVC），默认 ShapeGen-only

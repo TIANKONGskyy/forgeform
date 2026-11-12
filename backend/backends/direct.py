@@ -341,7 +341,19 @@ class DirectBackend:
         return self._first(outputs)
 
     def get_result_3d(self, outputs: dict) -> str:
-        return self._first(outputs)
+        """返回**本地路径**，不是 URL。
+
+        pipeline.generate_3d 拿到结果后直接 `shutil.copy2(model_path, output_path)`
+        并 `Path(model_path).exists()` —— 传 URL 进去这两步都会失败，
+        表现成"ComfyUI 未返回 3D 模型文件"，直连建模明明跑完了却报失败。
+        图像那边不同（generate_images 用 requests.get），所以 get_result_image
+        继续返回 URL。
+        """
+        for f in ((outputs or {}).get("__files__") or []):
+            p = Path(f)
+            if p.exists():
+                return str(p)
+        return ""
 
     # ── 模型解析：config 优先，插件补默认 ────────────────────
     def _resolve(self, stage: str, params: dict) -> tuple[str, dict, object]:
