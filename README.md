@@ -129,6 +129,7 @@ python tools/doctor.py
 | `docs/CONFIG.md` | 配置项与按显存分档的方案 |
 | `docs/PLUGINS.md` | 模型插件（YAML） |
 | `docs/BACKENDS.md` | 三种后端与实测对比 |
+| `docs/MODEL-BENCH.md` | 各模型在同一提示词下的实测数据 |
 | `docs/ARCHITECTURE.md` | 模块职责与核心机制 |
 | `docs/DECISIONS.md` | D1–D10 设计决策记录 |
 | `skills/forgeform/SKILL.md` | 给 agent 用的技能文件 |
