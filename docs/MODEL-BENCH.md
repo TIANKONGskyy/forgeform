@@ -374,3 +374,58 @@ conditioner / VAE 的加载等多个 CPU 分配点，其中一个在 10 GB 限�
 能跑完，但 SSD 会持续满速写，一次建模可能要十几分钟。
 
 **要在这台笔记本上建模，现实的做法是远程连一台有显卡的机器。**
+
+### 突破：conditioner 这一层挖到底之后，8G/10G 跑通了
+
+上一节说崩在「模型结构构建」。继续往下挖，找到**两个独立的修复**：
+
+#### 修复 ①：权重逐层搬到显存
+
+`backend/backends/lazy_gpu_load.py` 的 `load_to_gpu()`：读一层 → 搬显存 → 释放内存那份。
+
+#### 修复 ②：模型结构也在显存里构建
+
+hy3dgen 的 `conditioner`（DINO）和 `vae` 都是 `instantiate_from_config()` **现场 new 出来的**，
+不是 `from_pretrained()`。它们在 CPU 上逐个 `torch.empty` 参数 ——
+11 GB 限制下就崩在 `Dinov2SelfOutput` 的 `nn.Linear(1024, 1024)`（4 MB 都分不出来）。
+
+一行 `torch.set_default_device("cuda")` 让这些参数初始化直接进显存，不占系统内存。
+
+### 实测：8 GB 显存 / 10 GB 内存，跑通了
+
+```
+[1] 加载 2mini
+  ✓ 加载 20.9s   RSS 1.14 GB   显存 3.56 GB
+[2] 推理 30 步 / octree 256
+  ✓ 推理 12.9s   faces=481736   watertight=True
+总计 34.1s
+显存峰值 7.15 GB   内存峰值 1.59 GB
+```
+
+**内存峰值从 10.8 GB 降到 1.59 GB**（降 85%），显存从 6.4 GB 升到 7.15 GB（8 GB 卡够）。
+
+### 已集成进铸想
+
+`backend/backends/direct.py` 的 3D 加载里，低内存机器（`available < 20 GB` 或
+`low_memory_mode()`）会自动启用这两个优化，加载完恢复默认设备。
+
+```python
+low_ram = low_memory_mode() or available < 20
+patch_safetensors()
+prev = torch.empty(0).device.type
+if low_ram:
+    torch.set_default_device("cuda")
+try:
+    return getattr(M, cls).from_pretrained(ref, **load_kw)
+finally:
+    if low_ram and prev != "cuda":
+        torch.set_default_device(prev)
+    unpatch_safetensors()
+```
+
+### 结论修正
+
+**8 GB 显存 / 16 GB 内存的笔记本可以建模了** —— 用直连模式 + 2mini，
+实测 34 秒出网格（加载 21 秒 + 推理 13 秒）。
+
+之前得出的"四条路全堵死"是**错的** —— 那时还没做这两个优化。
