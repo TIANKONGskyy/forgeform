@@ -15,7 +15,7 @@ numpy>=1.26
 scipy>=1.11
 # 注意：gradio<6 要求 pillow<12，所以这里装到的是 11.x。
 # 11.x 有若干图像解码类 CVE（见 SECURITY.md），升级要连 gradio 6 一起升。
-Pillow>=10.0
+Pillow>=13.0.0
 opencv-python>=4.9
 matplotlib>=3.8
 
