@@ -2,6 +2,7 @@
 from __future__ import annotations
 import copy
 import json
+import re
 import os
 from pathlib import Path
 import secrets
@@ -44,7 +45,10 @@ class Studio:
         self.app_port = app_port
         self.lock = threading.RLock()
         self.token = secrets.token_urlsafe(32)
-        self.job = {'status': 'idle', 'label': '准备就绪', 'step': 0, 'total': 0, 'logs': []}
+        self.job = {'status': 'idle', 'label': '准备就绪', 'step': 0, 'total': 0, 'logs': [],
+                    # 下载进度：大模型几十分钟起步，只给"第几步"用户会以为卡死
+                    'file': '', 'percent': 0.0, 'speed_mbps': 0.0,
+                    'downloaded_mb': 0.0, 'size_mb': 0.0}
         self.cancelled = threading.Event()
         self.child = None
         self.app = None
@@ -61,6 +65,24 @@ class Studio:
         with self.lock:
             self.job['logs'] = (self.job['logs'] + [str(line).strip()])[-150:]
 
+    # fetch_model.py 每 5% 打一行：
+    #   62.5%  2275.4/3643.0 MB   3.08 MB/s  (model.fp16.safetensors)
+    _PROGRESS_RE = re.compile(
+        r"(\d+(?:\.\d+)?)%\s+([\d.]+)/([\d.]+)\s*MB\s+([\d.]+)\s*MB/s\s+\((.+?)\)")
+
+    def _parse_progress(self, line: str) -> None:
+        """把下载器的进度行抽成结构化字段，供前端画进度条。"""
+        m = self._PROGRESS_RE.search(line or "")
+        if not m:
+            return
+        pct, done, size, speed, name = m.groups()
+        with self.lock:
+            self.job['percent'] = float(pct)
+            self.job['downloaded_mb'] = float(done)
+            self.job['size_mb'] = float(size)
+            self.job['speed_mbps'] = float(speed)
+            self.job['file'] = name.strip()
+
     def command(self, argv):
         if self.cancelled.is_set():
             raise RuntimeError('任务已取消，可重试续传')
@@ -70,6 +92,7 @@ class Studio:
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         self.child = proc
         for line in proc.stdout:
+            self._parse_progress(line)
             self.log(line)
         code = proc.wait()
         self.child = None
@@ -83,7 +106,9 @@ class Studio:
             if self.job['status'] == 'running':
                 raise ValueError('已有任务运行，请等待完成或取消')
             self.cancelled.clear()
-            self.job = {'status': 'running', 'label': label, 'step': 0, 'total': 0, 'logs': []}
+            self.job = {'status': 'running', 'label': label, 'step': 0, 'total': 0, 'logs': [],
+                        'file': '', 'percent': 0.0, 'speed_mbps': 0.0,
+                        'downloaded_mb': 0.0, 'size_mb': 0.0}
         def run():
             try:
                 fn()
