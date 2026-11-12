@@ -84,3 +84,4 @@ desktop.ini
 # bench_direct.py 的产物
 direct-bench/
 docs/showcase/_bench/
+config.json.bak

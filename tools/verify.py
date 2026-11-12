@@ -41,6 +41,7 @@ import json
 import shutil
 import subprocess
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -424,7 +425,9 @@ def check_agent_layer() -> None:
     ck("app_shows_thinking_line", "🧠 思考" in src_a and "🎯 判断" in src_a)
     # 用户 2026-09-23 反馈：缺少 GLB→STL 这一步（以前只有自动导一次 / agent 判断两个入口）
     ck("stl_export_button_wired",
-       'btn_stl = gr.Button("📦 导出 STL"' in src_a and "btn_stl.click(fn=on_btn_export_stl" in src_a
+       # 按钮文案会变（emoji / 措辞），这里只认"声明存在"，不绑死具体字符串
+       re.search(r'btn_stl\s*=\s*gr\.Button\(', src_a) is not None
+       and "btn_stl.click(fn=on_btn_export_stl" in src_a
        and "btn_stl" in src_a.split("ui_outputs = [")[1].split("]")[0]   # 必须在 ui_outputs 里
        and "def on_btn_export_stl" in src_a,
        "声明 / 事件 / ui_outputs 三处缺一不可（漏 ui_outputs 会显示但不刷新）")
