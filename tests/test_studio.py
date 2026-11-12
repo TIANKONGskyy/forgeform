@@ -71,7 +71,8 @@ class PlanRegressionTest(unittest.TestCase):
             self.assertNotIn('D:/models', json.dumps(p.to_dict()))
             llm = next(d for d in p.downloads if d.kind == 'llm')
             self.assertEqual(p.config_patch['models']['llm']['default_model'], llm.repo)
-            self.assertEqual(llm.size_gb, 2)
+            # 16 GB 内存会走低内存分支，选 2B（1.5 GB）而不是 4B —— 脚本按方案档位+内存一起判
+            self.assertEqual(llm.size_gb, 1.5)
             self.assertTrue(p.quant_hints)
     def test_standard_contains_mesh_and_dependencies(self):
         p = next(p for p in build_profiles(Hardware(32,30,128,200,'GPU'), {}) if p.key == 'standard')

@@ -76,6 +76,7 @@ class Profile:
     fits: bool = True
     reason: str = ""
     config_patch: dict = field(default_factory=dict)
+    llm_options: list[dict] = field(default_factory=list)   # 可选的对话模型
     quant_hints: list[dict] = field(default_factory=list)
 
     def total_gb(self) -> float:
@@ -149,20 +150,38 @@ def summarize_assets(frameworks) -> dict:
 # ────────────────────────────────────────────────────────────────
 # 铸想的对话不是聊天，是「把一句话解析成结构化需求」—— 3B 就能做，
 # 7B 明显更稳，14B 会主动追问缺失参数。再大对收益很小，显存却翻倍。
+# 2026-11 更新：Ollama 上 Qwen3.5 已全系可用（0.8b / 2b / 4b / 9b / 27b / 35b-a3b）。
+# 体积按 q4_K_M 估，实际以 ollama pull 显示的为准。
 _LLM_TIERS = [
     # (最低显存, ollama 模型名, 下载体积 GB, 说明)
-    (24, "qwen2.5:14b-instruct-q4_K_M", 9.0, "14B，会主动追问缺失尺寸"),
-    (12, "qwen2.5:7b-instruct-q4_K_M", 4.7, "7B，解析稳定，最常用的一档"),
-    (7, "qwen2.5:7b-instruct-q4_K_M", 4.7, "7B，8G 卡可跑（上下文收窄）"),
-    (5, "qwen2.5:3b-instruct-q4_K_M", 2.0, "3B，够解析需求，显存占用小"),
-    (0, "qwen2.5:1.5b-instruct-q4_K_M", 1.1, "1.5B，纯 CPU 也能跑，质量一般"),
+    (24, "qwen3.5:27b-q4_K_M", 16.0, "27B，复杂需求更稳，显存占用大"),
+    (16, "qwen3.5:9b-q4_K_M", 5.5, "9B，解析稳定，多数机器够用"),
+    (8, "qwen3.5:4b-q4_K_M", 2.5, "4B，8G 卡可跑，响应快"),
+    (5, "qwen3.5:2b-q4_K_M", 1.5, "2B，显存占用小，简单需求够"),
+    (0, "qwen3.5:0.8b-q4_K_M", 0.6, "0.8B，纯 CPU 也能跑"),
 ]
+
+# 可选清单：不只给"按显存自动选"的那一个，让界面能列出跨度更大的备选。
+_LLM_CHOICES = [
+    ("qwen3.5:0.8b-q4_K_M", 0.6, 0, "0.8B · 纯 CPU 可用"),
+    ("qwen3.5:2b-q4_K_M", 1.5, 4, "2B · 小显存"),
+    ("qwen3.5:4b-q4_K_M", 2.5, 7, "4B · 8G 卡"),
+    ("qwen3.5:9b-q4_K_M", 5.5, 12, "9B · 12G 以上"),
+    ("qwen3.5:27b-q4_K_M", 16.0, 22, "27B · 24G 以上"),
+]
+
+
+def list_llm_choices(vram_gb: float) -> list[dict]:
+    """这台机器上能装的对话模型清单（装不下的也列出来，标 fits=False）。"""
+    return [{"model": name, "size_gb": gb, "min_vram_gb": need,
+             "label": why, "fits": vram_gb >= need}
+            for name, gb, need, why in _LLM_CHOICES]
 
 
 def pick_llm(vram_gb: float, ram_gb: float) -> tuple[str, float, str]:
     """按显存挑对话模型。没 GPU 时也能退到 1.5B 跑 CPU。"""
     if ram_gb < 20:
-        return ("qwen2.5:3b-instruct-q4_K_M", 2.0, "低内存模式：3B Q4，按阶段加载")
+        return ("qwen3.5:2b-q4_K_M", 1.5, "低内存模式：2B Q4，按阶段加载")
     for need, name, gb, why in _LLM_TIERS:
         if vram_gb >= need:
             return name, gb, why
@@ -197,14 +216,21 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
     has_diffusers = bool(assets.get("diffusers"))
     has_hy3d = bool(assets.get("hy3dgen"))
 
-    def with_llm(dls: list[Download], need_ollama: bool) -> list[Download]:
-        """把对话模型（以及 Ollama 本体）排到下载清单最前面。"""
+    def with_llm(dls: list[Download], need_ollama: bool,
+                 vram_cap: float | None = None) -> list[Download]:
+        """把对话模型（以及 Ollama 本体）排到下载清单最前面。
+
+        `vram_cap`：方案的显存档位。按整机显存挑 LLM 会错位 ——
+        一台 16 GB 的机器走 minimal 方案（为 7–8 GB 卡准备的），
+        却配上 9B 模型（要 12 GB），装完照样跑不动。
+        """
         if not no_chat:
             return dls
         pre: list[Download] = []
         if need_ollama:
             pre.append(_ollama_install_download())
-        pre.append(_llm_download(hw.vram_gb, hw.ram_gb))
+        cap = vram_cap if vram_cap is not None else hw.vram_gb
+        pre.append(_llm_download(cap, hw.ram_gb))
         return pre + dls
 
     # ── 方案 0：零下载（机器上已经有能用的 ComfyUI）──
@@ -257,7 +283,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             desc="出图用 SD1.5，建模用 Hunyuan3D-2mini。8G 显存能跑，画质一般但链路完整。",
             backend_mode="direct",
             image_model="sd15", mesh_model="hunyuan_mini",
-            downloads=with_llm([sd15, mini], need_ollama=not assets.get("ollama")),
+            downloads=with_llm([sd15, mini], need_ollama=not assets.get("ollama"), vram_cap=8),
             est_gb=8.2,
             fits=vram >= 7 and fits_by_ram(11),
             reason=("显存要 7 GB+、内存要 17 GB+（模型自身占 10.8 GB）"
@@ -289,20 +315,22 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
                       ["assets/"], 30.6, "8 步出图，中文理解好")
         out.append(Profile(
             key="standard",
-            name="标准（Z-Image Turbo + 3D 2mini）",
-            desc="出图 Z-Image（8 步、1024²、中文提示词准），建模 2mini。"
-                 "作者本人日常用的就是这一档。",
+            name="标准（FLUX.2 Klein 4B + 3D 2mini）",
+            desc="出图 FLUX.2 Klein 4B（约 10 GB 显存），建模 2mini。",
             backend_mode="auto",
-            image_model="z_image", mesh_model="hunyuan_mini",
-            downloads=with_llm([zi], need_ollama=not assets.get("ollama")), est_gb=30.6,
+            # 2026-11：这一档默认换成 FLUX.2 Klein 4B —— 10 GB 显存就够，
+            # 比 Z-Image 省一半，12–16 GB 的卡不用挤。Z-Image 保留为备选（8 步更快）。
+            image_model="flux2klein4b", mesh_model="hunyuan_mini",
+            downloads=with_llm([klein4b], need_ollama=not assets.get("ollama"), vram_cap=12),
+            est_gb=8.5,
             fits=vram >= 12 and fits_by_ram(11) and hw.disk_free_gb >= 40,
             reason=("显存 12 GB+ / 内存 16 GB+ / 磁盘 40 GB+"
                     if vram >= 12 else f"显存只有 {vram:.0f} GB，不够"),
             config_patch={
                 "backend": {"mode": "auto"},
-                "stages": {"image": {"default_model": "z_image"},
+                "stages": {"image": {"default_model": "flux2klein4b"},
                            "3d": {"default_model": "hunyuan_mini"}},
-                "models": {"image": {"z_image": {"path": "D:/models/z-image-turbo-diffusers"}},
+                "models": {"image": {"flux2klein4b": {"path": "D:/models/flux2klein4b"}},
                            "3d": {"hunyuan_mini": {"path": "D:/models/hy3dgen/hunyuan3d-2mini",
                                                    "octree": 256, "steps": 30}}},
             },
@@ -344,7 +372,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
         py_deps = Download("framework", "pydeps", "torch + diffusers + hy3dgen", size_gb=4.0,
                            note="pip install torch diffusers transformers hy3dgen  （约 4 GB，含 CUDA 运行时）")
         dls = with_llm([py_deps, sd15_boot, mini_boot],
-                       need_ollama=not assets.get("ollama"))
+                       need_ollama=not assets.get("ollama"), vram_cap=8)
         total = round(sum(d.size_gb for d in dls), 1)
         out.append(Profile(
             key="starter",

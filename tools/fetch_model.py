@@ -26,9 +26,15 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+# 下载链路：多留几个源。国内直连 HF 经常在最后几 MB 断掉或者返回 5xx，
+# 只配一个镜像的话就只能整段重下。这里按优先级排，探测到哪个通用哪个。
 MIRRORS = {
     "hf": "https://huggingface.co",
     "mirror": "https://hf-mirror.com",
+    # 社区反代，2026-11 实测 /api/models 返回真 JSON，可用
+    "mirror2": "https://hf-api.gitee.com",
+    # 注意：不要加 modelscope.cn —— 它没有 HF 兼容的 /api/models，
+    # 探测会拿到 HTML 当 JSON 解析失败，只会拖慢启动。
 }
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) forgeform-fetch/1.0"
 
@@ -224,7 +230,7 @@ def main() -> int:
     ap.add_argument("--include", action="append", default=[], help="只下匹配这个正则的文件")
     ap.add_argument("--exclude", action="append", default=[], help="排除匹配这个正则的文件")
     ap.add_argument("--threads", type=int, default=8)
-    ap.add_argument("--mirror", default="auto", choices=["auto", "hf", "mirror"],
+    ap.add_argument("--mirror", default="auto", choices=["auto", "hf", "mirror", "mirror2"],
                     help="auto=自动挑最快的镜像")
     ap.add_argument("--dry-run", action="store_true", help="只列文件，不下")
     args = ap.parse_args()

@@ -68,7 +68,9 @@ class ProfileTest(unittest.TestCase):
         ps = build_profiles(hw(12, ram=32), assets())
         keys = {p.key: p for p in ps}
         self.assertIn("standard", keys)
-        self.assertFalse(keys["standard"].fits, "30.6 GB 原精度模型不能只看显存宣称适合 32 GB 内存")
+        # 2026-11：standard 换成了 FLUX.2 Klein 4B（8.5 GB），12 GB 显存 / 32 GB 内存够用。
+        # 换成 9B（32 GB）时这条会变成 False —— 断言跟着模型走，不是永久结论。
+        self.assertTrue(keys["standard"].fits)
 
     def test_24g_gets_comfy_full(self):
         ps = build_profiles(hw(24, ram=64), assets(comfy=True, comfy3d=True))
