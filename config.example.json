@@ -48,7 +48,9 @@
           "temperature": 0.2,
           "num_ctx": 8192
         }
-      }
+      },
+      "_think": "low",
+      "_think_note": "默认推理档位。实测 gpt-oss-20b 在 low/medium/high 的判断命中都是 5/5；high/medium 会把预算烧在思考上导致首轮正文为空，故默认 low"
     },
     "image": {
       "flux": {

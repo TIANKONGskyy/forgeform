@@ -142,3 +142,47 @@ ComfyUI 那套 Hunyuan3D 权重和 hy3dgen 不兼容（层名、config.yaml 都�
 - **3D 贴图（texgen）没接**：`hy3dgen` 有 `Hunyuan3DPaintPipeline`，铸想目前只出白模。
 - **16 GB 内存机器没实机验证**：`docs/HARDWARE.md` 里的推断基于 32 GB 机器的 RSS 实测，
   16 GB 上是否真的会换页到不可用，需要有人跑一次 `tools/probe_resources.py` 确认。
+
+---
+
+## D11 · 闲置释放 ComfyUI 显存（2026-10-15）
+
+**决定**：`comfyui_idle.free_after_minutes`（默认 10 分钟）到了就 POST `/free`，
+把 ComfyUI 常驻的模型卸掉。
+
+**为什么**：ComfyUI 跑完任务不会自己释放，实测常驻 **14.4 GB**。同一张卡还要跑对话模型
+（11 GB）和视觉服务。队列空 = 没人用 —— 出图 / 视频 / 3D 都走同一个队列，所以不用往管线里埋点。
+
+**代价**：值调太小会频繁冷加载（冷跑 ~25 s vs 热跑 ~3 s）。
+
+---
+
+## D12 · 推理模型默认用 low 档（2026-10 实测）
+
+**决定**：`models.llm._think` 默认 `low`。
+
+**为什么**：实测 gpt-oss-20b 在 low / medium / high 三档的判断命中率都是 5/5；
+但 high / medium 会把 token 预算烧在思考上，导致首轮正文为空。
+
+**代价**：复杂推理场景可能不够用，需要按模型单独调高。
+
+---
+
+## D13 · 预览候选默认只出 1 张（2026-10-15）
+
+**决定**：`stages.image.preview_candidates` 默认 1。
+
+**为什么**：站点侧（`lib/foundry.ts`）目前只取 `cand_0`，多出的图用户看不到、纯烧 GPU。
+铸想自己的 Gradio 界面支持多候选（`select_candidate` / `selected_idx`），
+等站点加上选图 UI 后改成 3 即可，不用改代码。
+
+---
+
+## D14 · `generation.default_*` 只是遗留兜底（2026-10-15）
+
+**决定**：真正的默认值以 `stages.<阶段>.default_model` 为准，`generation.default_*`
+只在老 config 缺 `stages` 键时兜底（见 `backend/stages/base.py::get_model_config`）。
+
+**为什么**：原来这里写 `z_image` / `triposplat`，和 `stages` 里的 `qwen21_ref` / `hunyuan21`
+不一致 —— 同一件事有两个答案，出图模型取决于走哪条代码路径。已同步。
+
