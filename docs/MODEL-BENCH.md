@@ -335,3 +335,42 @@ conditioner / VAE 的加载等多个 CPU 分配点，其中一个在 10 GB 限�
 
 **结论：这条路有希望，但还没接通。** 下一步要逐个 patch hy3dgen 里其余的 CPU 分配点
 （conditioner、VAE、`smart_load_model`），而不是只换 `load_file`。
+
+### 挖到底了：崩在模型**构建**，不是加载
+
+逐层加载把权重部分降到 4.19 GB 之后，剩下的崩溃点全部集中在
+**"按 config 构建模型结构"** 这一步，跟权重无关：
+
+| 内存限制 | 结果 | 崩在哪 |
+|---|---|---|
+| 10 GB | 优雅失败（`DefaultCPUAllocator`，12 MB） | `vae = instantiate_from_config(config['vae'])` → VAE 的 `nn.Linear` 初始化 |
+| 11 GB | 优雅失败（9 MB） | DINO（conditioner）的 `Dinov2SelfOutput` → `nn.Linear(hidden, hidden)` |
+| **12 GB** | **段错误 `0xC0000005`** | 同上，但这次底层直接崩，连 Python 异常都没有 |
+
+**关键**：这三处都是 `torch.empty()` / `nn.Linear` 的**参数初始化**，
+不是读权重。也就是说：
+
+```
+权重加载（已优化到 4.19 GB）
+   +
+模型结构构建（VAE 的 attention block + DINO 的 24 层 transformer，约 6-8 GB）
+   =
+10 GB 以上
+```
+
+**结构构建这块省不掉** —— 除非改 hy3dgen 的模型定义（把 VAE 和 DINO 换成更小的），
+那是重写模型，不是调加载。
+
+### 最终结论
+
+**16 GB 内存的机器跑不了 2mini**，四条路都堵死：
+
+1. ComfyUI + 2.1：显存峰值 15.9 GB > 8 GB
+2. 直连 2mini：原生加载内存 10.8 GB
+3. 逐层搬显存：内存降到 4.19 GB，但模型构建又要 6-8 GB
+4. 换 TripoSR：transformers v5 层名不兼容
+
+**唯一没试的**：把页面文件（虚拟内存）开到 32 GB 以上，让它换页。
+能跑完，但 SSD 会持续满速写，一次建模可能要十几分钟。
+
+**要在这台笔记本上建模，现实的做法是远程连一台有显卡的机器。**
