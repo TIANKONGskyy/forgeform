@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);let selected='',lastScan=0,lastAction=nu
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(s){$('toast').textContent=s;$('toast').hidden=false;clearTimeout(window.toastTimer);window.toastTimer=setTimeout(()=>$('toast').hidden=true,6500)}
 async function api(path,data){const r=await fetch('/api/'+path,{method:data===undefined?'GET':'POST',headers:{'Content-Type':'application/json','X-Studio-Token':window.STUDIO_TOKEN},body:data===undefined?undefined:JSON.stringify(data)});const j=await r.json();if(!r.ok)throw Error(j.error||'请求失败');return j}
-function page(id){document.querySelectorAll('.page').forEach(e=>e.hidden=e.id!==id);document.querySelectorAll('nav button').forEach(e=>e.classList.toggle('active',e.dataset.page===id));$('breadcrumb').textContent=({overview:'工作台',setup:'安装与环境',models:'模型与配置',create:'创作空间'})[id];if(id==='models')catalog();}
+function page(id){document.querySelectorAll('.page').forEach(e=>e.hidden=e.id!==id);document.querySelectorAll('nav button').forEach(e=>e.classList.toggle('active',e.dataset.page===id));$('breadcrumb').textContent=({overview:'工作台',setup:'安装与环境',models:'模型与配置',create:'创作空间'})[id];if(id==='models'){catalog();refreshDelModel();}}
 document.querySelectorAll('[data-page]').forEach(b=>b.addEventListener('click',()=>page(b.dataset.page)));
 $('theme').onclick=()=>{document.body.classList.toggle('light');localStorage.setItem('forgeform-theme',document.body.classList.contains('light')?'light':'dark')};if(localStorage.getItem('forgeform-theme')==='light')document.body.classList.add('light');
 async function action(name,data={}){try{if(name!=='cancel')lastAction={name,data};await api(name,data);await poll()}catch(e){toast(e.message)}}
@@ -14,3 +14,57 @@ async function poll(){try{const s=await api('status'),j=s.job;renderScan(s.snaps
 // 下载中的文件级进度：只显示"第几步"时，30 GB 的模型看着像卡死
 if(j.status==='running'&&j.file){$('download').hidden=false;$('download-name').textContent=j.file;$('download-pct').textContent=(j.percent||0).toFixed(1)+'%';$('download-detail').textContent=`${(j.downloaded_mb||0).toFixed(0)} / ${(j.size_mb||0).toFixed(0)} MB · ${(j.speed_mbps||0).toFixed(2)} MB/s`;$('download-bar').style.width=Math.min(100,j.percent||0)+'%'}else{$('download')&&($('download').hidden=true)}for(const id of ['scan','runtime','launch'])$(id).disabled=j.status==='running';$('install').disabled=j.status==='running'||!selected;if(launchPending&&j.status==='done'&&s.ready){$('workspace').src=s.app_url+'/?__theme='+ (document.body.classList.contains('light')?'light':'dark');$('workspace').hidden=false;$('create-empty').hidden=true;launchPending=false}if(j.status==='failed'||j.status==='cancelled'){launchPending=false;if(!$('retry')){const b=document.createElement('button');b.id='retry';b.textContent='重试此任务';b.onclick=()=>{if(lastAction)action(lastAction.name,lastAction.data)};$('job').append(b)}}else $('retry')?.remove()}catch(e){$('top-status').textContent='连接中断';if(!window.connectionError){toast('本地服务连接中断，请重新打开启动程序');window.connectionError=true}}}
 poll();setInterval(poll,1500);
+
+// ── 删除：单模型 / 整个铸想 ──
+// 都走"先看清单再删"：purge-plan 显示要删什么、多大；删除前 confirm 一次。
+async function refreshDelModel(){
+  try{
+    const s = await api('catalog');
+    const sel = $('del-model');
+    if(!sel) return;
+    const installed = (s.models||[]).filter(m => m.installed);
+    sel.innerHTML = installed.length
+      ? installed.map(m => `<option value="${m.id}">${m.label}（${m.kind}）</option>`).join('')
+      : '<option value="">没有已安装的铸想模型</option>';
+  }catch(e){}
+}
+
+$('del-model-go')?.addEventListener('click', async () => {
+  const id = $('del-model')?.value;
+  if(!id){ $('del-model-msg').textContent = '没有可删的模型'; return; }
+  if(!confirm(`删除模型「${id}」的本地权重？\n只删铸想目录下的文件，ComfyUI 的共享权重不动。\n删除后要重新下载才能用。`)) return;
+  $('del-model-msg').textContent = '正在删除…';
+  try{
+    const r = await api('remove', {id});
+    $('del-model-msg').textContent = r.ok ? `已删除，释放 ${r.freed_gb} GB` : (r.error || '删除失败');
+    await refreshDelModel();
+    await catalog();
+  }catch(e){ $('del-model-msg').textContent = '删除失败：' + e.message; }
+});
+
+$('purge-inspect')?.addEventListener('click', async () => {
+  try{
+    const plan = await api('purge-plan');
+    const box = $('purge-plan');
+    $('purge-total').textContent = `共 ${plan.total_gb} GB`;
+    box.innerHTML = plan.items.length
+      ? plan.items.map(i => `<div class="purge-item"><b>${i.label}</b>
+          <span>${i.size_gb} GB</span>
+          <small>${i.note || ''}</small>
+          <code>${i.path}</code></div>`).join('')
+      : '<p class="muted">没有可删的内容。</p>';
+  }catch(e){ toast('读取失败：' + e.message); }
+});
+
+$('purge-all')?.addEventListener('click', async () => {
+  const ok = confirm(
+    '删除铸想在本机生成的全部数据？\n\n' +
+    '包含：Python 环境(.venv)、铸想下的模型权重、生成结果、日志、对话组存档、配置文件。\n' +
+    '不含：ComfyUI 及其权重、仓库源码本身。\n\n' +
+    '删除后无法恢复，需要重新安装。确定继续？'
+  );
+  if(!ok) return;
+  const twice = prompt('再确认一次：输入 删除 两个字');
+  if(twice !== '删除'){ toast('已取消'); return; }
+  await action('purge', {scope: 'all'});
+});

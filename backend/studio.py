@@ -308,6 +308,176 @@ class Studio:
                 time.sleep(.5)
         raise RuntimeError('创作服务启动超时，请查看 logs/studio-app.log')
 
+    # ══════════════════════════════════════════════════════════
+    # 删除：单个模型 / 整个铸想
+    # ══════════════════════════════════════════════════════════
+    #
+    # 安全边界（很重要）：
+    #   · 只删**铸想自己下的**东西。ComfyUI 的 models 目录是用户的其他资产，
+    #     哪怕铸想读它、也不能删它 —— 一旦删了，用户别的工具全废。
+    #   · 删除前先算清楚"要删什么、多大"，让界面能列清单给用户确认。
+    #   · 不接受前端传路径，只接受 catalog 里的 id / 固定的 scope 名。
+
+    def _deletable_roots(self):
+        """铸想自己拥有的、可以安全删除的目录。"""
+        roots = []
+        m = self.root / 'models'                    # 铸想默认模型目录
+        if m.exists():
+            roots.append(m)
+        cfg = self.config()
+        for key in ('model_root',):
+            v = cfg.get(key) or (cfg.get('paths') or {}).get(key)
+            if v and Path(os.path.expandvars(str(v))).exists():
+                roots.append(Path(os.path.expandvars(str(v))))
+        # 也认 D:/models 这种环境变量指过去的目录
+        env_models = os.environ.get('FOUNDRY_MODELS')
+        if env_models and Path(env_models).exists():
+            roots.append(Path(env_models))
+        # 去重
+        seen, out = set(), []
+        for r in roots:
+            k = str(r.resolve()).lower()
+            if k not in seen:
+                seen.add(k)
+                out.append(r)
+        return out
+
+    def _under_deletable(self, path: Path) -> bool:
+        """这个路径是否落在铸想可删范围内（resolve 后比较，防 ../ 与符号链接）。"""
+        try:
+            real = path.resolve()
+        except Exception:
+            return False
+        for root in self._deletable_roots():
+            try:
+                real.relative_to(root.resolve())
+                return True
+            except ValueError:
+                continue
+        return False
+
+    def model_removable(self, model_id: str) -> tuple[bool, str]:
+        from backend.plugins.spec import registry
+        cfg = self.config()
+        for p in registry(reload=True).all():
+            kind = '3d' if p.kind == 'mesh' else p.kind
+            if p.id != model_id:
+                continue
+            node = (cfg.get('models') or {}).get(kind, {}).get(p.id, {})
+            ref = node.get('path') or p.path
+            if not ref:
+                return False, '这个模型没有记录本地路径'
+            path = Path(os.path.expandvars(str(ref)))
+            if not path.exists():
+                return False, '文件不存在（可能已经删过）'
+            if path.is_file() and not self._under_deletable(path):
+                return False, '不在铸想可管理的目录内（可能是 ComfyUI 的共享权重，不做删除）'
+            if path.is_dir() and not self._under_deletable(path):
+                return False, '不在铸想可管理的目录内（可能是 ComfyUI 的共享权重，不做删除）'
+            return True, ''
+        return False, '没有这个模型'
+
+    def remove_model(self, model_id: str):
+        ok, why = self.model_removable(model_id)
+        if not ok:
+            raise ValueError(why)
+        from backend.plugins.spec import registry
+        cfg = self.config()
+        for p in registry(reload=True).all():
+            kind = '3d' if p.kind == 'mesh' else p.kind
+            if p.id != model_id:
+                continue
+            node = (cfg.get('models') or {}).get(kind, {}).get(p.id, {})
+            ref = node.get('path') or p.path
+            path = Path(os.path.expandvars(str(ref)))
+            freed = self._dir_size(path)
+            self.log(f'删除模型 {model_id}: {path}')
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink(missing_ok=True)
+            self.log(f'已删除，释放 {freed / 1024 ** 3:.2f} GB')
+            return {'ok': True, 'freed_gb': round(freed / 1024 ** 3, 2)}
+        raise ValueError('没有这个模型')
+
+    @staticmethod
+    def _dir_size(path: Path) -> int:
+        try:
+            if path.is_file():
+                return path.stat().st_size
+            total = 0
+            for f in path.rglob('*'):
+                if f.is_file():
+                    total += f.stat().st_size
+            return total
+        except Exception:
+            return 0
+
+    def purge_plan(self):
+        """列出"彻底删除铸想"会删掉什么、各多大。界面拿它做确认清单。"""
+        items = []
+        venv = self.root / '.venv'
+        if venv.exists():
+            items.append({'key': 'venv', 'label': 'Python 运行环境（.venv）',
+                          'path': str(venv), 'size_gb': round(self._dir_size(venv) / 1024 ** 3, 2),
+                          'note': '删除后需要重新安装依赖才能再用'})
+        for r in self._deletable_roots():
+            items.append({'key': 'models', 'label': '模型权重',
+                          'path': str(r), 'size_gb': round(self._dir_size(r) / 1024 ** 3, 2),
+                          'note': 'ComfyUI 的共享权重不在此列'})
+        for key, label, note in (
+            ('outputs', '生成结果与模型库', '含已生成的图片/GLB/STL，删了不可恢复'),
+            ('logs', '日志', '排查问题用'),
+            ('temp', '临时文件', ''),
+            ('projects', '对话组存档', '每个对话组的 project.json 与候选图'),
+        ):
+            d = self.root / key
+            if d.exists():
+                items.append({'key': key, 'label': label, 'path': str(d),
+                              'size_gb': round(self._dir_size(d) / 1024 ** 3, 2),
+                              'note': note})
+        cfg = self.root / 'config.json'
+        if cfg.exists():
+            items.append({'key': 'config', 'label': '配置文件', 'path': str(cfg),
+                          'size_gb': 0.0, 'note': '删了下次启动会重新生成'})
+        return {'items': items,
+                'total_gb': round(sum(i['size_gb'] for i in items), 2)}
+
+    def purge(self, scope: str = 'all'):
+        """删掉铸想自己装的东西。scope: all | runtime | models | outputs。
+
+        **不删**：ComfyUI 目录、用户指定的外部模型目录、仓库源码本身。
+        """
+        scope = (scope or 'all').lower()
+        removed = []
+        if scope in ('all', 'runtime'):
+            venv = self.root / '.venv'
+            if venv.exists():
+                freed = self._dir_size(venv)
+                shutil.rmtree(venv, ignore_errors=True)
+                removed.append(('venv', round(freed / 1024 ** 3, 2)))
+        if scope in ('all', 'models'):
+            for r in self._deletable_roots():
+                if r.exists():
+                    freed = self._dir_size(r)
+                    shutil.rmtree(r, ignore_errors=True)
+                    removed.append((str(r), round(freed / 1024 ** 3, 2)))
+        if scope in ('all', 'outputs'):
+            for key in ('outputs', 'logs', 'temp', 'projects'):
+                d = self.root / key
+                if d.exists():
+                    freed = self._dir_size(d)
+                    shutil.rmtree(d, ignore_errors=True)
+                    removed.append((key, round(freed / 1024 ** 3, 2)))
+        if scope == 'all':
+            cfg = self.root / 'config.json'
+            if cfg.exists():
+                cfg.unlink(missing_ok=True)
+                removed.append(('config.json', 0.0))
+        total = round(sum(g for _, g in removed), 2)
+        self.log(f'已删除：{removed}，共释放 {total} GB')
+        return {'ok': True, 'removed': removed, 'freed_gb': total}
+
     def status(self):
         with self.lock:
             return {'job': copy.deepcopy(self.job), 'snapshot': self.snapshot,
@@ -338,6 +508,7 @@ def make_server(studio, port=7861):
             if not self.trusted(): return self.send({'error': '无效来源'}, 403)
             try:
                 if self.path == '/api/status': return self.send(studio.status())
+                if self.path == '/api/purge-plan': return self.send(studio.purge_plan())
                 if self.path == '/api/catalog': return self.send({'models': studio.catalog(), 'config': {
                     'stages': studio.config().get('stages', {}), 'backend': studio.config().get('backend', {})}})
                 if self.path in ('/', '/index.html'):
@@ -363,6 +534,8 @@ def make_server(studio, port=7861):
                 elif self.path == '/api/launch': result = studio.start_job('启动创作空间', studio.launch)
                 elif self.path == '/api/cancel': result = studio.cancel()
                 elif self.path == '/api/config': result = studio.configure(data)
+                elif self.path == '/api/remove': result = studio.remove_model(data.get('id', ''))
+                elif self.path == '/api/purge': result = studio.start_job('删除铸想数据', lambda: studio.purge(data.get('scope', 'all')))
                 else: return self.send({'error': '未找到'}, 404)
                 return self.send(result)
             except (ValueError, RuntimeError) as exc:
