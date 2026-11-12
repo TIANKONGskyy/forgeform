@@ -38,11 +38,18 @@ class ModelLibraryRoutesTest(unittest.TestCase):
         register_model_library(app)
         cls.client = TestClient(app)
 
-        cls.src = Path(cls.tmp.name) / "phone-stand.stl"
+        # 源文件必须放在真实的 outputs/ 下 —— publish() 现在会校验路径白名单，
+        # 拿临时目录里的文件会被拒（这是刻意的：不许把系统文件发布成公开下载）。
+        cls.src = Path(__file__).resolve().parent.parent / "outputs" / "_test_phone-stand.stl"
+        cls.src.parent.mkdir(parents=True, exist_ok=True)
         cls.src.write_bytes(b"solid stand\nendsolid stand\n")
 
     @classmethod
     def tearDownClass(cls):
+        try:
+            cls.src.unlink(missing_ok=True)
+        except Exception:
+            pass
         os.environ.pop("DSH_OPS_TOKEN", None)
         ml.LIB_DB, ml.LIB_DIR = cls._old_db, cls._old_dir
         cls.tmp.cleanup()
