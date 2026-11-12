@@ -458,3 +458,61 @@ finally:
 但**峰值低得多**，反而更安全。
 
 之前得出的"四条路全堵死"是**错的** —— 那时还没做这两个优化。
+
+---
+
+## 2.1 能不能在 8 GB 卡上跑：装不下
+
+想在同样的低配条件下试 2.1，结果是**物理上放不下**。
+
+### 显存账
+
+```
+2.1 DiT 权重 fp16        6.86 GB
+2.1 VAE fp16             0.61 GB
+DINO conditioner         2.12 GB
+----------------------------------
+合计                     9.59 GB
+
+8 GB 卡扣掉系统占用后约 7.2 GB 可用
+```
+
+**光 DiT 权重（6.86 GB）就吃掉 7.2 GB 的 95%**，VAE 和 DINO 无处安放。
+之前实测 ComfyUI 跑 2.1 的峰值是 **15.9 GB**，和这个账吻合。
+
+### 还有一层障碍：2.1 换了代码库
+
+2.1 的 `config.yaml` 指向 `hy3dshape.*`（新包），2mini 是 `hy3dgen.*`（旧包）：
+
+```yaml
+# 2.1
+model: { target: hy3dshape.models.denoisers.hunyuandit.HunYuanDiTPlain }
+# 2mini
+model: { target: hy3dgen.shapegen.models.Hunyuan3DDiT }
+```
+
+而且模型结构也变了（2.1 是 MoE：`num_moe_layers: 6, num_experts: 8`，`hidden_size: 2048`；
+2mini 是 `hidden_size: 1024`、8+16 层普通 DiT）。
+
+官方安装要求 `torch==2.5.1`，本机是 **2.14.1+cu126** —— 降级会连带废掉 ComfyUI。
+`hy3dshape` 也不在 PyPI，只能 `pip install -e .` 装源码。
+
+### 替代：2mini 的 512 octree
+
+质量接近 2.1 的 256 octree，显存需求低得多：
+
+| 显存限制 | octree | 耗时 | 显存峰值 | 内存峰值 | 水密 |
+|---|---|---|---|---|---|
+| 8 GB | 512 | 120.1 s | **5.35 GB** | 1.74 GB | ✗（这次没水密） |
+| 6 GB | 512 | 196.5 s | **5.35 GB** | 1.72 GB | ✓ |
+| 6 GB | 256 | 44.6 s | 3.88 GB | 1.61 GB | ✓ |
+
+**注意 8 GB 那次 `watertight=False`** —— 512 octree 出的网格有 142 万面，
+边界情况更容易留缝。铸想的 `mesh_optimizer._repair` 会兜底（pymeshlab + pymeshfix），
+但直连裸跑时要自己检查。
+
+### 结论
+
+**8 GB 显存跑 2.1：不行。** 不是优化能解决的 —— 权重本身就比可用显存大。
+
+8 GB 卡的最佳组合是 **2mini + 512 octree**：5.35 GB 显存、2 分钟出一张 140 万面的网格。
