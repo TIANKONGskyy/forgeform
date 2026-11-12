@@ -10,3 +10,23 @@
 .download-track i{display:block;height:100%;width:0;border-radius:99px;
   background:linear-gradient(90deg,var(--accent),#7fd6c8);transition:width .35s ease}
 .download small{display:block;margin-top:8px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+
+/* ── 响应式补丁（2026-11-12）──
+   两个在真机宽度上才暴露的问题：
+   390px：顶部导航第三个 tab「模型与配置」被挤出屏幕，看不见也点不到；
+   768px：rail 里 "FORGEFORM / ZYKT STUDIO" 折成两行，把品牌块撑高。 */
+@media(max-width:700px){
+  /* 导航改成可横滑，三个 tab 都能摸到；隐藏滚动条免得占高度。
+     nav 必须 flex:1 + min-width:0 —— 否则它在 flex 行里按内容宽度撑开，
+     超出 rail 的部分被裁掉，「模型与配置」就永远看不见（390px 实测过）。 */
+  nav{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  nav::-webkit-scrollbar{display:none;height:0}
+  nav button{white-space:nowrap;flex:0 0 auto;font-size:10px;padding:6px 5px}
+  /* 小屏没地方放右侧的说明文字，它是装饰不是信息 */
+  .section-title span{display:none}
+}
+@media(min-width:701px) and (max-width:820px){
+  .brand{font-size:20px;letter-spacing:1px}
+  .brand small{white-space:nowrap;letter-spacing:1px}
+}
