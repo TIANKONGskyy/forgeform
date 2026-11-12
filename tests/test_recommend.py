@@ -28,20 +28,39 @@ class ProfileTest(unittest.TestCase):
         self.assertIs(pick_default(ps), ps[0])
 
     def test_8g_laptop(self):
-        """8G 显存 + 16G 内存：minimal 能装（紧），standard 装不下。"""
+        """8G 显存 + 16G 内存 + 什么都没有 → 只能走 starter，且标"装不下"。"""
         ps = build_profiles(hw(8, ram=16), assets())
         keys = {p.key: p for p in ps}
-        self.assertIn("minimal", keys)
-        # 内存 16G，模型要 10.8G，留 5G 给系统 → 判定卡边缘、不该标 fits
-        self.assertFalse(keys["minimal"].fits, "16G 内存不该被判为舒适可用")
-        self.assertIn("内存", keys["minimal"].reason)
+        # assets() 全空 = 没有 ComfyUI/diffusers/hy3dgen → 只剩从零开始那套
+        self.assertIn("starter", keys)
+        self.assertFalse(keys["starter"].fits, "16G 内存不该被判为舒适可用")
+        self.assertIn("内存", keys["starter"].reason)
         # 8G 显存连 standard 都不进列表（阈值 12G）
         self.assertNotIn("standard", keys)
 
     def test_8g_with_32g_ram_is_ok(self):
         ps = build_profiles(hw(8, ram=32), assets())
         keys = {p.key: p for p in ps}
-        self.assertTrue(keys["minimal"].fits, "8G 显存 + 32G 内存应该可用")
+        self.assertTrue(keys["starter"].fits, "8G 显存 + 32G 内存应该可用")
+
+    def test_starter_includes_llm_and_ollama(self):
+        """什么都没有的机器必须把对话能力算进去 —— 否则装完还是没法解析需求。"""
+        ps = build_profiles(hw(8, ram=32), assets())
+        st = next(p for p in ps if p.key == "starter")
+        kinds = [d.kind for d in st.downloads]
+        self.assertIn("llm", kinds, "必须推荐对话模型")
+        self.assertIn("framework", kinds, "没 Ollama 时必须提示装它")
+        llm = next(d for d in st.downloads if d.kind == "llm")
+        self.assertTrue(llm.command().startswith("ollama pull"), llm.command())
+        self.assertTrue(any(d.kind == "image" for d in st.downloads))
+        self.assertTrue(any(d.kind == "mesh" for d in st.downloads))
+
+    def test_no_llm_when_chat_exists(self):
+        """已经有对话服务时不该再推荐下 LLM。"""
+        ps = build_profiles(hw(16, ram=32), assets(chat=True, diffusers=True))
+        for p in ps:
+            self.assertFalse(any(d.kind == "llm" for d in p.downloads),
+                             f"{p.key} 不该带 llm 下载项")
 
     def test_12g_gets_standard(self):
         ps = build_profiles(hw(12, ram=32), assets())
@@ -73,13 +92,20 @@ class ProfileTest(unittest.TestCase):
             self.assertIn("backend", p.config_patch)
 
     def test_download_commands_are_runnable(self):
+        """每类下载项给出的命令都要能直接执行。"""
         ps = build_profiles(hw(32, ram=64), assets())
         for p in ps:
             for d in p.downloads:
                 cmd = d.command()
-                self.assertIn("tools/fetch_model.py", cmd)
-                self.assertIn("--repo", cmd)
-                self.assertIn("--dest", cmd)
+                self.assertTrue(cmd, f"{p.key}/{d.repo} 命令为空")
+                if d.kind == "llm":
+                    self.assertTrue(cmd.startswith("ollama pull"), cmd)
+                elif d.kind == "framework":
+                    self.assertTrue(len(cmd) > 10, "框架项要给出可操作的提示")
+                else:
+                    self.assertIn("tools/fetch_model.py", cmd)
+                    self.assertIn("--repo", cmd)
+                    self.assertIn("--dest", cmd)
 
     def test_summarize_assets_ignores_dead_comfyui(self):
         """8189 没起、8188 起了 —— 不能因为死实例把能力判没了。"""

@@ -40,16 +40,21 @@ class Hardware:
 
 @dataclass
 class Download:
-    kind: str                       # image | mesh
+    kind: str                       # llm | image | mesh | framework
     plugin_id: str                  # 装完写进 config 用的 key
-    repo: str
-    dest: str
+    repo: str                       # HF repo / ollama 模型名 / 安装包 URL
+    dest: str = ""
     include: list[str] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
     size_gb: float = 0.0
     note: str = ""
 
     def command(self) -> str:
+        if self.kind == "llm":
+            # 走 Ollama 拉，比自己下 GGUF 省事（自动管量化、模板、上下文）
+            return f"ollama pull {self.repo}"
+        if self.kind == "framework":
+            return self.note
         inc = " ".join(f"--include '{p}'" for p in self.include)
         exc = " ".join(f"--exclude '{p}'" for p in self.exclude)
         return (f"python tools/fetch_model.py --repo {self.repo} --dest {self.dest} "
@@ -128,10 +133,64 @@ def summarize_assets(frameworks) -> dict:
 
 
 # ────────────────────────────────────────────────────────────────
+# 对话模型（LLM）选型
+# ────────────────────────────────────────────────────────────────
+# 铸想的对话不是聊天，是「把一句话解析成结构化需求」—— 3B 就能做，
+# 7B 明显更稳，14B 会主动追问缺失参数。再大对收益很小，显存却翻倍。
+_LLM_TIERS = [
+    # (最低显存, ollama 模型名, 下载体积 GB, 说明)
+    (24, "qwen2.5:14b-instruct-q4_K_M", 9.0, "14B，会主动追问缺失尺寸"),
+    (12, "qwen2.5:7b-instruct-q4_K_M", 4.7, "7B，解析稳定，最常用的一档"),
+    (7, "qwen2.5:7b-instruct-q4_K_M", 4.7, "7B，8G 卡可跑（上下文收窄）"),
+    (5, "qwen2.5:3b-instruct-q4_K_M", 2.0, "3B，够解析需求，显存占用小"),
+    (0, "qwen2.5:1.5b-instruct-q4_K_M", 1.1, "1.5B，纯 CPU 也能跑，质量一般"),
+]
+
+
+def pick_llm(vram_gb: float, ram_gb: float) -> tuple[str, float, str]:
+    """按显存挑对话模型。没 GPU 时也能退到 1.5B 跑 CPU。"""
+    for need, name, gb, why in _LLM_TIERS:
+        if vram_gb >= need:
+            return name, gb, why
+    return _LLM_TIERS[-1][1], _LLM_TIERS[-1][2], _LLM_TIERS[-1][3]
+
+
+def _llm_download(vram_gb: float, ram_gb: float) -> Download:
+    name, gb, why = pick_llm(vram_gb, ram_gb)
+    return Download("llm", "chat", name, size_gb=gb,
+                    note=f"{why}（{gb} GB，ollama pull 一条命令）")
+
+
+def _ollama_install_download() -> Download:
+    return Download(
+        "framework", "ollama", "https://ollama.com/download/OllamaSetup.exe",
+        size_gb=0.7,
+        note="没装 Ollama 时先装它（0.7 GB，装完 ollama serve 自动起）: "
+             "winget install Ollama.Ollama   或   https://ollama.com/download")
+
+
+# ────────────────────────────────────────────────────────────────
 # 方案生成
 # ────────────────────────────────────────────────────────────────
 def build_profiles(hw: Hardware, assets: dict) -> list[Profile]:
     out: list[Profile] = []
+
+    # 对话模型：机器上没有可用聊天端点时才需要装。
+    # 这一步经常被忽略 —— 用户以为装了出图/建模就完事，结果第一句话就没人解析。
+    no_chat = not assets.get("chat")
+    has_comfy = bool(assets.get("comfyui"))
+    has_diffusers = bool(assets.get("diffusers"))
+    has_hy3d = bool(assets.get("hy3dgen"))
+
+    def with_llm(dls: list[Download], need_ollama: bool) -> list[Download]:
+        """把对话模型（以及 Ollama 本体）排到下载清单最前面。"""
+        if not no_chat:
+            return dls
+        pre: list[Download] = []
+        if need_ollama:
+            pre.append(_ollama_install_download())
+        pre.append(_llm_download(hw.vram_gb, hw.ram_gb))
+        return pre + dls
 
     # ── 方案 0：零下载（机器上已经有能用的 ComfyUI）──
     if assets.get("comfyui") and assets.get("comfyui_3d"):
@@ -160,7 +219,9 @@ def build_profiles(hw: Hardware, assets: dict) -> list[Profile]:
         return ram >= need + 6
 
     # 最小：SD1.5 + 2mini
-    if hw.has_gpu:
+    # 只在机器上已经有 diffusers / hy3dgen 时才提 —— 否则它和下面的 starter 重复，
+    # 只是少了"装 Python 推理库"这一项，会误导用户以为能少下 4 GB。
+    if hw.has_gpu and (has_diffusers or has_hy3d):
         sd15 = Download("image", "sd15", "stable-diffusion-v1-5/stable-diffusion-v1-5",
                         "D:/models/sd15", ["model_index.json", "vae/", "unet/", "text_encoder/",
                                            "tokenizer/", "scheduler/"], ["*.ckpt"], 4.2,
@@ -175,9 +236,10 @@ def build_profiles(hw: Hardware, assets: dict) -> list[Profile]:
             desc="出图用 SD1.5，建模用 Hunyuan3D-2mini。8G 显存能跑，画质一般但链路完整。",
             backend_mode="direct",
             image_model="sd15", mesh_model="hunyuan_mini",
-            downloads=[sd15, mini], est_gb=8.2,
+            downloads=with_llm([sd15, mini], need_ollama=not assets.get("ollama")),
+            est_gb=8.2,
             fits=vram >= 7 and fits_by_ram(11),
-            reason=("显存要 7 GB+、内存要 16 GB+（模型自身占 10.8 GB）"
+            reason=("显存要 7 GB+、内存要 17 GB+（模型自身占 10.8 GB）"
                     if not (vram >= 7 and fits_by_ram(11)) else "够用"),
             config_patch={
                 "backend": {"mode": "direct"},
@@ -204,7 +266,7 @@ def build_profiles(hw: Hardware, assets: dict) -> list[Profile]:
                  "作者本人日常用的就是这一档。",
             backend_mode="auto",
             image_model="z_image", mesh_model="hunyuan_mini",
-            downloads=[zi], est_gb=30.6,
+            downloads=with_llm([zi], need_ollama=not assets.get("ollama")), est_gb=30.6,
             fits=vram >= 12 and fits_by_ram(11) and hw.disk_free_gb >= 40,
             reason=("显存 12 GB+ / 内存 16 GB+ / 磁盘 40 GB+"
                     if vram >= 12 else f"显存只有 {vram:.0f} GB，不够"),
@@ -234,6 +296,53 @@ def build_profiles(hw: Hardware, assets: dict) -> list[Profile]:
                 "backend": {"mode": "comfyui"},
                 "stages": {"image": {"default_model": "qwen21_ref"},
                            "3d": {"default_model": "hunyuan21"}},
+            },
+        ))
+
+    # ── 从零开始：什么都没有的机器 ──
+    # 这是最容易被漏掉的一类用户：新装的 Windows、只有显卡驱动。
+    # 四个东西都得装：Ollama（对话）+ LLM + 出图模型 + 建模模型，走直连不装 ComfyUI。
+    if not has_comfy and not has_diffusers and not has_hy3d:
+        sd15_boot = Download("image", "sd15", "stable-diffusion-v1-5/stable-diffusion-v1-5",
+                             "D:/models/sd15",
+                             ["model_index.json", "vae/", "unet/", "text_encoder/",
+                              "tokenizer/", "scheduler/"], ["*.ckpt"], 4.2,
+                             "SD1.5 全精度，8G 显存够")
+        mini_boot = Download("mesh", "hunyuan_mini", "tencent/Hunyuan3D-2mini",
+                             "D:/models/hy3dgen/hunyuan3d-2mini",
+                             ["^hunyuan3d-dit-v2-mini/", "^hunyuan3d-vae-v2-mini/",
+                              "^config\\.json$"], ["\\.ckpt$"], 3.96,
+                             "3.96 GB，hy3dgen 认的目录结构")
+        py_deps = Download("framework", "pydeps", "torch + diffusers + hy3dgen", size_gb=4.0,
+                           note="pip install torch diffusers transformers hy3dgen  （约 4 GB，含 CUDA 运行时）")
+        dls = with_llm([py_deps, sd15_boot, mini_boot],
+                       need_ollama=not assets.get("ollama"))
+        total = round(sum(d.size_gb for d in dls), 1)
+        out.append(Profile(
+            key="starter",
+            name="从零开始（LLM + 出图 + 建模全装）",
+            desc=f"这台机器上没找到可用的推理框架或模型。需要装 Ollama（对话）、"
+                 f"Python 推理库、SD1.5（出图）、Hunyuan3D 2mini（建模），合计约 {total} GB。"
+                 f"走直连模式，不需要 ComfyUI。",
+            backend_mode="direct",
+            image_model="sd15", mesh_model="hunyuan_mini",
+            downloads=dls, est_gb=total,
+            fits=(hw.vram_gb >= 7 and hw.ram_gb >= 17 and hw.disk_free_gb >= total + 10),
+            reason=("显存 ≥ 7 GB / 内存 ≥ 17 GB / 磁盘 ≥ "
+                    f"{total + 10:.0f} GB" if not (hw.vram_gb >= 7 and hw.ram_gb >= 17
+                                                  and hw.disk_free_gb >= total + 10) else "够用"),
+            config_patch={
+                "backend": {"mode": "direct"},
+                "agent": {"provider": "ollama"},
+                "stages": {"image": {"default_model": "sd15"},
+                           "3d": {"default_model": "hunyuan_mini"}},
+                "models": {
+                    "image": {"sd15": {"path": "D:/models/sd15",
+                                       "pipeline": "StableDiffusionPipeline",
+                                       "steps": 25, "width": 512, "height": 512}},
+                    "3d": {"hunyuan_mini": {"path": "D:/models/hy3dgen/hunyuan3d-2mini",
+                                            "octree": 192, "steps": 30}},
+                },
             },
         ))
 

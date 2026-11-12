@@ -60,7 +60,10 @@ def show_detail(p) -> None:
     else:
         print(f"需要下载 {sum(d.size_gb for d in p.downloads):.2f} GB：")
         for d in p.downloads:
-            print(f"  · {d.repo}  ({d.size_gb:.2f} GB) → {d.dest}")
+            kind = {"llm": "对话模型", "framework": "依赖/框架", "image": "出图",
+                    "mesh": "建模"}.get(d.kind, d.kind)
+            tail = f" → {d.dest}" if d.dest else ""
+            print(f"  · [{kind}] {d.repo}  ({d.size_gb:.2f} GB){tail}")
             if d.note:
                 print(f"      {d.note}")
             print(f"      {d.command()}")
@@ -109,6 +112,26 @@ def run_downloads(p, yes: bool) -> bool:
             print("跳过下载。")
             return False
     for d in p.downloads:
+        # 按 kind 分派：LLM 走 ollama pull，框架走提示，模型走自带下载器
+        if d.kind == "llm":
+            exe = shutil.which("ollama")
+            if not exe:
+                print(f"\n  跳过 {d.repo}：没找到 ollama 命令。")
+                print("  先装 Ollama（https://ollama.com/download），装完再跑一次。")
+                continue
+            cmd = [exe, "pull", d.repo]
+            print(f"\n$ ollama pull {d.repo}")
+            rc = subprocess.call(cmd)
+            if rc != 0:
+                print(f"  ollama pull 失败（exit {rc}）。可以重跑同一条命令。")
+                return False
+            continue
+
+        if d.kind == "framework":
+            print(f"\n  需要手动装（{d.size_gb:.1f} GB）：{d.repo}")
+            print(f"    {d.note}")
+            continue
+
         cmd = [sys.executable, str(ROOT / "tools" / "fetch_model.py"),
                "--repo", d.repo, "--dest", d.dest, "--threads", "8"]
         for pat in d.include:
