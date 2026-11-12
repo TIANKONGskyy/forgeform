@@ -279,3 +279,59 @@ image_tokenizer.model.layers.0.attention.q_proj.weight
 要用的话得把那套依赖单独隔离（独立虚拟环境），成本和收益不成比例。
 
 **8 GB 显存 / 16 GB 内存的机器，建模这条路当前没有可行方案。**
+
+---
+
+## 「优先往显存载」的实测与卡点（2026-11-12 深夜）
+
+用户提的思路：加载时直接进显存，显存放不下才溢出到内存。这个方向**对**，
+实测也确实把内存峰值压下来了。
+
+### 拆开验证：逐层搬到显存是可行的
+
+用 `tools/probe_lazy_load.py` 做对照实验（四种限制组合各起独立进程）：
+
+| 显存限制 | 内存限制 | 结果 | 显存峰值 | 内存峰值 |
+|---|---|---|---|---|
+| 不限 | 不限 | ✓ 1325 层 / 4.1 s | 0.02 GB | 4.19 GB |
+| 6 GB | 不限 | ✓ 1325 层 / 5.0 s | 0.02 GB | 4.19 GB |
+| 不限 | 10 GB | ✓ 1325 层 / 2.7 s | 0.02 GB | 4.19 GB |
+| **6 GB** | **10 GB** | **✓ 1325 层 / 2.4 s** | 0.02 GB | 4.19 GB |
+
+不删张量（`--keep`，全部留在显存）：
+
+```
+1325 层 / 3643 MB / 10.5 s
+显存峰值 3.56 GB   内存峰值 4.19 GB
+```
+
+**3.56 GB 显存 + 4.19 GB 内存** —— 8 GB 显存 / 16 GB 内存的机器**完全够**。
+
+同样的权重，原生加载的内存峰值是 **10.8 GB**，逐层加载是 **4.19 GB**。**差 6.6 GB。**
+
+### 但集成到 hy3dgen 时还是失败
+
+`backend/backends/lazy_gpu_load.py` 已经把这个加载器做出来了，
+并且验证过 patch 确实生效（`safetensors.torch.load_file` 被换成 `load_file_gpu`）。
+
+但真跑 `from_pretrained` 仍然报：
+
+```
+RuntimeError: DefaultCPUAllocator: not enough memory: you tried to allocate 12582912 bytes
+RSS 4.47 GB   显存 0.00 GB
+```
+
+**显存 0.00 GB** 说明权重根本没进 GPU —— 崩在更早的地方。
+`from_pretrained` 里除了 `load_file`，还有 `smart_load_model`（读 config）、
+conditioner / VAE 的加载等多个 CPU 分配点，其中一个在 10 GB 限制下失败。
+
+### 当前进度
+
+| 项 | 状态 |
+|---|---|
+| 逐层加载到显存（独立验证） | ✅ 峰值 3.56 GB 显存 / 4.19 GB 内存 |
+| 加载器实现（`lazy_gpu_load.py`） | ✅ 已写入仓库，patch 验证生效 |
+| 集成进 hy3dgen 完整流程 | ❌ 仍崩在某个未定位的 CPU 分配点 |
+
+**结论：这条路有希望，但还没接通。** 下一步要逐个 patch hy3dgen 里其余的 CPU 分配点
+（conditioner、VAE、`smart_load_model`），而不是只换 `load_file`。
