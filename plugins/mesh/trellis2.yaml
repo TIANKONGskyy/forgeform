@@ -1,0 +1,17 @@
+id: trellis2
+kind: mesh
+label: TRELLIS.2 4B
+# TRELLIS.2 不是 diffusers 模型，走官方 trellis2 包的加载入口。
+# 装了 ComfyUI 的话更省事：直接用 ComfyUI-3D-Pack 里的 TRELLIS.2 节点。
+loader: trellis2.pipelines.Trellis2ImageTo3DPipeline
+repo: microsoft/TRELLIS.2-4B
+vram_hint: 16
+# 2026-11 查 HF：下载量约 258 万，是当前用得最多的图生 3D。
+# 输出带 PBR 材质；也能出白模，铸想只用几何。
+# 0.5M 体素下模型推荐 16 GB 以上显存，8 GB 卡用 GGUF 版（见 trellis2_gguf.yaml）。
+notes: 4B 参数，输出含 PBR；几何质量与 Hunyuan3D 2.1 同级或更好
+defaults:
+  steps: 12
+  guidance: 7.5
+  octree: 256
+  dtype: float16

@@ -203,6 +203,49 @@ def _ollama_install_download() -> Download:
 
 
 # ────────────────────────────────────────────────────────────────
+# 建模模型选型
+# ────────────────────────────────────────────────────────────────
+# 2026-11 查 HF 下载量：TRELLIS.2（约 258 万）> TripoSR（17 万）
+#   > Hunyuan3D 2.1（10.8 万）> 2mini（9.8 万）。
+# 但下载量不等于"这台机器能跑" —— 选型要同时看：有没有 ComfyUI、显存多少。
+_MESH_CHOICES = [
+    # (id, 需要的最低显存, 需要的条件, 说明)
+    ("hunyuan21", 16, "comfyui", "ComfyUI 3D-Pack 已装时最省事，512 octree 质量最高"),
+    ("trellis2", 16, "any", "2026 用得最多；输出含 PBR，几何与 2.1 同级"),
+    ("trellis2_gguf", 8, "any", "量化版，8G 卡可跑；质量差异未实测"),
+    ("hunyuan_mini", 7, "any", "3.6 GB 权重，跑得最快，但正视图容易出薄片"),
+]
+
+
+def pick_mesh(assets: dict, vram_gb: float) -> tuple[str, str]:
+    """按"有没有 ComfyUI + 显存"挑建模模型。返回 (id, 说明)。
+
+    顺序是有意的：ComfyUI 已经装了 3D-Pack 就用它（零下载、最稳），
+    否则才考虑直连的 TRELLIS.2，最后退到 2mini。
+    """
+    has_comfy3d = bool(assets.get("comfyui_3d"))
+    for mid, need_vram, need, why in _MESH_CHOICES:
+        if need == "comfyui" and not has_comfy3d:
+            continue
+        if vram_gb < need_vram:
+            continue
+        return mid, why
+    return "hunyuan_mini", "显存有限，用最小的 2mini（3.6 GB 权重）"
+
+
+def list_mesh_choices(assets: dict, vram_gb: float) -> list[dict]:
+    """建模模型的可选清单，装不了的也列出来标 fits。"""
+    has_comfy3d = bool(assets.get("comfyui_3d"))
+    out = []
+    for mid, need_vram, need, why in _MESH_CHOICES:
+        ok = vram_gb >= need_vram and (need != "comfyui" or has_comfy3d)
+        out.append({"id": mid, "min_vram_gb": need_vram, "label": why,
+                    "requires": ("ComfyUI 3D-Pack" if need == "comfyui" else ""),
+                    "fits": ok})
+    return out
+
+
+# ────────────────────────────────────────────────────────────────
 # 方案生成
 # ────────────────────────────────────────────────────────────────
 def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Profile]:
@@ -215,6 +258,9 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
     has_comfy = bool(assets.get("comfyui"))
     has_diffusers = bool(assets.get("diffusers"))
     has_hy3d = bool(assets.get("hy3dgen"))
+
+    # 建模模型：按"有没有 ComfyUI 3D-Pack + 显存"选，不再硬编码 2mini/2.1
+    mesh_pick, mesh_why = pick_mesh(assets, hw.vram_gb)
 
     def with_llm(dls: list[Download], need_ollama: bool,
                  vram_cap: float | None = None) -> list[Download]:
@@ -282,7 +328,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             name="最小可用（SD1.5 + 3D 2mini）",
             desc="出图用 SD1.5，建模用 Hunyuan3D-2mini。8G 显存能跑，画质一般但链路完整。",
             backend_mode="direct",
-            image_model="sd15", mesh_model="hunyuan_mini",
+            image_model="sd15", mesh_model=mesh_pick,
             downloads=with_llm([sd15, mini], need_ollama=not assets.get("ollama"), vram_cap=8),
             est_gb=8.2,
             fits=vram >= 7 and fits_by_ram(11),
@@ -291,7 +337,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             config_patch={
                 "backend": {"mode": "direct"},
                 "stages": {"image": {"default_model": "sd15"},
-                           "3d": {"default_model": "hunyuan_mini"}},
+                           "3d": {"default_model": mesh_pick}},
                 "models": {"image": {"sd15": {"path": "D:/models/sd15",
                                               "pipeline": "StableDiffusionPipeline",
                                               "steps": 25, "width": 512, "height": 512}},
@@ -320,7 +366,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             backend_mode="auto",
             # 2026-11：这一档默认换成 FLUX.2 Klein 4B —— 10 GB 显存就够，
             # 比 Z-Image 省一半，12–16 GB 的卡不用挤。Z-Image 保留为备选（8 步更快）。
-            image_model="flux2klein4b", mesh_model="hunyuan_mini",
+            image_model="flux2klein4b", mesh_model=mesh_pick,
             downloads=with_llm([klein4b], need_ollama=not assets.get("ollama"), vram_cap=12),
             est_gb=8.5,
             fits=vram >= 12 and fits_by_ram(11) and hw.disk_free_gb >= 40,
@@ -329,7 +375,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             config_patch={
                 "backend": {"mode": "auto"},
                 "stages": {"image": {"default_model": "flux2klein4b"},
-                           "3d": {"default_model": "hunyuan_mini"}},
+                           "3d": {"default_model": mesh_pick}},
                 "models": {"image": {"flux2klein4b": {"path": "D:/models/flux2klein4b"}},
                            "3d": {"hunyuan_mini": {"path": "D:/models/hy3dgen/hunyuan3d-2mini",
                                                    "octree": 256, "steps": 30}}},
@@ -381,7 +427,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
                  f"Python 推理库、SD1.5（出图）、Hunyuan3D 2mini（建模），合计约 {total} GB。"
                  f"走直连模式，不需要 ComfyUI。",
             backend_mode="direct",
-            image_model="sd15", mesh_model="hunyuan_mini",
+            image_model="sd15", mesh_model=mesh_pick,
             downloads=dls, est_gb=total,
             fits=(hw.vram_gb >= 7 and hw.ram_gb >= 17 and hw.disk_free_gb >= total + 10),
             reason=("显存 ≥ 7 GB / 内存 ≥ 17 GB / 磁盘 ≥ "
@@ -391,7 +437,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
                 "backend": {"mode": "direct"},
                 "agent": {"provider": "ollama"},
                 "stages": {"image": {"default_model": "sd15"},
-                           "3d": {"default_model": "hunyuan_mini"}},
+                           "3d": {"default_model": mesh_pick}},
                 "models": {
                     "image": {"sd15": {"path": "D:/models/sd15",
                                        "pipeline": "StableDiffusionPipeline",

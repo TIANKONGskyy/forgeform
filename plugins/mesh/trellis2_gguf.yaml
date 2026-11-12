@@ -1,0 +1,14 @@
+id: trellis2_gguf
+kind: mesh
+label: TRELLIS.2 4B (GGUF)
+loader: trellis2.pipelines.Trellis2ImageTo3DPipeline
+repo: ilintar/trellis2-gguf
+vram_hint: 8
+# 社区做的 GGUF 量化版。8 GB 卡跑不动 fp16 的 4B，用这个。
+# 量化对几何质量有影响，具体差异需要实测 —— 想比就 tools/bench_mesh.py。
+notes: 量化版，8 GB 显存可跑；质量与 fp16 版的差异未实测
+defaults:
+  steps: 12
+  guidance: 7.5
+  octree: 192
+  dtype: float16
