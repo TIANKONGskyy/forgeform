@@ -48,7 +48,8 @@ class Studio:
         self.job = {'status': 'idle', 'label': '准备就绪', 'step': 0, 'total': 0, 'logs': [],
                     # 下载进度：大模型几十分钟起步，只给"第几步"用户会以为卡死
                     'file': '', 'percent': 0.0, 'speed_mbps': 0.0,
-                    'downloaded_mb': 0.0, 'size_mb': 0.0}
+                    'downloaded_mb': 0.0, 'size_mb': 0.0,
+                    'eta_sec': 0, 'tick': 0.0}
         self.cancelled = threading.Event()
         self.child = None
         self.app = None
@@ -67,21 +68,47 @@ class Studio:
 
     # fetch_model.py 每 5% 打一行：
     #   62.5%  2275.4/3643.0 MB   3.08 MB/s  (model.fp16.safetensors)
+    # fetch_model.py：  62.5%  2275.4/3643.0 MB   3.08 MB/s  (model.fp16.safetensors)
     _PROGRESS_RE = re.compile(
         r"(\d+(?:\.\d+)?)%\s+([\d.]+)/([\d.]+)\s*MB\s+([\d.]+)\s*MB/s\s+\((.+?)\)")
+    # ollama pull：     pulling 8934d96d3f08:  45% ▕███▏  1.2 GB/2.7 GB  5.1 MB/s  1m20s
+    _OLLAMA_RE = re.compile(
+        r"pulling\s+([0-9a-f]{6,})[^:]*:\s+(\d+)%.*?([\d.]+)\s*([GM])B\s*/\s*([\d.]+)\s*([GM])B"
+        r"\s+([\d.]+)\s*([GM])B/s")
+
+    @staticmethod
+    def _to_mb(v: float, unit: str) -> float:
+        return v * 1024.0 if unit == "G" else v
 
     def _parse_progress(self, line: str) -> None:
-        """把下载器的进度行抽成结构化字段，供前端画进度条。"""
-        m = self._PROGRESS_RE.search(line or "")
-        if not m:
-            return
-        pct, done, size, speed, name = m.groups()
+        """把下载器的进度行抽成结构化字段，供前端画进度条与剩余时间。
+
+        两种输出格式都要认：模型走 fetch_model.py，对话模型走 `ollama pull`。
+        只认前一种的话，装 LLM 那一步界面会一直停在"正在准备 xxx"不动 —— 实测踩过。
+        """
+        line = line or ""
         with self.lock:
-            self.job['percent'] = float(pct)
-            self.job['downloaded_mb'] = float(done)
-            self.job['size_mb'] = float(size)
-            self.job['speed_mbps'] = float(speed)
-            self.job['file'] = name.strip()
+            self.job['tick'] = time.time()
+            m = self._PROGRESS_RE.search(line)
+            if m:
+                pct, done, size, speed, name = m.groups()
+                self.job.update(percent=float(pct), downloaded_mb=float(done),
+                                size_mb=float(size), speed_mbps=float(speed),
+                                file=name.strip())
+            else:
+                m = self._OLLAMA_RE.search(line)
+                if not m:
+                    return
+                _h, pct, dv, du, sv, su, spv, spu = m.groups()
+                done = self._to_mb(float(dv), du)
+                size = self._to_mb(float(sv), su)
+                speed = self._to_mb(float(spv), spu)
+                self.job.update(percent=float(pct), downloaded_mb=done, size_mb=size,
+                                speed_mbps=speed, file="(ollama)")
+            # 剩余时间：拿剩余量除以当前速度。速度是瞬时值，抖得厉害，夹一下上下限。
+            speed = float(self.job.get('speed_mbps') or 0)
+            left = float(self.job.get('size_mb') or 0) - float(self.job.get('downloaded_mb') or 0)
+            self.job['eta_sec'] = int(left / speed) if speed > 0.05 and left > 0 else 0
 
     def command(self, argv):
         if self.cancelled.is_set():

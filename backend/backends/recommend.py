@@ -276,6 +276,13 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
 
     # 标准：Z-Image + 2mini
     if hw.has_gpu and vram >= 12:
+        # 2026-11：FLUX.2 Klein 出了 4B 版（约 9B 的一半显存），12–16 GB 卡上
+        # 比推 Z-Image 更划算。Z-Image 仍保留，它 8 步出图更快。
+        klein4b = Download("image", "flux2klein4b", "black-forest-labs/FLUX.2-klein-base-4B",
+                           "D:/models/flux2klein4b",
+                           ["model_index.json", "scheduler/", "text_encoder/", "tokenizer/",
+                            "transformer/", "vae/"], ["*.ckpt"], 8.5,
+                           "4B 参数，diffusers 原生支持，约 10 GB 显存")
         zi = Download("image", "z_image", "Tongyi-MAI/Z-Image-Turbo",
                       "D:/models/z-image-turbo-diffusers", ["^model_index\\.json$", "^scheduler/",
                       "^text_encoder/", "^tokenizer/", "^transformer/", "^vae/"],
