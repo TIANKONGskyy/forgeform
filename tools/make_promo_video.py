@@ -55,6 +55,13 @@ def render_frames(mesh: trimesh.Trimesh) -> list[Path]:
     for f in TMP.glob("*.png"):
         f.unlink()
 
+    # ★ glTF 是 **Y-up**，matplotlib 的 3D 轴是 Z-up。不转的话猫头鹰会躺倒
+    #   （之前渲染出来像一块砖，就是这个原因，不是模型坏了）。
+    #   绕 X 轴 +90°：Y → Z。
+    mesh = mesh.copy()
+    rot = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
+    mesh.apply_transform(rot)
+
     tris = mesh.vertices[mesh.faces]
     center = mesh.bounds.mean(axis=0)
     scale = 1.0 / max(mesh.extents)
@@ -64,7 +71,7 @@ def render_frames(mesh: trimesh.Trimesh) -> list[Path]:
     for i in range(N):
         t = i / N
         elev = 18 + 8 * np.sin(t * 2 * np.pi * 2)      # 轻微上下
-        azim = 360 * t
+        azim = 225 + 360 * t   # 225° 是正面；从 0° 起会先看到后背
         fig = plt.figure(figsize=(W / 100, H / 100), dpi=100, facecolor=BG)
         ax = fig.add_axes([0, 0, 1, 1], projection="3d", facecolor=BG)
         ax.set_axis_off()
@@ -130,9 +137,11 @@ def main() -> int:
     glb = None
     # trimmed_owl 是 trim_base 切过立板的版本（那个板是**竖直**的，
     # 底部尖峰检测切不到，但 tools/trim_base.py 单独跑过一次把它切掉了）
+    # 试过 e2e_owl_trim：没有立板，但模型是**横躺**的（不是 Z-up），
+    # 渲染出来像一块砖，反而更糟。trimmed_owl 至少是正着的，
+    # 残留一块小背板 —— 这是 2mini 的真实产出，接受。
     for cand in ("outputs/art/view/trimmed_owl.glb",
-                 "outputs/3d/model_1794530838.glb",
-                 "outputs/art/view/owl.glb"):
+                 "outputs/art/e2e_owl_trim.glb"):
         p = ROOT / cand
         if p.exists():
             glb = p

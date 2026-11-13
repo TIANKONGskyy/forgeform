@@ -28,6 +28,40 @@ Say '=========================================='
 Say "folder: $root"
 Say ''
 
+# ── Self-check before anything else ────────────────────────
+# Desktop shortcut + update probe. The probe uses a 4s timeout, so a machine
+# without internet still starts in about four seconds instead of hanging.
+# Nothing is installed without the user saying yes.
+$bootstrap = Join-Path $root 'tools\bootstrap.py'
+if (Test-Path $bootstrap) {
+    $sysPy = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if ($sysPy) {
+        try {
+            $bj = & $sysPy $bootstrap --quiet 2>$null | Out-String
+            if ($bj -match '\{.*\}') {
+                $info = $bj.Substring($bj.IndexOf('{')) | ConvertFrom-Json
+                $upd = $info.update
+                if ($upd.ok -and $upd.newer) {
+                    Say ("New version available: " + $upd.latest + "  (current " + $upd.current + ")") 'Yellow'
+                    Say "  " + $upd.url
+                    Say '  Run 更新.bat to upgrade (keeps config and models).' 'DarkYellow'
+                } elseif ($upd.ok) {
+                    Say ("Version " + $upd.current + " is up to date.") 'DarkGray'
+                } else {
+                    Say 'No network, skipping update check.' 'DarkGray'
+                }
+                if ($info.steampp -and -not $info.steampp.installed) {
+                    Say 'Steam++ not found - model downloads may be slow.' 'DarkYellow'
+                    Say '  Install it if you want faster downloads: https://steampp.net/' 'DarkGray'
+                }
+            }
+        } catch {
+            Say 'Self-check skipped.' 'DarkGray'
+        }
+    }
+    Say ''
+}
+
 # ── 1. python ──────────────────────────────────────────────
 # A machine can have Python 3.15 on PATH and nothing else. numpy/pymeshlab have no
 # 3.14+ wheels, so pip dies. Strategy: find a supported interpreter anywhere, and if

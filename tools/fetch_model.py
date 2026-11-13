@@ -29,8 +29,11 @@ from pathlib import Path
 # 下载链路：多留几个源。国内直连 HF 经常在最后几 MB 断掉或者返回 5xx，
 # 只配一个镜像的话就只能整段重下。这里按优先级排，探测到哪个通用哪个。
 MIRRORS = {
-    "hf": "https://huggingface.co",
+    # 2026-11-13：国内优先。官方 HF 在国内实测经常 0.1 MB/s 或直接超时，
+    # 镜像通常快 2-5 倍。探测时按这个顺序试，第一个通的就用。
     "mirror": "https://hf-mirror.com",
+    "mirror2": "https://hf-api.gitee.com",
+    "hf": "https://huggingface.co",
     # 社区反代，2026-11 实测 /api/models 返回真 JSON，可用
     "mirror2": "https://hf-api.gitee.com",
     # 注意：不要加 modelscope.cn —— 它没有 HF 兼容的 /api/models，
@@ -93,18 +96,26 @@ def probe_mirrors(repo: str, timeout: int = 8) -> tuple[str, float]:
     探的是 `/api/models/<repo>`，不是某个具体文件 —— 仓库里不一定有 model_index.json
     （hy3dgen 那种格式就没有），拿文件探测会把好镜像误判成不可用。
     """
-    best, best_t = "", 999.0
+    # ★ 2026-11-13 改：**优先用国内镜像**，不再按 API 响应时间挑。
+    #
+    # 为什么不比时间：`/api/models` 的往返延迟和**大文件下载速度**不成正比。
+    # 实测在这台机器上官方 API 0.85s、hf-mirror 2.1s，看着官方快；
+    # 但同一时刻下载权重，官方 0.17 MB/s、镜像 0.4–0.5 MB/s。按延迟挑会选错。
+    #
+    # 所以策略是：**按 MIRRORS 的顺序（国内在前）试，第一个通了就用**。
+    # 国内确实不通（超时/解析失败）才退到官方。
+    tried = []
     for name, base in MIRRORS.items():
         t0 = time.time()
         try:
             _get(f"{base}/api/models/{repo}", timeout=timeout)
             dt = time.time() - t0
-            print(f"  [{name}] {base}  {dt*1000:.0f} ms")
-            if dt < best_t:
-                best, best_t = base, dt
+            print(f"  [{name}] {base}  {dt*1000:.0f} ms  OK")
+            return base, dt
         except Exception as exc:
             print(f"  [{name}] {base}  不可用 ({type(exc).__name__})")
-    return best, best_t
+            tried.append(name)
+    return "", 999.0
 
 
 # ────────────────────────────────────────────────────────────────
