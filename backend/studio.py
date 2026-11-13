@@ -548,6 +548,26 @@ class Studio:
         self.log(f'已删除：{removed}，共释放 {total} GB')
         return {'ok': True, 'removed': removed, 'freed_gb': total}
 
+    def netboost_advice(self):
+        """下载链路体检 + 要不要提示开 Steam++。
+
+        国内直连 GitHub Release 实测 0.17 MB/s，模型 3–9 GB 的话要几小时。
+        这个接口只是**给出判断**，不会自动装任何软件。
+        """
+        try:
+            from . import netboost
+            return {'ok': True, **netboost.advise()}
+        except Exception as exc:
+            return {'ok': False, 'error': f'{type(exc).__name__}: {exc}'}
+
+    def netboost_launch(self):
+        """启动本机已装的 Steam++。没装就返回下载地址，不静默安装。"""
+        try:
+            from . import netboost
+            return {'ok': True, **netboost.launch()}
+        except Exception as exc:
+            return {'ok': False, 'error': f'{type(exc).__name__}: {exc}'}
+
     def hardware(self):
         """实时硬件快照。给界面的监控面板用，每 2 秒拉一次。
 
@@ -594,6 +614,7 @@ def make_server(studio, port=7861):
             try:
                 if self.path == '/api/status': return self.send(studio.status())
                 if self.path == '/api/hardware': return self.send(studio.hardware())
+                if self.path == '/api/netboost': return self.send(studio.netboost_advice())
                 if self.path == '/api/purge-plan': return self.send(studio.purge_plan())
                 if self.path == '/api/catalog': return self.send({'models': studio.catalog(), 'config': {
                     'stages': studio.config().get('stages', {}), 'backend': studio.config().get('backend', {})}})
@@ -620,6 +641,7 @@ def make_server(studio, port=7861):
                 elif self.path == '/api/launch': result = studio.start_job('启动创作空间', studio.launch)
                 elif self.path == '/api/cancel': result = studio.cancel()
                 elif self.path == '/api/config': result = studio.configure(data)
+                elif self.path == '/api/netboost': result = studio.netboost_launch()
                 elif self.path == '/api/remove': result = studio.remove_model(data.get('id', ''))
                 elif self.path == '/api/purge': result = studio.start_job('删除铸想数据', lambda: studio.purge(data.get('scope', 'all')))
                 else: return self.send({'error': '未找到'}, 404)
