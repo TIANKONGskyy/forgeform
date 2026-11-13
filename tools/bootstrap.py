@@ -82,7 +82,7 @@ def check_update(timeout: int = 4) -> dict:
 
 
 # ── 桌面快捷方式 ────────────────────────────────────────────
-SHORTCUT_NAME = "铸想 ForgeForm.lnk"
+SHORTCUT_NAME = "ZYKT铸想.lnk"
 
 
 def desktop_dir() -> Path | None:
@@ -126,7 +126,7 @@ $sc = $ws.CreateShortcut("{target}")
 $sc.TargetPath = "{bat}"
 $sc.WorkingDirectory = "{ROOT}"
 $sc.IconLocation = "{ROOT}\\docs\\assets\\icon.ico,0"
-$sc.Description = "铸想 ForgeForm — 一句话到可打印模型"
+$sc.Description = "ZYKT铸想 — 一句话到可打印模型"
 $sc.Save()
 '''
     try:
@@ -138,6 +138,75 @@ $sc.Save()
         return {"ok": False, "error": (r.stderr or r.stdout or "未知")[:160]}
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+# ── 自动更新 ────────────────────────────────────────────────
+def auto_update(quiet: bool = False) -> dict:
+    """发现新版就下载并合并。用户数据（config/outputs/models/.venv）保留。
+
+    2026-11-13：用户要求"双击就自动更新到最新版"。所以这里不再只是提示，
+    而是真的装 —— 但**保留用户数据**（updater.py 的白名单控制），
+    并且失败不阻断启动（更新失败照样用旧版跑）。
+    """
+    upd = check_update()
+    if not upd.get("ok"):
+        return {"ok": False, "skipped": "no-network"}
+    if not upd.get("newer"):
+        return {"ok": True, "skipped": "up-to-date", "version": upd.get("current")}
+
+    tag = "v" + upd["latest"]
+    if not quiet:
+        _log(f"发现新版本 {upd['latest']}（当前 {upd['current']}），正在更新…")
+
+    # 下载 zip：先试 gh-proxy（国内快），再直连
+    import tempfile
+    url_name = f"forgeform-{tag}.zip"
+    base = f"https://github.com/{REPO}/releases/download/{tag}/{url_name}"
+    urls = [f"https://gh-proxy.com/{base}", base]
+    tmp = Path(tempfile.mkdtemp()) / url_name
+    got = False
+    last = ""
+    for u in urls:
+        try:
+            req = urllib.request.Request(u, headers={"User-Agent": "ForgeForm-updater"})
+            with urllib.request.urlopen(req, timeout=180) as r, open(tmp, "wb") as f:
+                while True:
+                    chunk = r.read(1024 * 256)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+            if tmp.stat().st_size > 1_000_000:
+                got = True
+                break
+        except Exception as exc:
+            last = f"{type(exc).__name__}: {str(exc)[:70]}"
+    if not got:
+        return {"ok": False, "error": f"下载失败: {last}"}
+
+    # 解压 + 合并（updater.py 里已实现"保留用户数据"）
+    import zipfile
+    extract = tmp.parent / "pkg"
+    try:
+        with zipfile.ZipFile(tmp) as z:
+            z.extractall(extract)
+    except Exception as exc:
+        return {"ok": False, "error": f"解压失败: {exc}"}
+
+    root = next((d for d in extract.iterdir() if (d / "app.py").exists()), None)
+    if not root:
+        return {"ok": False, "error": "包结构异常（没有 app.py）"}
+
+    cmd = [sys.executable, str(ROOT / "tools" / "updater.py"),
+           "--from", str(root), "--to", str(ROOT)]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
+                       env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
+    ok = r.returncode == 0
+    if not quiet:
+        tail = [l for l in (r.stdout or "").splitlines() if l.strip()][-3:]
+        for l in tail:
+            _log("  " + l)
+    return {"ok": ok, "from": upd["current"], "to": upd["latest"],
+            "output": (r.stdout or "")[-500:] if ok else (r.stderr or "")[-500:]}
 
 
 # ── Steam++ ────────────────────────────────────────────────
@@ -166,6 +235,8 @@ def main() -> int:
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--no-update", action="store_true")
     ap.add_argument("--check-only", action="store_true")
+    ap.add_argument("--auto-update", action="store_true",
+                    help="发现新版就下载并合并（保留 config/outputs/models）")
     args = ap.parse_args()
 
     if not args.quiet:
@@ -176,9 +247,21 @@ def main() -> int:
     if not args.quiet:
         _log(f"桌面快捷方式: {'已有' if sc.get('already') else ('已创建' if sc.get('created') else '跳过')}")
 
-    # 2. 检查更新
+    # 2. 检查更新（--auto-update 时直接装）
     upd = {"ok": False, "newer": False}
-    if not args.no_update:
+    if args.auto_update:
+        res = auto_update(quiet=args.quiet)
+        upd = {"ok": res.get("ok", False), "auto": True, **res}
+        if not args.quiet:
+            if res.get("skipped") == "up-to-date":
+                _log(f"已是最新 {res.get('version')}")
+            elif res.get("skipped") == "no-network":
+                _log("无网络，跳过更新，直接启动")
+            elif res.get("ok"):
+                _log(f"已更新 {res.get('from')} → {res.get('to')}")
+            else:
+                _log(f"更新失败（{res.get('error')}），继续用当前版本启动")
+    elif not args.no_update:
         t0 = time.time()
         upd = check_update()
         dt = time.time() - t0

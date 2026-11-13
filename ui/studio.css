@@ -112,3 +112,8 @@
 .net-actions button.primary{background:var(--accent);color:#0c1019;border-color:var(--accent);font-weight:550}
 .net-actions button.ghost{opacity:.8}
 .net-actions button:disabled{opacity:.4;cursor:default}
+
+
+/* 侧栏底部的版本号 */
+.rail-ver{margin-top:auto;padding:14px 18px 16px;font-family:ui-monospace,Consolas,monospace;
+  font-size:11px;letter-spacing:.08em;color:#5d6780;border-top:1px solid var(--line)}

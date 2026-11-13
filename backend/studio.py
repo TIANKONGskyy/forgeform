@@ -674,7 +674,13 @@ def make_server(studio, port=7861):
                 if self.path == '/api/catalog': return self.send({'models': studio.catalog(), 'config': {
                     'stages': studio.config().get('stages', {}), 'backend': studio.config().get('backend', {})}})
                 if self.path in ('/', '/index.html'):
-                    html = (studio.root / 'ui/studio.html').read_text(encoding='utf-8').replace('__TOKEN__', studio.token)
+                    html = (studio.root / 'ui/studio.html').read_text(encoding='utf-8')
+                    ver = '3.0.0'
+                    try:
+                        ver = (studio.root / 'VERSION').read_text(encoding='utf-8').strip()
+                    except Exception:
+                        pass
+                    html = html.replace('__TOKEN__', studio.token).replace('__VERSION__', ver)
                     return self.send(html.encode(), mime='text/html')
                 if self.path in ('/studio.css', '/studio.js'):
                     p = studio.root / 'ui' / self.path[1:]
