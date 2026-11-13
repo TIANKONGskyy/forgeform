@@ -87,8 +87,42 @@ def _sharpen(img: Image.Image, amount: float = 1.4) -> Image.Image:
     return out
 
 
+def _enhance_detail(img: Image.Image, clip_limit: float = 2.2,
+                    amount: float = 1.8) -> Image.Image:
+    """把细节推出来：局部对比度 + 强锐化。
+
+    为什么 3D 建模前要这一步：
+      octree / DiT 是靠**图像梯度**推轮廓的。卡通角色那种大片纯色 + 细黑描边，
+      梯度集中在描边上，模型只能抓到"外轮廓"，抓不到内部的起伏（衣褶、发丝、
+      手指之间的间隙）。增强之后这些过渡变成可检测的梯度，重建出来的表面就有
+      东西可抓，而不是一片平板。
+
+    用 CLAHE（自适应直方图均衡）而不是全局对比度：
+      全局拉对比会把白底拉灰、把浅色区域拉成噪点；CLAHE 按局部窗口做，
+      白底还是白的，暗部细节才提。
+
+    ★ 只对 RGB 做，alpha 原样保留 —— 改 alpha 会破坏"主体在哪"这个信息。
+    """
+    try:
+        import cv2
+        import numpy as np
+        rgb = np.array(img.convert("RGB"))
+        lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
+        l, a, b = cv2.split(lab)
+        l = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8)).apply(l)
+        rgb = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2RGB)
+        out = Image.fromarray(rgb)
+    except Exception:
+        out = img.convert("RGB")
+    out = out.filter(ImageFilter.UnsharpMask(radius=1.5, percent=int(amount * 100), threshold=2))
+    result = out.convert("RGBA")
+    result.putalpha(img.split()[-1])
+    return result
+
+
 def prepare(img_path: str, out_path: str | None = None, size: int = 1024,
-            do_remove_bg: bool = True, do_sharpen: bool = True) -> dict:
+            do_remove_bg: bool = True, do_sharpen: bool = True,
+            do_enhance: bool = True) -> dict:
     """跑完整预处理，返回 {ok, path, steps, before, after}。
 
     任何一步失败都降级继续 —— 建模不能因为预处理失败就中断。
@@ -121,6 +155,9 @@ def prepare(img_path: str, out_path: str | None = None, size: int = 1024,
     if do_sharpen:
         img = _sharpen(img)
         steps.append("锐化")
+    if do_enhance:
+        img = _enhance_detail(img)
+        steps.append("细节增强（CLAHE + 强锐化）")
 
     dst = Path(out_path) if out_path else src.with_name(src.stem + "_prep.png")
     img.save(dst)

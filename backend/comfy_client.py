@@ -774,7 +774,10 @@ class ComfyUIClient:
                 # Avoid the node's optional rembg wrapper: initialization errors
                 # there silently retain the opaque background.
                 "remove_background": False,  # explicit foreground alpha above
-                "auto_cleanup": True,
+                "auto_cleanup": False,
+                # 2026-11-13: was True. 3D-Pack cleans the pipeline object after a run,
+                # so the *second* run dies with "'Hunyuan3DDiFloMatchingPipeline' object
+                # has no attribute 'scheduler'". Keep False.
                 # ★ 2026-10-18：面数上限可由 params 显式指定
                 #   （0/不给 = 让节点按 octree 自动推导，保持原行为）
                 "max_facenum": int(params.get("max_facenum") or 0),
