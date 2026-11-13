@@ -67,6 +67,106 @@ def is_running() -> bool:
         return False
 
 
+STEAMPP_REPO = "BeyondDimension/SteamTools"
+STEAMPP_API = f"https://api.github.com/repos/{STEAMPP_REPO}/releases/latest"
+# 国内反代，官方 API 不通时兜底
+STEAMPP_API_CN = f"https://gh-proxy.com/https://api.github.com/repos/{STEAMPP_REPO}/releases/latest"
+
+
+def latest_installer() -> dict:
+    """查 Steam++ 最新 Windows 安装包的下载地址。
+
+    Steam++ 是开源的（BeyondDimension/SteamTools），release 里有
+    `Steam++_v*_win_x64.exe`（安装包）和 `.7z`（便携版）。优先用 exe，
+    静默参数 `/S`（NSIS 约定）。
+    """
+    import json
+    last = ""
+    for api in (STEAMPP_API, STEAMPP_API_CN):
+        try:
+            req = urllib.request.Request(api, headers={
+                "User-Agent": "ForgeForm", "Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                d = json.loads(r.read().decode())
+            exe = next((a for a in d.get("assets", [])
+                        if a["name"].lower().endswith("_win_x64.exe")), None)
+            if not exe:
+                continue
+            return {"ok": True, "version": (d.get("tag_name") or "").lstrip("v"),
+                    "name": exe["name"],
+                    "url": exe["browser_download_url"],
+                    "size_mb": round(exe["size"] / 1024 / 1024, 1)}
+        except Exception as exc:
+            last = f"{type(exc).__name__}: {str(exc)[:80]}"
+    return {"ok": False, "error": last or "没有找到 Windows 安装包"}
+
+
+def install_steampp(progress=None, timeout: int = 900) -> dict:
+    """下载并**静默安装** Steam++。用户必须显式调用这个函数（界面上的确认按钮）。
+
+    返回 {ok, path, version, log}。安装完会再 detect 一次确认。
+    """
+    import tempfile
+
+    info = latest_installer()
+    if not info.get("ok"):
+        return {"ok": False, "error": f"查不到安装包：{info.get('error')}"}
+
+    tmp = Path(tempfile.gettempdir()) / info["name"]
+    if progress:
+        progress(f"下载 {info['name']}（{info['size_mb']} MB）…")
+
+    # 下载：优先 gh-proxy，失败再直连
+    urls = [
+        "https://gh-proxy.com/" + info["url"],
+        info["url"],
+    ]
+    last = ""
+    for u in urls:
+        try:
+            req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
+                total = int(r.headers.get("Content-Length") or 0)
+                done = 0
+                while True:
+                    chunk = r.read(1024 * 256)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    done += len(chunk)
+                    if progress and total:
+                        progress(f"下载中 {done * 100 // total}%  "
+                                 f"({done / 1024 / 1024:.1f}/{total / 1024 / 1024:.1f} MB)")
+            if tmp.exists() and tmp.stat().st_size > 10 * 1024 * 1024:
+                break
+            last = "文件太小"
+        except Exception as exc:
+            last = f"{type(exc).__name__}: {str(exc)[:80]}"
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
+
+    if not tmp.exists() or tmp.stat().st_size < 10 * 1024 * 1024:
+        return {"ok": False, "error": f"下载失败：{last}"}
+
+    if progress:
+        progress("静默安装…")
+    try:
+        # NSIS 的静默参数是 /S；/D= 指定目录（必须放最后且不带引号）
+        proc = subprocess.run([str(tmp), "/S"], capture_output=True, text=True,
+                              timeout=timeout,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        ok = proc.returncode in (0, 3010)          # 3010 = 需要重启
+        log = (proc.stdout or "") + (proc.stderr or "")
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    tmp.unlink(missing_ok=True)
+    after = detect()
+    return {"ok": bool(after["installed"]), "version": info["version"],
+            "path": after["path"], "installer_rc": proc.returncode,
+            "log": log[-400:] if log else ""}
+
+
 def detect() -> dict:
     path = find_install()
     return {

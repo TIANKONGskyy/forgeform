@@ -560,6 +560,32 @@ class Studio:
         except Exception as exc:
             return {'ok': False, 'error': f'{type(exc).__name__}: {exc}'}
 
+    def netboost_pack(self):
+        """查 Steam++ 的最新安装包地址（不下载，只给界面显示版本和体积）。"""
+        try:
+            from . import netboost
+            return {'ok': True, **netboost.latest_installer()}
+        except Exception as exc:
+            return {'ok': False, 'error': f'{type(exc).__name__}: {exc}'}
+
+    def netboost_install(self):
+        """下载并静默安装 Steam++。
+
+        ★ 只在用户点了确认之后才会走到这里 —— 界面上是个明确的"安装"按钮。
+          装软件是显式动作，不做静默自动装。
+        """
+        try:
+            from . import netboost
+            info = netboost.latest_installer()
+            if not info.get('ok'):
+                return {'ok': False, 'error': info.get('error') or '查不到安装包'}
+            self._log(f"开始下载 {info['name']}（{info['size_mb']} MB）…")
+            res = netboost.install_steampp(progress=self._log)
+            self._log(f"安装结果: {'成功' if res.get('ok') else res.get('error')}")
+            return {'ok': bool(res.get('ok')), **res}
+        except Exception as exc:
+            return {'ok': False, 'error': f'{type(exc).__name__}: {exc}'}
+
     def netboost_launch(self):
         """启动本机已装的 Steam++。没装就返回下载地址，不静默安装。"""
         try:
@@ -615,6 +641,7 @@ def make_server(studio, port=7861):
                 if self.path == '/api/status': return self.send(studio.status())
                 if self.path == '/api/hardware': return self.send(studio.hardware())
                 if self.path == '/api/netboost': return self.send(studio.netboost_advice())
+                if self.path == '/api/netboost/pack': return self.send(studio.netboost_pack())
                 if self.path == '/api/purge-plan': return self.send(studio.purge_plan())
                 if self.path == '/api/catalog': return self.send({'models': studio.catalog(), 'config': {
                     'stages': studio.config().get('stages', {}), 'backend': studio.config().get('backend', {})}})
@@ -642,6 +669,7 @@ def make_server(studio, port=7861):
                 elif self.path == '/api/cancel': result = studio.cancel()
                 elif self.path == '/api/config': result = studio.configure(data)
                 elif self.path == '/api/netboost': result = studio.netboost_launch()
+                elif self.path == '/api/netboost/install': result = studio.start_job('安装 Steam++', studio.netboost_install)
                 elif self.path == '/api/remove': result = studio.remove_model(data.get('id', ''))
                 elif self.path == '/api/purge': result = studio.start_job('删除铸想数据', lambda: studio.purge(data.get('scope', 'all')))
                 else: return self.send({'error': '未找到'}, 404)
