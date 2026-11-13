@@ -274,9 +274,14 @@ def check_prompt_and_preview() -> None:
     import backend.render3d as R3
 
     # ── 提示词：清理函数的边界（这是"草率"回归的第一道闸）──
+    # 2026-11-13：`_clean_image_prompt` 出口会补干净背景（isolated on white…），
+    # 所以这里只验"前缀被去掉"，不要求整串完全相等
     ck("clean_strips_prompt_prefix",
-       D._clean_image_prompt('Prompt: a matte blue phone stand, studio light, 8k') ==
-       "a matte blue phone stand, studio light, 8k")
+       D._clean_image_prompt('Prompt: a matte blue phone stand, studio light, 8k')
+       .startswith("a matte blue phone stand, studio light, 8k"))
+    ck("clean_adds_white_background",
+       "white background" in D._clean_image_prompt(
+           'Prompt: a matte blue phone stand, studio light, 8k'))
     ck("clean_rejects_chinese", D._clean_image_prompt("这是一个蓝色手机支架，写实风格，非常好") == "")
     ck("clean_rejects_too_short", D._clean_image_prompt("blue stand") == "")
     ck("clean_strips_markdown_and_newlines",
