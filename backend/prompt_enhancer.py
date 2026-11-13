@@ -269,15 +269,51 @@ def _unload_expert() -> None:
         pass
 
 
+def _ollama_enhance(instruction: str, timeout: int = 240) -> str:
+    """用 Ollama 上的对话模型扩写。
+
+    ★ 为什么需要这个兜底（2026-11-13）
+      `LLAMACPP_CMD` 的第一项是裸命令 `llama-server`，这台机器的 PATH 里没有它
+      → `_llamacpp_start` 直接 WinError 2 → `enhance_local` 返回**原始提示词**，
+      日志只留一行 warning。表现成"LLM 扩写这步 4 秒就过去了、字数没变"。
+      而 Ollama 一直在跑、里面就有 qwen3.8:latest，白白浪费。
+
+    兜底顺序：llama-server（质量最好）→ Ollama（够用）→ 原文。
+    """
+    model = _resolve_translate_model()
+    try:
+        r = requests.post(
+            f"{OLLAMA_URL}/api/generate",
+            json={
+                "model": model,
+                "prompt": instruction,
+                "stream": False,
+                # qwen3.8 是 thinking 模型：不关的话整段输出会进 `thinking` 字段，
+                # `response` 是空字符串（实测 146 秒换来一个空回复）。
+                "think": False,
+                "options": {"num_predict": 700, "temperature": 0.7},
+            },
+            timeout=timeout,
+        )
+        r.raise_for_status()
+        txt = (r.json() or {}).get("response") or ""
+        logger.info(f"[ollama] {model} 扩写 {len(txt)} 字符")
+        return txt.strip()
+    except Exception as exc:
+        logger.warning(f"[ollama] 扩写失败: {type(exc).__name__}: {exc}")
+        return ""
+
+
 def enhance_local(prompt: str, negative_prompt: str = "", timeout: int = 300) -> str:
     """用 llama-server 上的 Qwen3-Coder-30B 扩写（2026-08-18 宇凯指定）。
     扩写完成自动释放显存给 ComfyUI；下次扩写自动重启服务。
     """
     if not prompt or not prompt.strip():
         return prompt
-    if not _llamacpp_start(timeout=240):
-        logger.warning("Qwen3-Coder-30B 服务未就绪，使用原始提示词")
-        return prompt
+    backend = "llama-server"
+    if not _llamacpp_start(timeout=120):
+        backend = "ollama"
+        logger.warning("Qwen3-Coder-30B 服务未就绪，改走 Ollama")
 
     instruction = (
         f"为 3D 打印生成一个{prompt.strip()}的精细建模提示词。"
@@ -314,6 +350,18 @@ def enhance_local(prompt: str, negative_prompt: str = "", timeout: int = 300) ->
     )
     if negative_prompt:
         instruction += f"，避免：{negative_prompt}"
+    # Ollama 那条路：直接用 /api/generate，不走 chat completions
+    if backend == "ollama":
+        t0 = time.time()
+        result = _ollama_enhance(instruction, timeout=timeout)
+        result = _strip_think_tags(result)
+        if not result or len(result) < 20:
+            logger.warning("Ollama 返回空/过短，使用原始提示词")
+            return prompt
+        logger.info(f"[ollama] 扩写 in {time.time() - t0:.1f}s: "
+                    f"{len(prompt)} → {len(result)} chars")
+        return result
+
     t0 = time.time()
     try:
         response = requests.post(

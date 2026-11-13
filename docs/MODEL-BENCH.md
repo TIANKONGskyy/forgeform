@@ -629,3 +629,47 @@ prompt = _ensure_clean_background(prompt)   # ← 新增
 **两条防线现在是叠加的**：
 1. 出图阶段补白底（从源头减少）
 2. `trim_base` 切底部尖峰（兜底）
+
+---
+
+## 全流程端到端实测（2026-11-13）
+
+`tools/e2e_full.py`，跑真入口（`enhance_prompt` / `generate_images` /
+`generate_3d` / `export_stl`），不绕过任何一步。
+
+输入：`做一个猫头鹰摆件，翅膀收拢，圆胖身体，陶土质感，能直接 3D 打印`
+
+| 步骤 | 耗时 | 结果 |
+|---|---|---|
+| LLM 扩写 | **69.7 s** | 33 → 848 字符 |
+| 出图 z_image 1024² | **56.3 s** | 793 KB |
+| 建模 2mini 512oct | **182.8 s** | 229 万面 · 厚度 86% |
+| 导出 STL | **9.6 s** | 80,000 面 · 水密 ✓ · 63.5×57.9×80.0 mm |
+| **合计** | **5.3 分钟** | 4/4 步通过 |
+
+产物：`outputs/stl/model_1794533132_optimized.stl`（3.9 MB，体积 134,968 mm³）
+
+### 顺带修掉的 LLM 扩写断点
+
+之前这一步**一直是静默失败的**：
+
+```
+Qwen3-Coder-30B 服务未运行，拉起 llama-server...
+启动 llama-server 失败: [WinError 2] 系统找不到指定的文件
+Qwen3-Coder-30B 服务未就绪，使用原始提示词
+```
+
+根因两层：
+
+1. `LLAMACPP_CMD` 第一项是裸命令 `llama-server`，这台机器的 PATH 里没有
+2. 失败后没有兜底 —— 直接返回原始提示词，日志只有一行 warning。
+   表现成「扩写这步 4 秒就过去了、字数没变」，很容易当成"本来就很快"
+
+修法：`enhance_local` 改成三级降级 —— **llama-server → Ollama → 原文**。
+Ollama 那边还有两个坑：
+
+- `qwen3.8` 是 thinking 模型，不传 `"think": false` 的话整段输出会进 `thinking`
+  字段、`response` 是空字符串（实测 146 秒换一个空回复）
+- 显存被 ComfyUI 占满时 Ollama 会返回 500，得先让 ComfyUI 卸模型
+
+修完实测：33 → 848 字符 / 69.7 秒 / 走本地 `qwen3.8:latest`。
