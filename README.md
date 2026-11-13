@@ -6,6 +6,8 @@
 
 **官网 / 在线试用**：[zykt.space/foundry](https://zykt.space/foundry) · 作者：[ZYKT studio](https://zykt.space)
 
+**仓库**：[GitHub](https://github.com/TIANKONGskyy/forgeform) · [Gitee 镜像](https://gitee.com/zyktspace/forgeform)（国内访问更快）
+
 ![铸想 ForgeForm](docs/assets/promo/poster.png)
 
 <p align="center">
@@ -47,7 +49,7 @@
 
 ### 方式一：解压后双击
 
-1. 下载 [`forgeform-v3.0.0.zip`](https://github.com/TIANKONGskyy/forgeform/releases/latest) 并解压
+1. 下载 [`forgeform-v3.1.2.zip`](https://github.com/TIANKONGskyy/forgeform/releases/latest) 并解压
 2. 双击 **`启动.bat`**
 
 它会依次做：检查 Python → 建 `.venv` 并装依赖（3–5 分钟，只一次）→ 首次运行跑配置向导
@@ -100,7 +102,8 @@ python tools/doctor.py
 ## 硬件要求
 
 - Windows 10/11
-- NVIDIA GPU，8 GB 显存起步，16 GB 以上能跑完整链路
+- NVIDIA GPU，**6 GB 显存**起步（2mini 256oct 峰值 3.9 GB，512oct 5.35 GB）
+- 内存 16 GB 也能跑通（低内存机器自动启用逐层搬显存 + fp16 构建，见 docs/MODEL-BENCH.md）
 - 内存 32 GB 建议（直连 3D 时模型自身占 10.8 GB）
 - Python 3.11–3.13
 - 一个本地 LLM 端点（可选，没有则降级成规则模式）
@@ -145,8 +148,8 @@ python tools/doctor.py
 ## 测试
 
 ```powershell
-python -m pytest          # 207 个用例，不需要 GPU
-python tools/verify.py    # 151 条结构性断言
+python -m pytest          # 233 个用例，不需要 GPU
+python tools/verify.py    # 152 条结构性断言
 ```
 
 ## 许可证

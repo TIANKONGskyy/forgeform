@@ -69,7 +69,8 @@ python tools/doctor.py
 ## Requirements
 
 - Windows 10/11
-- NVIDIA GPU, 8 GB VRAM minimum, 16 GB+ for the full chain
+- NVIDIA GPU, **6 GB VRAM** minimum (2mini peaks at 3.9 GB @256oct / 5.35 GB @512oct)
+- 16 GB RAM is enough (low-memory machines enable layer-by-layer VRAM loading + fp16 build)
 - 32 GB RAM recommended (direct 3D holds ~10.8 GB)
 - Python 3.11–3.13
 - A local LLM endpoint (optional; falls back to rule-based mode)
@@ -112,8 +113,8 @@ Details and measurements: `docs/BACKENDS.md`
 ## Tests
 
 ```powershell
-python -m pytest          # 207 cases, no GPU required
-python tools/verify.py    # 151 structural assertions
+python -m pytest          # 233 cases, no GPU required
+python tools/verify.py    # 152 structural assertions
 ```
 
 ## License

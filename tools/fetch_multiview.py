@@ -32,15 +32,19 @@ COMFY = Path(r"D:\ComfyUI-New")
 
 # (说明, HF repo, 仓库内路径, 本地目标)
 PLAN = [
+    # ★ 注意：fetch_model.py 会在 --dest 下**按 repo 内路径**建目录。
+    #   所以 dest 只能给到 checkpoints，不能预先拼进 hunyuan3d-dit-v2-mv-fast
+    #   —— 否则会变成 checkpoints/Hunyuan3D-2mv/hunyuan3d-dit-v2-mv-fast/hunyuan3d-dit-v2-mv-fast/
+    #   （实测这么错过一次，下了 4 GB 分片却没合并）。
     ("Hunyuan3D-2mv（多视图重建，Fast 版）", "tencent/Hunyuan3D-2mv",
      "hunyuan3d-dit-v2-mv-fast/model.fp16.safetensors",
-     COMFY / "models" / "checkpoints" / "Hunyuan3D-2mv" / "hunyuan3d-dit-v2-mv-fast" / "model.fp16.safetensors"),
+     COMFY / "models" / "checkpoints" / "hunyuan3d-dit-v2-mv-fast" / "model.fp16.safetensors"),
     ("Hunyuan3D-2mv 配置", "tencent/Hunyuan3D-2mv",
      "hunyuan3d-dit-v2-mv-fast/config.yaml",
-     COMFY / "models" / "checkpoints" / "Hunyuan3D-2mv" / "hunyuan3d-dit-v2-mv-fast" / "config.yaml"),
+     COMFY / "models" / "checkpoints" / "hunyuan3d-dit-v2-mv-fast" / "config.yaml"),
     ("VAE（多视图共用）", "tencent/Hunyuan3D-2mv",
      "hunyuan3d-vae-v2-mv/model.fp16.safetensors",
-     COMFY / "models" / "checkpoints" / "Hunyuan3D-2mv" / "hunyuan3d-vae-v2-mv" / "model.fp16.safetensors"),
+     COMFY / "models" / "checkpoints" / "hunyuan3d-vae-v2-mv" / "model.fp16.safetensors"),
     ("Zero123Plus（单图 → 多视图）", "sudo-ai/zero123plus-v1.2",
      "diffusion_pytorch_model.safetensors",
      COMFY / "models" / "checkpoints" / "Zero123Plus" / "diffusion_pytorch_model.safetensors"),
@@ -65,11 +69,13 @@ def run(only_missing: bool = True) -> int:
         print(f"\n↓ {item['label']}")
         print(f"  {item['repo']} :: {item['path']}")
         dst = Path(item["dst"])
-        dst.parent.mkdir(parents=True, exist_ok=True)
+        # dest 给 checkpoints 根（不是 dst.parent）—— 见上面 PLAN 里的注释
+        dest_root = COMFY / "models" / "checkpoints"
+        dest_root.mkdir(parents=True, exist_ok=True)
         r = subprocess.run([
             sys.executable, str(ROOT / "tools" / "fetch_model.py"),
             "--repo", item["repo"],
-            "--dest", str(dst.parent),
+            "--dest", str(dest_root),
             "--include", "^" + item["path"].replace(".", r"\.") + "$",
             "--threads", "8",
         ])
