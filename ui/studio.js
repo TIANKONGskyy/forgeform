@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);let selected='',lastScan=0,lastAction=nu
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(s){$('toast').textContent=s;$('toast').hidden=false;clearTimeout(window.toastTimer);window.toastTimer=setTimeout(()=>$('toast').hidden=true,6500)}
 async function api(path,data){const r=await fetch('/api/'+path,{method:data===undefined?'GET':'POST',headers:{'Content-Type':'application/json','X-Studio-Token':window.STUDIO_TOKEN},body:data===undefined?undefined:JSON.stringify(data)});const j=await r.json();if(!r.ok)throw Error(j.error||'请求失败');return j}
-function page(id){document.querySelectorAll('.page').forEach(e=>e.hidden=e.id!==id);document.querySelectorAll('nav button').forEach(e=>e.classList.toggle('active',e.dataset.page===id));$('breadcrumb').textContent=({overview:'工作台',setup:'安装与环境',models:'模型与配置',create:'创作空间'})[id];if(id==='models'){catalog();refreshDelModel();}}
+function page(id){document.querySelectorAll('.page').forEach(e=>e.hidden=e.id!==id);document.querySelectorAll('nav button').forEach(e=>e.classList.toggle('active',e.dataset.page===id));$('breadcrumb').textContent=({overview:'工作台',setup:'安装与环境',models:'模型与配置',create:'创作空间'})[id];if(id==='models'){catalog();refreshDelModel();}if(id==='overview'){hwStart();}else{hwStop();}}
 document.querySelectorAll('[data-page]').forEach(b=>b.addEventListener('click',()=>page(b.dataset.page)));
 $('theme').onclick=()=>{document.body.classList.toggle('light');localStorage.setItem('forgeform-theme',document.body.classList.contains('light')?'light':'dark')};if(localStorage.getItem('forgeform-theme')==='light')document.body.classList.add('light');
 async function action(name,data={}){try{if(name!=='cancel')lastAction={name,data};await api(name,data);await poll()}catch(e){toast(e.message)}}
@@ -83,3 +83,105 @@ function installationEstimate(){
   $('install-estimate').textContent=`当前组合预计下载 ${size.toFixed(2)} GB（卡片为默认组合）`;
 }
 $('install-llm').onchange=installationEstimate;
+
+// ── 硬件实时监控（overview 页）──────────────────────────────
+// 每 2 秒拉 /api/hardware。monitor.py 那边维护滚动历史，这里只负责画。
+const HW = { timer: 0, shown: false };
+const HW_COL = { gpu: '#9ce4da', vram: '#8fb8f0', ram: '#c4a8f0', cpu: '#f0c48f' };
+
+function spark(id, series, color, max) {
+  const cv = $(id);
+  if (!cv || !series || !series.length) return;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = cv.clientWidth || 300;
+  const h = cv.clientHeight || 44;
+  if (cv.width !== w * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const n = series.length;
+  const hi = max || Math.max(...series, 1);
+  g.beginPath();
+  series.forEach((v, i) => {
+    const x = n === 1 ? w : (i / (n - 1)) * w;
+    const y = h - 2 - (Math.min(v, hi) / hi) * (h - 6);
+    i ? g.lineTo(x, y) : g.moveTo(x, y);
+  });
+  g.strokeStyle = color;
+  g.lineWidth = 1.6;
+  g.lineJoin = 'round';
+  g.stroke();
+  // 面积填充
+  g.lineTo(w, h);
+  g.lineTo(0, h);
+  g.closePath();
+  g.fillStyle = color + '18';
+  g.fill();
+}
+
+function setText(id, v) { const el = $(id); if (el) el.textContent = v; }
+
+async function hardware() {
+  let s;
+  try {
+    s = await api('hardware');
+  } catch (e) {
+    // 别静默失败：面板得能看出是"取不到"还是"没数据"
+    setText('hw-stamp', '采集失败：' + (e && e.message ? e.message : e));
+    return;
+  }
+  if (!s || !s.ok) {
+    setText('hw-stamp', (s && s.error) ? ('采集失败：' + s.error) : '没有数据');
+    return;
+  }
+  HW.shown = true;
+
+  // GPU
+  setText('hw-gpu-name', (s.gpu_model || '—').replace(/^Tesla |^NVIDIA /, ''));
+  setText('hw-gpu-util', s.gpu ?? '—');
+  setText('hw-gpu-temp', s.gpu_temp ?? '—');
+  setText('hw-gpu-power', (s.gpu_power_w ?? '—') + ' / ' + (s.gpu_power_limit_w ?? '—'));
+  spark('hw-gpu-spark', s.gpu_hist, HW_COL.gpu, 100);
+
+  // 显存
+  const vu = Number(s.vram_used_gb || 0);
+  const vt = Number(s.vram_total_gb || 0);
+  const vp = vt ? Math.round(vu / vt * 100) : 0;
+  setText('hw-vram-used', vu.toFixed(1));
+  setText('hw-vram-total', vt.toFixed(0));
+  setText('hw-vram-frac', vp + '%');
+  setText('hw-vram-note', vp > 85 ? '接近上限' : '余量 ' + (vt - vu).toFixed(1) + ' GB');
+  spark('hw-vram-spark', s.vram_hist, HW_COL.vram, vt || 32);
+  $('hw-vram-spark')?.closest('.hw-card')?.classList.toggle('warn', vp > 90);
+
+  // 内存
+  const ru = Number(s.ram_used_gb || 0);
+  const rt = Number(s.ram_total_gb || 0);
+  const rp = rt ? Math.round(ru / rt * 100) : 0;
+  setText('hw-ram-used', ru.toFixed(1));
+  setText('hw-ram-total', rt.toFixed(0));
+  setText('hw-ram-frac', rp + '%');
+  setText('hw-ram-note', rp > 85 ? '接近上限' : '余量 ' + (rt - ru).toFixed(1) + ' GB');
+  spark('hw-ram-spark', s.ram_hist, HW_COL.ram, rt || 32);
+  $('hw-ram-spark')?.closest('.hw-card')?.classList.toggle('warn', rp > 90);
+
+  // CPU
+  setText('hw-cpu-name', (s.cpu_model || '—').replace(/\s*(Processor|CPU)\s*$/i, ''));
+  setText('hw-cpu-util', s.cpu ?? '—');
+  setText('hw-cpu-cores', s.cpu_cores ?? '—');
+  setText('hw-cpu-freq', s.cpu_freq_mhz ?? '—');
+  spark('hw-cpu-spark', s.cpu_hist, HW_COL.cpu, 100);
+
+  setText('hw-stamp', new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+}
+
+function hwStart() {
+  if (HW.timer) return;
+  hardware();
+  HW.timer = setInterval(hardware, 2000);
+}
+function hwStop() {
+  if (HW.timer) { clearInterval(HW.timer); HW.timer = 0; }
+}
+
+hwStart();   // 首屏就是 overview，直接开监控（必须在 const HW 之后，否则 TDZ）

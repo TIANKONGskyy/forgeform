@@ -548,6 +548,21 @@ class Studio:
         self.log(f'已删除：{removed}，共释放 {total} GB')
         return {'ok': True, 'removed': removed, 'freed_gb': total}
 
+    def hardware(self):
+        """实时硬件快照。给界面的监控面板用，每 2 秒拉一次。
+
+        数据来自 backend/monitor.py 的 HardwareMonitor（同一个实例维护历史曲线），
+        所以连续调用会拿到滚动的 cpu_hist / vram_hist 等序列，前端直接画折线。
+        采集失败时返回 ok=False + 原因，不让监控把界面拖死。
+        """
+        try:
+            from .monitor import get_stats
+            snap = get_stats()
+            return {'ok': True, 'ts': time.time(), **snap}
+        except Exception as exc:
+            return {'ok': False, 'ts': time.time(),
+                    'error': f'{type(exc).__name__}: {exc}'}
+
     def status(self):
         with self.lock:
             return {'job': copy.deepcopy(self.job), 'snapshot': self.snapshot,
@@ -578,6 +593,7 @@ def make_server(studio, port=7861):
             if not self.trusted(): return self.send({'error': '无效来源'}, 403)
             try:
                 if self.path == '/api/status': return self.send(studio.status())
+                if self.path == '/api/hardware': return self.send(studio.hardware())
                 if self.path == '/api/purge-plan': return self.send(studio.purge_plan())
                 if self.path == '/api/catalog': return self.send({'models': studio.catalog(), 'config': {
                     'stages': studio.config().get('stages', {}), 'backend': studio.config().get('backend', {})}})

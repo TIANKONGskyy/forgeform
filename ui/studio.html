@@ -3,6 +3,46 @@
 <main><header><span id="breadcrumb">工作台</span><div class="header-right"><a class="byline" href="https://zykt.space" target="_blank" rel="noopener">by <b>ZYKT studio</b></a><span class="pill" id="top-status">准备就绪</span></div></header>
 <section id="overview" class="page"><div class="eyebrow">LOCAL 3D PRINT PIPELINE</div><div class="intro"><div><h1>一句话，<br><span>到可打印模型。</span></h1><p>描述你想做的物品。铸想帮你整理需求、生成图片，<br>再把它变成可预览、可导出的 3D 模型。</p><button class="primary" data-page="create">进入创作空间 ↗</button><button data-page="setup">准备我的电脑</button></div><div class="sculpture" aria-hidden="true"><div class="orb"></div><div class="orb-line"></div><div class="pedestal"></div><span>IDEA → IMAGE → OBJECT</span></div></div>
 <div class="section-title"><h2>一条完整的创作路径</h2><span>四个阶段</span></div><div class="flow"><article><b>01</b><h3>说出想法</h3><p>补齐尺寸、用途与风格，确认后再生成。</p></article><article><b>02</b><h3>看见设计</h3><p>生成候选图，上传参考图，继续修改。</p></article><article><b>03</b><h3>得到模型</h3><p>查看 3D，修复网格，导出 STL。</p></article></div>
+<div class="section-title"><h2>本机状态</h2><span id="hw-stamp">—</span></div>
+<div class="hw" id="hw">
+  <div class="hw-card">
+    <div class="hw-head"><span>GPU</span><b id="hw-gpu-name">—</b></div>
+    <div class="hw-big"><b id="hw-gpu-util">—</b><small>%</small></div>
+    <canvas class="hw-spark" id="hw-gpu-spark" width="300" height="44"></canvas>
+    <div class="hw-foot">
+      <span>温度 <b id="hw-gpu-temp">—</b>°C</span>
+      <span>功耗 <b id="hw-gpu-power">—</b> W</span>
+    </div>
+  </div>
+  <div class="hw-card">
+    <div class="hw-head"><span>显存</span><b id="hw-vram-frac">—</b></div>
+    <div class="hw-big"><b id="hw-vram-used">—</b><small>GB</small></div>
+    <canvas class="hw-spark" id="hw-vram-spark" width="300" height="44"></canvas>
+    <div class="hw-foot">
+      <span>共 <b id="hw-vram-total">—</b> GB</span>
+      <span id="hw-vram-note">—</span>
+    </div>
+  </div>
+  <div class="hw-card">
+    <div class="hw-head"><span>内存</span><b id="hw-ram-frac">—</b></div>
+    <div class="hw-big"><b id="hw-ram-used">—</b><small>GB</small></div>
+    <canvas class="hw-spark" id="hw-ram-spark" width="300" height="44"></canvas>
+    <div class="hw-foot">
+      <span>共 <b id="hw-ram-total">—</b> GB</span>
+      <span id="hw-ram-note">—</span>
+    </div>
+  </div>
+  <div class="hw-card">
+    <div class="hw-head"><span>CPU</span><b id="hw-cpu-name">—</b></div>
+    <div class="hw-big"><b id="hw-cpu-util">—</b><small>%</small></div>
+    <canvas class="hw-spark" id="hw-cpu-spark" width="300" height="44"></canvas>
+    <div class="hw-foot">
+      <span><b id="hw-cpu-cores">—</b> 线程</span>
+      <span><b id="hw-cpu-freq">—</b> MHz</span>
+    </div>
+  </div>
+</div>
+
 <div class="notice"><div><h3>第一次使用？从这里开始</h3><p>扫描硬件和已有模型，为这台电脑选择适合的方案。</p></div><button data-page="setup">检测我的环境 →</button></div></section>
 <section id="setup" class="page" hidden><div class="eyebrow">GET READY</div><h1 class="small-title">为你的电脑，配好一切。</h1><p class="subtitle">优先复用已有环境。每个方案都展示下载量、资源估算和限制。</p><div class="steps"><span>01 检测环境</span><span>02 选择方案</span><span>03 安装与配置</span><span>04 开始创作</span></div>
 <div class="toolbar"><label class="grow">模型保存位置<input id="model-root" placeholder="默认保存在铸想目录的 models 文件夹"></label><button id="scan" class="primary">检测 / 重新扫描</button></div><div id="hardware" class="hardware"><p>点击检测，读取真实硬件与本地推理服务。</p></div><div id="frameworks" class="frameworks"></div>

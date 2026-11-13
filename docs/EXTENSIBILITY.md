@@ -180,7 +180,26 @@ trim_base（切底部背景板）→ 质量闸（连通块/面数/薄片判定�
 
 ---
 
-## 7. 已知边界（别当 bug 报）
+## 7. 实时硬件监控
+
+`backend/monitor.py` 的 `HardwareMonitor` 采集 CPU/GPU/内存/显存/温度/功耗，
+**自带滚动历史**（`cpu_hist` / `vram_hist` / `gpu_temp_hist` 等）。
+
+- **API**：`GET /api/hardware`（`backend/studio.py → Studio.hardware()`）
+- **UI**：overview 页「本机状态」四张卡片 + sparkline，每 2 秒刷新
+- **生命周期**：`page('overview')` 调 `hwStart()`，切走 `hwStop()` —— 别的页面不轮询
+
+采集失败返回 `{ok: false, error}`，界面显示"采集失败：…"，**不会**静默成空白。
+
+**加新指标**：在 `monitor.get_stats()` 里加字段，前端照 `hw-card` 的结构复制一块。
+历史序列要自己维护（`_history` 列表 + `maxlen`），否则 sparkline 只有一根竖线。
+
+> ⚠️ 前端踩过的坑：`const HW = {...}` 在文件末尾，而 `hwStart()` 被放在第 7 行调用
+> → **TDZ（暂时性死区）**，`ReferenceError: Cannot access 'HW' before initialization`，
+> 整行之后的初始化全废。JS 里 `const` / `let` **不提升**（函数声明才提升），
+> 把启动调用放在文件最末尾最安全。
+
+## 8. 已知边界（别当 bug 报）
 
 | 现象 | 原因 |
 |---|---|

@@ -137,6 +137,7 @@ UI 之外还有一组 FastAPI 路由（挂在同一个端口）：
 | GET | `/api/status` | 当前作业进度、日志 |
 | GET | `/api/catalog` | 模型目录（含已装/未装、显存需求） |
 | GET | `/api/scan` | 扫本机已有的推理框架与模型 |
+| GET | `/api/hardware` | 实时硬件：GPU 利用率/温度/功耗、显存、内存、CPU（每 2 秒一次） |
 | GET | `/api/purge-plan` | 删之前先看会删什么、多大 |
 | POST | `/api/install` | 装方案（异步，轮询 status） |
 | POST | `/api/launch` | 起主服务 |
