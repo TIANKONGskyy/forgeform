@@ -213,7 +213,9 @@ _MESH_CHOICES = [
     ("hunyuan21", 8, "comfyui", "复用已有 ComfyUI 3D-Pack（显存不够时它能自己 offload）"),
     ("trellis2", 16, "any", "尚未接入 TRELLIS 运行时，暂不可用"),
     ("trellis2_gguf", 8, "any", "尚未接入 GGUF 运行时，暂不可用"),
-    ("hunyuan_mini", 7, "any", "Hunyuan3D-2mini，支持直连建模"),
+    # 2026-11-13 实测：256oct 峰值 3.88 GB / 512oct 峰值 5.35 GB，
+    # 所以 6 GB 卡确实能跑 256。门槛从 7 降到 6，别把 6G 卡挡在外面。
+    ("hunyuan_mini", 6, "any", "Hunyuan3D-2mini，支持直连建模（512oct 峰值 5.35 GB）"),
 ]
 
 
