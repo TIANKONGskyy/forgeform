@@ -71,14 +71,17 @@ def workflow(prompt: str, seconds: float = 6, seed: int = 20261113) -> dict:
     return {
         "1": {"class_type": "UNETLoader",
               "inputs": {"unet_name": UNET, "weight_dtype": "default"}},
+        # ★ 2026-11-13 实测：qwen3vl 这个 CLIP 是 24.55 GB，放显存必然 OOM。
+        #   CLIPLoader 有 device 参数（default|cpu）—— 放 CPU 只吃内存，省 24 GB 显存。
+        #   代价是编码阶段慢几分钟（CPU 满载、GPU 空转），属正常。
         "2": {"class_type": "CLIPLoader",
-              "inputs": {"clip_name": CLIP, "type": "minimax"}},
+              "inputs": {"clip_name": CLIP, "type": "minimax", "device": "cpu"}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": VAE}},
         "4": {"class_type": "LoraLoaderModelOnly",
               "inputs": {"model": ["1", 0], "lora_name": LORA, "strength_model": 1.0}},
         "5": {"class_type": "MiniMaxH3ReferenceToVideo",
               "inputs": {"clip": ["2", 0], "prompt": prompt,
-                         "width": 1344, "height": 768, "length": length,
+                         "width": 768, "height": 432, "length": length,
                          "ref_image_size": "match"}},
         "6": {"class_type": "BasicGuider",
               "inputs": {"model": ["4", 0], "conditioning": ["5", 0]}},
@@ -109,7 +112,7 @@ def submit(wf: dict) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--seconds", type=float, default=6)
+    ap.add_argument("--seconds", type=float, default=4)
     ap.add_argument("--seed", type=int, default=20261113)
     args = ap.parse_args()
 
@@ -118,7 +121,7 @@ def main() -> int:
     print("=" * 66)
     print("铸想宣传片 · MiniMax H3（纯 T2V）")
     print("=" * 66)
-    print(f"  分辨率 1344x768   帧数 {frames}（{frames / FPS:.1f} 秒）")
+    print(f"  分辨率 768x432   帧数 {frames}（{frames / FPS:.1f} 秒）")
     print(f"  模型   {UNET}")
     print(f"  LoRA   {LORA}")
     print(f"  采样   res_multistep / simple / 8 步（无 TeaCache）")

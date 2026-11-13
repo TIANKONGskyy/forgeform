@@ -69,6 +69,13 @@ htmlcov/
 !docs/assets/promo/*.mp4
 # 例外：作品展示页的预览图（源图 image.png 不入库，只入库压缩后的 jpg）
 !docs/showcase/*/*.jpg
+# 2026-11-13：四件作品的 STL / GLB 也放行（约 33 MB）。
+# 开源包只有源码太"空"——别人下下来除了代码什么都看不到。
+# 这些是真实产物，能直接拖进切片器验证"这个项目真的出过东西"。
+!docs/showcase/*/*.stl
+!docs/showcase/*/*.glb
+# 但 _bench* 是测试产物，不要
+docs/showcase/_bench*/
 
 # 编辑器 / 系统
 .vscode/

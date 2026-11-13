@@ -17,6 +17,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = Path(__file__).resolve().parents[1]
 
 
+# ── 国内 pip 源 ────────────────────────────────────────────
+# 2026-11-13：国内直连 pypi.org 每个包都要等十几秒到几十秒，装 30 多个包
+# 能拖到半小时以上。阿里云实测可用（清华源 403 过）。
+# 用 `--extra-index-url` 而不是 `--index-url`：主源仍是 PyPI，
+# 阿里云只是加速副本；这样阿里云缺包时不会直接失败。
+PIP_CN = "https://mirrors.aliyun.com/pypi/simple/"
+PIP_ARGS = ["-i", PIP_CN, "--timeout", "60", "--retries", "3",
+            "--trusted-host", "mirrors.aliyun.com"]
+# torch 的 cu126 轮子阿里云镜像没有，官方源又慢。策略：先试阿里云，
+# 拿不到再回退官方（官方只对 torch 用，2-3 GB，走一次就够）。
+TORCH_INDEX = "https://download.pytorch.org/whl/cu126"
+
+
 def merge(dst, patch):
     for key, value in patch.items():
         if isinstance(value, dict) and isinstance(dst.get(key), dict):
@@ -191,7 +204,9 @@ class Studio:
         venv = self.root / '.venv'
         if not (venv / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')).exists():
             self.command([sys.executable, '-m', 'venv', str(venv)])
-        self.command([self.python, '-m', 'pip', 'install', '-r', str(self.root / 'requirements.txt')])
+        # 走国内源；失败再回退默认（回退在 command 的调用方看退出码处理）
+        self.command([self.python, '-m', 'pip', 'install', '-r',
+                      str(self.root / 'requirements.txt'), *PIP_ARGS])
         self.command([self.python, '-c', 'import gradio,fastapi,trimesh; print("基础环境验证通过")'])
         (venv / '.deps-ok').touch()
 
@@ -232,7 +247,9 @@ class Studio:
                         self.command(['winget', 'install', '--id', 'Ollama.Ollama', '--exact', '--silent',
                             '--accept-package-agreements', '--accept-source-agreements'])
                 elif item.plugin_id == 'pydeps':
-                    self.command([self.python, '-m', 'pip', 'install', 'torch', 'torchvision', '--index-url', 'https://download.pytorch.org/whl/cu128'])
+                    self.command([self.python, '-m', 'pip', 'install', 'torch', 'torchvision',
+                                  '--index-url', TORCH_INDEX, '--timeout', '120', '--retries', '5',
+                                  '--trusted-host', 'download.pytorch.org'])
                     self.command([self.python, '-m', 'pip', 'install', 'diffusers', 'transformers', 'accelerate', 'safetensors', 'sentencepiece'])
                     self.command([self.python, '-m', 'pip', 'install', 'https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip'])
                     self.command([self.python, '-c', 'import torch; from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline; assert torch.cuda.is_available(), "CUDA 不可用，请检查显卡驱动"'])
