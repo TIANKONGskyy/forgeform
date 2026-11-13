@@ -298,6 +298,39 @@ def _strip_think_tags(text: str) -> str:
     return re.sub(r"</?think(?:ing)?>", " ", t, flags=re.I).strip()
 
 
+# ══════════════════════════════════════════════════════════════════════
+# 干净背景兜底（2026-11-13）
+# ══════════════════════════════════════════════════════════════════════
+#
+# ★ 为什么需要
+#   z_image 默认出"产品摄影"风格：灰底 + 地面接触阴影 + 反光。
+#   2mini 会把这些**当成几何一起重建** —— 模型底下多一块带纹理的平板。
+#   实测四件艺术品全中（输入图见 outputs/art/art_inputs.png）。
+#
+# ★ 为什么不用 "no shadow"
+#   ① `_strip_negations` 会把 "no shadow" 整段删掉（shadows 在清理表里）
+#   ② 扩散模型读到 shadow 反而更容易画阴影 —— 否定词是反效果
+#   所以用**正向描述**：isolated on white / evenly lit / shadowless。
+#
+# ★ 只在缺的时候补
+#   提示词里已经写了 white background / isolated 之类就不再重复。
+_BG_MARKERS = (
+    "white background", "isolated on", "seamless background",
+    "plain background", "transparent background", "product photo on white",
+)
+_BG_SUFFIX = ", isolated on a pure white background, evenly lit, shadowless lighting"
+
+
+def _ensure_clean_background(prompt: str) -> str:
+    """给出图提示词补"干净背景"，减少后续 2mini 把背景重建进几何的概率。"""
+    if not prompt:
+        return prompt
+    low = prompt.lower()
+    if any(m in low for m in _BG_MARKERS):
+        return prompt
+    return prompt.rstrip(" ,.") + _BG_SUFFIX
+
+
 def _clean_image_prompt(raw: str) -> str:
     """清掉 markdown/引号/中英夹杂与多余空白；中文占比过高视为失败返回空串"""
     if not raw:
@@ -320,7 +353,7 @@ def _clean_image_prompt(raw: str) -> str:
         return ""
     if len(t) < 30:                            # 太短 = 没扩写
         return ""
-    return _strip_negations(t)[:900]
+    return _ensure_clean_background(_strip_negations(t))[:900]
 
 
 # ══════════════════════════════════════════════════════════════════════

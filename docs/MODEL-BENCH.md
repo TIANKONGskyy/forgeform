@@ -590,3 +590,42 @@ model: { target: hy3dgen.shapegen.models.Hunyuan3DDiT }
 **更根本的解法是出图时就避免**：提示词里明确写
 `white background, no ground plane, no shadow, no base`。
 z_image 默认会给产品摄影风格（灰底 + 投影），那正是地毯的来源。
+
+### 从源头解决：出图统一加白底
+
+`backend/describer.py` 新增 `_ensure_clean_background()`，在
+`generate_images` 里接在 `_strip_negations` 之后：
+
+```python
+prompt = _strip_negations(prompt)
+prompt = _ensure_clean_background(prompt)   # ← 新增
+```
+
+补的词是**正向描述**，不是否定词：
+
+```
+, isolated on a pure white background, evenly lit, shadowless lighting
+```
+
+**为什么不用 `no shadow`**：
+1. `_strip_negations` 会把 "no shadow" 整段删掉（shadows 在清理表里，实测确认）
+2. 扩散模型读到 shadow 反而更容易画阴影 —— 否定词是反效果
+
+**只在缺的时候补**：提示词里已经有 `white background` / `isolated on` /
+`seamless background` / `plain background` / `transparent background` 就不重复加。
+
+### 效果
+
+同一句提示词，只差这个后缀：
+
+| | 背景 | 建模后的底层占比 | 地毯 |
+|---|---|---|---|
+| 改之前 | 灰底 + 地面投影 | **33.3%**（尖峰） | 一大块方板 |
+| 改之后 | 白底 + 无投影 | **0.15%** | 只剩贴脚的椭圆小底 |
+
+**底层占比从 33% 掉到 0.15%** —— 地毯基本消失。剩下的那个椭圆小底是白色背景
+在脚下形成的接触面，面积很小，不影响打印。
+
+**两条防线现在是叠加的**：
+1. 出图阶段补白底（从源头减少）
+2. `trim_base` 切底部尖峰（兜底）

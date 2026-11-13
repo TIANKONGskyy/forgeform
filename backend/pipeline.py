@@ -280,11 +280,17 @@ class Pipeline:
         #   否则日志和实际不一致，下次排查又会被误导。
         # ══════════════════════════════════════════════════════════
         try:
-            from .describer import _strip_negations
+            from .describer import _ensure_clean_background, _strip_negations
             _before = prompt
             prompt = _strip_negations(prompt)
             if prompt != _before:
                 print(f"[prompt] 🧹 否定词/单物体兜底: {_before[:80]} → {prompt[:80]}")
+            # 补干净背景（必须在 _strip_negations 之后：它会把 "no shadow" 删掉）。
+            # 参考图的灰底+投影是 2mini 重建出"底部地毯"的根因，见 docs/MODEL-BENCH.md。
+            _bg_before = prompt
+            prompt = _ensure_clean_background(prompt)
+            if prompt != _bg_before:
+                print(f"[prompt] 🧼 补干净背景: +{len(prompt) - len(_bg_before)} 字符")
         except Exception as _e:
             print(f"[prompt] ⚠️ 兜底清理异常（忽略）: {_e!r}")
 
