@@ -15,7 +15,7 @@ Usage:
     
     opt = MeshOptimizer()
     result = opt.optimize(glb_path, config=OptConfig(
-        target_faces=50000,
+        target_faces=200000,
         repair=True,
         simplify=True,
         smooth=False,
@@ -49,12 +49,21 @@ class OptConfig:
     
     # Simplification
     simplify: bool = False
-    target_faces: Optional[int] = None  # None = auto (50k-100k based on input)
+    # ★ 2026-11-13：默认从 5 万提到 20 万。5 万面在笔记本上看就是"粗糙" ——
+    # 2mini 的 octree 表面本身有台阶，再砍到 5 万面，细节全平了。
+    target_faces: Optional[int] = None  # None = auto (100k-300k based on input)
     simplify_ratio: Optional[float] = None  # 0.0-1.0, overrides target_faces
     aggressive: bool = False  # Allow more aggressive simplification
     
     # Smoothing
-    smooth: bool = False
+    #
+    # ★ 2026-11-13：默认从 False 改成 True。
+    #   2mini 的 octree 输出是"体素块拼出来的"，表面有台阶感 ——
+    #   不加平滑时，笔记本上出的模型看着就是粗糙的。
+    #   用 **Taubin**（λ/μ 两步，一正一负）而不是纯 Laplacian：
+    #   Laplacian 每轮都收缩，3 轮能把细件缩掉一圈；Taubin 基本不缩。
+    smooth: bool = True
+    smooth_taubin: bool = True
     smooth_iterations: int = 3
     smooth_lambda: float = 0.5
     
@@ -503,13 +512,16 @@ class MeshOptimizer:
         elif config.target_faces is not None:
             target = config.target_faces
         else:
-            # Auto: aim for 50k-100k faces
-            if input_faces > 200000:
-                target = 100000
+            # Auto：保细节优先。200 万面的产物砍到 10 万会丢掉台阶以下的起伏，
+            # 20 万面（STL 约 10 MB）对切片器完全没压力，没必要省这点体积。
+            if input_faces > 1000000:
+                target = 300000
+            elif input_faces > 200000:
+                target = 200000
             elif input_faces > 100000:
-                target = 50000
+                target = 100000
             else:
-                target = max(10000, input_faces // 2)
+                target = max(20000, input_faces // 2)
         
         if target >= input_faces:
             log.append(f"  Skip simplify: {input_faces} faces ≤ target {target}")
@@ -575,7 +587,22 @@ class MeshOptimizer:
         return result
     
     def _smooth(self, mesh: trimesh.Trimesh, config: OptConfig, log: list) -> trimesh.Trimesh:
-        """Laplacian smoothing."""
+        """表面平滑。
+
+        优先 **Taubin**（λ=0.5 / μ=-0.53）：两步一正一负，把台阶磨掉但几乎不收缩体积。
+        退到 Laplacian 时才用老参数 —— 它每轮都缩，细件会变小。
+        """
+        if getattr(config, "smooth_taubin", True):
+            try:
+                trimesh.smoothing.filter_taubin(
+                    mesh,
+                    lamb=0.5, nu=-0.53,
+                    iterations=max(2, config.smooth_iterations),
+                )
+                log.append(f"  Taubin smoothed {max(2, config.smooth_iterations)} iterations")
+                return mesh
+            except Exception as exc:
+                log.append(f"  Taubin 失败（{type(exc).__name__}），退回 Laplacian")
         try:
             import pymeshlab
             

@@ -926,6 +926,26 @@ class Pipeline:
             q = td_quality.get(quality_name, {"octree_resolution": 512, "guidance_scale": 5.0})
             params["octree_resolution"] = q["octree_resolution"]
             params["guidance_scale"] = q["guidance_scale"]
+            # ★ 2026-11-13：octree 按**显存**兜底抬升。
+            #
+            #   问题：笔记本上默认走"快速"（256），出来的模型表面是一块块台阶，
+            #   看着就是粗糙。而 256 只占 3.9 GB 显存 —— 8 GB 的卡完全跑得动 384。
+            #
+            #   规则：显存 ≥ 12 GB 时 256 抬到 384；≥ 24 GB 时抬到 512。
+            #   只**抬高**不降低，用户在 config 里写更大值就尊重 config。
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    _vram = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
+                    _oc = int(params["octree_resolution"])
+                    _floor = 384 if _vram >= 12 else (512 if _vram >= 24 else 0)
+                    if _floor and _oc < _floor:
+                        self._log(f"🧊 octree {_oc} → {_floor}（显存 {_vram:.0f} GB 跑得动，"
+                                  f"256 的表面台阶太明显）")
+                        params["octree_resolution"] = _floor
+            except Exception:
+                pass
+
             # ★ 直通覆盖（精度对比/终稿控制）：传了就用传的
             if int(octree_override or 0) > 0:
                 params["octree_resolution"] = int(octree_override)
