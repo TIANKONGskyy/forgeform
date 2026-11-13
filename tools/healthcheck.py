@@ -182,9 +182,11 @@ def updater_dryrun():
     (inst / "backend").mkdir(parents=True)
     (inst / "app.py").write_text("# old", encoding="utf-8")
     (inst / "config.json").write_text('{"keep":1}', encoding="utf-8")
+    # 子进程也要 UTF-8 —— updater.py 会打中文 + ✓，GBK 控制台会 UnicodeEncodeError
+    env = {**__import__("os").environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "updater.py"),
                         "--from", str(pkg), "--to", str(inst)],
-                       capture_output=True, text=True, timeout=120)
+                       capture_output=True, text=True, timeout=120, env=env)
     assert r.returncode == 0, r.stderr[:300]
     assert (inst / "VERSION").read_text(encoding="utf-8").strip() == "9.9.9"
     assert (inst / "config.json").read_text(encoding="utf-8") == '{"keep":1}', "config 被覆盖"
