@@ -6,6 +6,12 @@
 
 **官网 / 在线试用**：[zykt.space/foundry](https://zykt.space/foundry) · 作者：[ZYKT studio](https://zykt.space)
 
+![铸想 ForgeForm](docs/assets/promo/poster.png)
+
+<p align="center">
+  <img src="docs/assets/promo/demo_small.gif" width="640" alt="模型 360 度预览" />
+</p>
+
 <img src="docs/assets/hero.jpg" width="340" align="right" alt="铸想生成的产品图" />
 
 <br clear="right" />
