@@ -185,3 +185,54 @@ function hwStop() {
 }
 
 hwStart();   // 首屏就是 overview，直接开监控（必须在 const HW 之后，否则 TDZ）
+
+// ── 下载链路 / 网络加速 ─────────────────────────────────────
+// 后端：GET /api/netboost 测速+检测，POST /api/netboost 启动，
+//       GET /api/netboost/pack 查安装包，POST /api/netboost/install 下载安装
+async function netProbe() {
+  const btn = $('net-probe');
+  if (btn) { btn.disabled = true; btn.textContent = '测速中…'; }
+  setText('net-msg', '');
+  try {
+    const r = await api('netboost');
+    if (!r.ok) { setText('net-stamp', '采集失败'); setText('net-advice', r.error || '—'); return; }
+    const sp = (r.speed || {});
+    setText('net-speed', sp.ok ? sp.mbps.toFixed(2) + ' MB/s' : '测不到');
+    setText('net-advice', r.advice || '');
+    setText('net-stamp', new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+    const spp = r.steampp || {};
+    setText('net-msg', spp.installed
+      ? ('Steam++ 已装：' + (spp.running ? '运行中' : '未运行'))
+      : 'Steam++ 未装，可以点「下载并安装」');
+    const lb = $('net-launch'); if (lb) lb.disabled = !spp.installed || spp.running;
+  } catch (e) {
+    setText('net-stamp', '失败');
+    setText('net-advice', '测速失败：' + (e && e.message ? e.message : e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '再测一次'; }
+  }
+}
+
+$('net-probe')?.addEventListener('click', netProbe);
+
+$('net-launch')?.addEventListener('click', async () => {
+  setText('net-msg', '正在启动 Steam++…');
+  try {
+    const r = await api('netboost', {});
+    setText('net-msg', r.ok ? (r.already ? 'Steam++ 已经在运行' : '已启动，等它连上再测一次速度') : ('启动失败：' + r.error));
+  } catch (e) { setText('net-msg', '启动失败：' + e.message); }
+});
+
+$('net-install')?.addEventListener('click', async () => {
+  const pack = await api('netboost/pack').catch(() => null);
+  if (!pack || !pack.ok) { setText('net-msg', '查不到安装包：' + (pack && pack.error || '网络问题')); return; }
+  const yes = confirm(
+    '要下载并安装 Steam++ 吗？\n\n' +
+    '版本 ' + pack.version + '，约 ' + pack.size_mb + ' MB。\n' +
+    '它会静默安装到本机（不弹安装向导）。\n' +
+    'Steam++ 是开源的网络加速工具（github.com/BeyondDimension/SteamTools）。'
+  );
+  if (!yes) return;
+  setText('net-msg', '已提交安装任务，进度看页面底部的日志…');
+  await action('netboost/install', {});
+});

@@ -59,45 +59,41 @@
 
 首次运行向导：
 
-```
-硬件：Tesla V100 32G（可用 30） · 内存 128 GB · 磁盘剩 166 GB
-已有：ComfyUI(含3D)、本地 diffusers 模型 2 个、hy3dgen、对话服务
-
- ★ [1] 复用现有 ComfyUI（零下载）        0.0 GB · auto
-   [2] 最小可用（SD1.5 + 3D 2mini）       8.2 GB · direct
-   [3] 标准（Z-Image Turbo + 3D 2mini）  30.6 GB · auto
-```
+> 硬件：Tesla V100 32G（可用 30） · 内存 128 GB · 磁盘剩 166 GB
+> 已有：ComfyUI(含3D)、本地 diffusers 模型 2 个、hy3dgen、对话服务
+>
+>  ★ [1] 复用现有 ComfyUI（零下载）        0.0 GB · auto
+>    [2] 最小可用（SD1.5 + 3D 2mini）       8.2 GB · direct
+>    [3] 标准（Z-Image Turbo + 3D 2mini）  30.6 GB · auto
 
 ### 方式二：命令行
 
-```powershell
-git clone https://github.com/TIANKONGskyy/forgeform.git
-cd forgeform
-pip install -r requirements.txt
+适合想自己控制环境的人。四步：
 
-python tools/setup.py     # 探测本机硬件与已装框架，列出可装方案
-python app.py             # → http://127.0.0.1:7860
-```
+| 步骤 | 做什么 |
+|---|---|
+| 1 | 把仓库 clone 或下载解压到本地 |
+| 2 | 装运行依赖（`requirements.txt`，约 2–3 GB） |
+| 3 | 跑配置向导，它会探硬件、列方案、下模型 |
+| 4 | 启动，浏览器打开 `127.0.0.1:7860` |
+
+依赖和模型都不在仓库里 —— 仓库只有源码，模型要单独下（见下面「模型」一节）。
 
 `tools/setup.py` 会先识别显存、内存、磁盘，以及机器上已有的 ComfyUI / Ollama / llama.cpp /
 vLLM / 本地 diffusers 模型，然后给出可选方案：
 
-```
-硬件：Tesla V100 32G（可用 30） · 内存 128 GB · 磁盘剩 166 GB
-已有：ComfyUI(含3D)、本地 diffusers 模型 2 个、hy3dgen、对话服务
-
- ★ [1] 复用现有 ComfyUI（零下载）        0.0 GB · auto
-   [2] 最小可用（SD1.5 + 3D 2mini）       8.2 GB · direct
-   [3] 标准（Z-Image Turbo + 3D 2mini）  30.6 GB · auto
-```
+> 硬件：Tesla V100 32G（可用 30） · 内存 128 GB · 磁盘剩 166 GB
+> 已有：ComfyUI(含3D)、本地 diffusers 模型 2 个、hy3dgen、对话服务
+>
+>  ★ [1] 复用现有 ComfyUI（零下载）        0.0 GB · auto
+>    [2] 最小可用（SD1.5 + 3D 2mini）       8.2 GB · direct
+>    [3] 标准（Z-Image Turbo + 3D 2mini）  30.6 GB · auto
 
 也可以 `--dry-run`（只看方案）、`--custom`（自己选模型）、`--profile <名字> --yes`（直接装）。
 
 装完自检：
 
-```powershell
-python tools/doctor.py
-```
+`tools/doctor.py` 会检查环境缺什么、该装什么，出问题时先跑它。
 
 ## 硬件要求
 
@@ -147,10 +143,15 @@ python tools/doctor.py
 
 ## 测试
 
-```powershell
-python -m pytest          # 233 个用例，不需要 GPU
-python tools/verify.py    # 152 条结构性断言
-```
+| 命令 | 内容 |
+|---|---|
+| `pytest` | 233 个用例，不需要 GPU |
+| `verify.py` | 152 条结构性断言 |
+| `healthcheck.py` | 12 项全链路自检（含上面两项） |
+| `e2e_full.py` | 真跑一遍全流程，约 5 分钟 |
+
+`healthcheck.py` 是最省事的入口 —— 它会检查插件、配置引用、入口文件、文档、
+推荐逻辑、后端接口、更新器，最后再跑 pytest 和 verify。
 
 ## 许可证
 

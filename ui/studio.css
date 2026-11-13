@@ -96,3 +96,19 @@
 .hw-card.warn .hw-big b{color:#e88b8b}
 @media(max-width:1050px){.hw{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:700px){.hw{grid-template-columns:1fr}}
+
+
+/* 下载链路 / 网络加速 */
+.net{margin:14px 0 26px}
+.net-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.net-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.net-head span{font-size:11px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
+.net-head b{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+.net-note{margin:8px 0 0;font-size:12px;line-height:1.65;color:var(--muted)}
+.net-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.net-actions button{padding:7px 14px;font-size:13px;border-radius:9px;border:1px solid var(--line);
+  background:transparent;color:var(--text);cursor:pointer;transition:border-color .15s,background .15s}
+.net-actions button:hover{border-color:rgba(156,228,218,.5)}
+.net-actions button.primary{background:var(--accent);color:#0c1019;border-color:var(--accent);font-weight:550}
+.net-actions button.ghost{opacity:.8}
+.net-actions button:disabled{opacity:.4;cursor:default}
