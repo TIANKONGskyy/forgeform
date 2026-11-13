@@ -849,8 +849,14 @@ class Pipeline:
         try:
             from .preprocess import prepare as _prep
             _pin = Path(input_image)
-            _pout = _pin.with_name(_pin.stem + "_prep.png")
-            _r = _prep(str(_pin), out_path=str(_pout))
+            # 已经是预处理过的图就跳过，否则会出 boy_ref_prep_prep.png 这种套娃
+            if _pin.stem.endswith("_prep"):
+                self._log("🖼 参考图已预处理过，跳过")
+                _pout = _pin
+                _r = {"ok": False}
+            else:
+                _pout = _pin.with_name(_pin.stem + "_prep.png")
+                _r = _prep(str(_pin), out_path=str(_pout))
             if _r.get("ok"):
                 input_image = _r["path"]
                 self._log(f"🖼 参考图预处理: {' · '.join(_r['steps'])}")

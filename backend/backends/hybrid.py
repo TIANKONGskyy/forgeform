@@ -87,6 +87,13 @@ class HybridBackend:
         model_cfg = self.config.get("models", {}).get(cfg_kind, {}).get(selected, {})
         if model_cfg.get("path") or model_cfg.get("backend") == "direct":
             return self._get_direct()
+        # ★ 2026-11-13 修：只给了 checkpoint（ComfyUI 用）而没有 path 的模型，
+        #   必须走 ComfyUI。之前只判 `path` / `backend=="direct"`，于是
+        #   z_image / qwen21_ref 这种"权重按文件名交给 ComfyUI"的配置会掉到
+        #   direct，然后 direct 报"没给 path/repo" —— 用户看到的是模型加载失败，
+        #   实际是后端选错了。
+        if model_cfg.get("checkpoint") and not model_cfg.get("path"):
+            return self._get_comfy()
         choice = self.plan.get(kind, "")
         if choice == "comfyui":
             return self._get_comfy()

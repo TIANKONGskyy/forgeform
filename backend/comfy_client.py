@@ -684,6 +684,12 @@ class ComfyUIClient:
             # V2 管线：model 带 generation_mode 时走 V2（Turbo/Fast + FlashVDM）
             if model.get("generation_mode"):
                 return self._build_hunyuan3d_v2_workflow(params)
+            # ★ 2026-11-13：Hunyuan3D **2.1** 有专用节点（[Comfy3D] Hunyuan3D 21 ShapeGen），
+            #   和 V1/V2 的 Comfy3D 节点不是同一套。之前 2.1 被路由到 _build_hunyuan3d_workflow，
+            #   那条链路用的是 V2 节点，跑 2.1 的权重会失败。
+            if str(model.get("backend") or "") in ("hy21", "hy21_comfy") \
+                    or "2.1" in model_name:
+                return self._build_hunyuan21_workflow(params)
             return self._build_hunyuan3d_workflow(params)
         elif "TripoSplat" in model_name:
             return self._build_triposplat_workflow(params)
@@ -907,6 +913,53 @@ class ComfyUIClient:
         
         return {"prompt": workflow, "negative_prompt": ""}
     
+    def _build_hunyuan21_workflow(self, params: Dict) -> Dict:
+        """Hunyuan3D 2.1 单图建模（最强质量档）。
+
+        和 V1/V2 的区别：2.1 用的是 ComfyUI-3D-Pack 里的 **专用节点**
+        `[Comfy3D] Load Hunyuan3D 21 ShapeGen Pipeline` + `[Comfy3D] Hunyuan3D 21 ShapeGen`，
+        权重目录固定为 `models/checkpoints/tencent/Hunyuan3D-2_1/hunyuan3d-dit-v2-1/model.fp16.ckpt`。
+
+        ★ 实测注意（2026-11-13）：
+          - `auto_cleanup=True` 会在跑完后把 pipeline 内部状态清掉，**再跑第二个就会报**
+            `'Hunyuan3DDiFloMatchingPipeline' object has no attribute 'scheduler'`。
+            所以这里固定传 False；连续跑多个模型时仍需重启 ComfyUI，这是 3D-Pack 的 bug。
+          - `remove_background=True` 只对**不透明**输入可靠。已经过 rembg 的 RGBA 图
+            再传 True 会把 alpha 当主体，导致输出变成一张薄片。
+        """
+        model = params.get("model_config", {})
+        input_image = params.get("input_image", "")
+        seed = params.get("seed", 1234)
+        octree_res = int(params.get("octree_resolution") or model.get("octree_resolution") or 512)
+        guidance = float(params.get("guidance_scale") or model.get("guidance_scale") or 7.5)
+        steps = int(params.get("steps") or model.get("steps") or 30)
+        subfolder = model.get("subfolder") or "hunyuan3d-dit-v2-1"
+        output_path = params.get("output_path", "")
+        # 图已经去过背景（文件名带 _prep 或者显式传了）就不再让节点去一次
+        already_cut = bool(params.get("remove_background_done")) or "_prep" in str(input_image)
+
+        if seed == -1:
+            import random
+            seed = random.randint(0, 2**32 - 1)
+
+        wf: Dict = {}
+        wf["1"] = {"class_type": "[Comfy3D] Load Hunyuan3D 21 ShapeGen Pipeline",
+                   "inputs": {"subfolder": subfolder}}
+        wf["2"] = {"class_type": "LoadImage", "inputs": {"image": input_image}}
+        wf["3"] = {"class_type": "[Comfy3D] Hunyuan3D 21 ShapeGen",
+                   "inputs": {"shapegen_pipe": ["1", 0], "image": ["2", 0],
+                              "seed": seed, "steps": steps,
+                              "guidance_scale": guidance,
+                              "octree_resolution": octree_res,
+                              "remove_background": not already_cut,
+                              "auto_cleanup": False}}
+        wf["4"] = {"class_type": "[Comfy3D] Save 3D Mesh",
+                   "inputs": {"mesh": ["3", 0],
+                              "save_path": str(output_path or "forgeform_21.glb")}}
+        print(f"[2.1] octree={octree_res} guidance={guidance} steps={steps} "
+              f"remove_bg={not already_cut}", flush=True)
+        return wf
+
     def _build_multiview_workflow(self, params: Dict) -> Dict:
         """多视图 3D 工作流（2026-08-14）：解决单图 3D 空间关系错乱
         

@@ -156,6 +156,58 @@ def _fetch_range(url: str, start: int, end: int, part: Path, stop: threading.Eve
                 raise RuntimeError('分片传输提前结束')
 
 
+def _stream_download(url: str, dest: Path, size: int, retries: int = 5) -> bool:
+    """单线程流式下载，**完全不用 Range**。
+
+    2026-11-13：hf-mirror 在大文件上 Range 行为不稳定 —— 有时返回 200（整个文件）
+    而不是 206，导致分片被写进远超预期的数据。实测 4.7 GB 的文件下到
+    "170%" 还报"分片传输提前结束"。
+
+    单线程不用 Range，虽然有中断风险，但**每次中断都能从 .part 续**，
+    而且不会出现"分片越来越大"这种诡异状态。
+    """
+    part = dest.with_suffix(dest.suffix + ".stream")
+    for attempt in range(retries):
+        have = part.stat().st_size if part.exists() else 0
+        if size and have >= size:
+            break
+        headers = {"User-Agent": UA}
+        if have:
+            headers["Range"] = f"bytes={have}-"
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=90) as r:
+                # 服务器忽略 Range 时只能从头写，把已有分片清掉
+                if have and r.status != 206:
+                    have = 0
+                    part.unlink(missing_ok=True)
+                mode = "ab" if have else "wb"
+                with open(part, mode) as f:
+                    done = have
+                    while True:
+                        chunk = r.read(1 << 20)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        done += len(chunk)
+                        if size and done % (64 << 20) < (1 << 20):
+                            print(f"    {done / size * 100:5.1f}%  "
+                                  f"{done / 1024 / 1024:8.1f}/{size / 1024 / 1024:.1f} MB  "
+                                  f"({dest.name})", flush=True)
+        except Exception as exc:
+            print(f"    中断: {type(exc).__name__}（第 {attempt + 1} 次），续传…", flush=True)
+            time.sleep(2)
+            continue
+        if not size or part.stat().st_size == size:
+            part.replace(dest)
+            return True
+    if part.exists() and (not size or part.stat().st_size == size):
+        part.replace(dest)
+        return True
+    print(f"    ✗ 未完成 {part.stat().st_size if part.exists() else 0}/{size} 字节")
+    return False
+
+
 def download_file(url: str, dest: Path, size: int, threads: int = 8,
                   retries: int = 3) -> bool:
     """多线程分片下载一个文件。断点续传靠 .part/<index> 目录里的小块。"""
@@ -172,8 +224,11 @@ def download_file(url: str, dest: Path, size: int, threads: int = 8,
     if size <= 0:
         raise RuntimeError(f"拿不到文件大小: {url}")
 
-    # 小于 16 MB 就单线程，分片反而慢
-    threads = 1 if size < 16 << 20 else min(threads, 16)
+    # 2026-11-13：单线程走流式（不用 Range）。大文件优先用这个，
+    # 因为 hf-mirror 的 Range 在 4 GB 以上不稳（实测分片涨到 170%）。
+    if threads <= 1 or size < 16 << 20:
+        return _stream_download(url, dest, size)
+    threads = min(threads, 16)
     chunk = size // threads + 1
     stop = threading.Event()
     procs = []
