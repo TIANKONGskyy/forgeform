@@ -5,7 +5,7 @@ license: AGPL-3.0
 metadata:
   author: ZYKT studio
   homepage: https://github.com/TIANKONGskyy/forgeform
-  version: "3.1.0"
+  version: "3.1.2"
 ---
 
 # 铸想 ForgeForm
