@@ -250,8 +250,19 @@ class Studio:
                     self.command([self.python, '-m', 'pip', 'install', 'torch', 'torchvision',
                                   '--index-url', TORCH_INDEX, '--timeout', '120', '--retries', '5',
                                   '--trusted-host', 'download.pytorch.org'])
-                    self.command([self.python, '-m', 'pip', 'install', 'diffusers', 'transformers', 'accelerate', 'safetensors', 'sentencepiece'])
-                    self.command([self.python, '-m', 'pip', 'install', 'https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip'])
+                    self.command([self.python, '-m', 'pip', 'install', 'diffusers', 'transformers',
+                                  'accelerate', 'safetensors', 'sentencepiece',
+                                  *PIP_ARGS])
+                    # 2026-11-13: GitHub direct often stalls at 0 bytes in China (laptop users
+                    # reported "stuck forever"). gh-proxy returns 200 in testing; fall back
+                    # to direct only if the proxy fails.
+                    _hy = 'https://gh-proxy.com/https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip'
+                    try:
+                        self.command([self.python, '-m', 'pip', 'install', _hy, *PIP_ARGS])
+                    except Exception:
+                        self._log('gh-proxy failed for hy3dgen, falling back to GitHub direct...')
+                        self.command([self.python, '-m', 'pip', 'install',
+                                      'https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip'])
                     self.command([self.python, '-c', 'import torch; from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline; assert torch.cuda.is_available(), "CUDA 不可用，请检查显卡驱动"'])
                 else:
                     raise ValueError('不支持的框架安装步骤：' + item.plugin_id)

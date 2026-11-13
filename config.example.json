@@ -195,7 +195,6 @@
     "max_retries": 3
   },
   "stl_export": {
-    "script_path": "D:/AI-Workshop/meshy_api/scripts/stl_optimize.py",
     "decimate_ratio": 0.5,
     "target_faces": 50000,
     "smooth_iterations": 2,
