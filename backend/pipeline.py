@@ -753,6 +753,28 @@ class Pipeline:
         重建一次，两个里挑连通块少的那个。
         """
         from .stages.base import StageResult
+
+        # ★ 2026-11-13：先试着把 2mini 重建出来的"底部背景板"切掉，再做质量闸。
+        #   参考图是产品摄影风格（灰底 + 地面阴影）时，2mini 会把背景和阴影
+        #   一起重建成几何，模型底下多一块带纹理的平板。实测四件艺术品全中
+        #   （见 outputs/art/art_inputs.png）。
+        #   切法是纯几何判断：最底层三角形占比 > 12% 视为"盘子"，沿转折处切。
+        #   切完再判质量，能救回一批本来会被判碎块云的产物。
+        try:
+            from tools.trim_base import trim as _trim_base
+            import tempfile as _tf
+            _tmp = _tf.NamedTemporaryFile(suffix=".glb", delete=False).name
+            _info = _trim_base(output_path, _tmp, dry=False)
+            if _info.get("cut_z") is not None and _info.get("faces_out", 0) > 100:
+                import shutil as _sh
+                _sh.move(_tmp, output_path)
+                self._log(f"🧹 已切掉底部背景板: 面数 {_info['faces_in']:,} → "
+                          f"{_info['faces_out']:,}（小 -{_info['removed_pct']}%）")
+            else:
+                Path(_tmp).unlink(missing_ok=True)
+        except Exception as _e:
+            self._log(f"[trim] 跳过（{type(_e).__name__}: {_e}）")
+
         parts, faces = self._mesh_parts(output_path)
         flat, flat_msg = self._mesh_is_flat_slab(output_path)
         bad = parts < 0 or parts > 200 or faces < 100 or flat
