@@ -840,6 +840,24 @@ class Pipeline:
         input_image = image_path or self.state.selected_image_path
         if not input_image or not Path(input_image).exists():
             return StageResult(False, error="未选择图片或图片不存在")
+
+        # ★ 2026-11-13：建模前先处理参考图（Meshy / Tripo / 混元都这么做）
+        #   ① rembg 去背景 —— 背景会被当成几何重建，实测模型底下会多一块平板
+        #   ② 按 alpha 紧裁 —— 主体占满画面，同样的分辨率等于更多细节
+        #   ③ 锐化 —— octree 靠图像特征推轮廓，边缘糊则轮廓糊
+        #   失败不阻断（降级用原图），只记一行日志。
+        try:
+            from .preprocess import prepare as _prep
+            _pin = Path(input_image)
+            _pout = _pin.with_name(_pin.stem + "_prep.png")
+            _r = _prep(str(_pin), out_path=str(_pout))
+            if _r.get("ok"):
+                input_image = _r["path"]
+                self._log(f"🖼 参考图预处理: {' · '.join(_r['steps'])}")
+            else:
+                self._log(f"🖼 参考图预处理跳过: {_r.get('error', '未知')}")
+        except Exception as _e:
+            self._log(f"🖼 参考图预处理跳过（{type(_e).__name__}）")
         
         # 获取模型配置
         td_models = self.config.get("models", {}).get("3d", {})
