@@ -175,14 +175,17 @@ class Studio:
         return {'ok': True}
 
     def scan(self, model_root=''):
-        from backend.backends.detect import probe_all, probe_local_diffusers
+        from backend.backends.detect import probe_all, probe_local_diffusers, guess_comfy_dir
         from backend.backends.recommend import probe_hardware, summarize_assets, build_profiles, pick_default, list_llm_choices
         if model_root:
             self.model_root = str(Path(model_root).expanduser().resolve())
         config = self.config()
         comfy = config.get('paths', {}).get('comfyui', '')
-        if '${' in comfy:
-            comfy = os.environ.get('COMFYUI_DIR', '')
+        if not comfy or '${' in comfy:
+            # 配置里写的是占位符（或压根没写）→ 自动找
+            comfy = guess_comfy_dir()
+            if comfy:
+                self.log(f'自动找到 ComfyUI: {comfy}')
         fws = probe_all(comfy_dir=comfy or None)
         local = probe_local_diffusers([self.model_root])
         fws = [local if f.key == "diffusers" else f for f in fws]

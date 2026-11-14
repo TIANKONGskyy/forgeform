@@ -133,6 +133,40 @@ def probe_openai_compat(key: str, label: str, host: str, port: int) -> Framework
     return fw
 
 
+def guess_comfy_dir() -> str:
+    """猜 ComfyUI 装在哪。
+
+    ★ 2026-11-15：`studio.py` 的 scan 和 `tools/setup.py` 之前都只看
+    `--comfy-dir` / `COMFYUI_DIR`，两个都没给就当"没装 ComfyUI"。
+    结果：机器上明明有 240 GB 权重，UI 却推荐"下载 22.96 GB"的方案。
+    这个函数被两条路径共用，避免再各修一遍。
+
+    判定标准：目录里有 main.py 且 models/ 是目录（防「空壳目录」误判）。
+    """
+    import os
+    from pathlib import Path
+
+    cands: list[str] = []
+    env = os.environ.get("COMFYUI_DIR", "").strip()
+    if env:
+        cands.append(env)
+    for drive in ("C:", "D:", "E:", "F:", "G:"):
+        for name in ("ComfyUI", "ComfyUI-New", "ComfyUI_windows_portable",
+                     "comfyui", "ComfyUI-new", "ComfyUI-new2"):
+            cands.append(os.path.join(drive + os.sep, name))
+    for parent in (Path.home(), Path.home() / "Desktop",
+                   Path.home() / "Documents"):
+        for name in ("ComfyUI", "ComfyUI-New", "ComfyUI_windows_portable"):
+            cands.append(str(parent / name))
+    for c in cands:
+        try:
+            if (Path(c) / "main.py").is_file() and (Path(c) / "models").is_dir():
+                return c
+        except OSError:
+            continue
+    return ""
+
+
 def probe_comfyui(host: str = "127.0.0.1", port: int = 8188,
                   comfy_dir: str | Path | None = None) -> Framework:
     fw = Framework("comfyui", "ComfyUI", url=f"http://{host}:{port}")
