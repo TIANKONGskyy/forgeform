@@ -242,3 +242,120 @@ def count_check(text: str, rendered: str) -> list[str]:
         if w.lower() in rendered.lower():
             problems.append(f"扩写里出现了空话词 {w}")
     return problems
+
+# ── 深度线索与细节密度检查（2026-11-14，实测得出）─────────────
+#
+# 三组对照实验（Hunyuan3D 2.1 / 512 octree，同一张出图模型）：
+#
+#   ① 正面站姿 + 12 道细褶 + 20 根细卷发  → 厚度 40.3%，卷发糊成坨
+#   ② 正面站姿 +  6 道深褶 +  6 束粗卷发  → 厚度  0.7%，**整张纸片**
+#   ③ 四分之三侧面 + 手前伸 + 6 道深褶 + 6 束粗卷发
+#                                          → 厚度 56.3%，水密，细节都在
+#
+# 两个结论：
+#   A. **姿势 > 细节**。正面站姿（左右对称、无前后遮挡）会让模型输出纸片，
+#      细节放得再大也救不回来 —— 深度信息一开始就没了。
+#   B. 细节尺寸必须大于面片尺寸。200k 面 / 2 单位高 → 平均面片边长约 5-6mm
+#      （按 80mm 打印算），细节间距小于这个数就表达不出来。
+
+# 表示"有深度线索"的说法
+_DEPTH_CUES = (
+    "侧面", "斜侧", "四分之三", "半侧", "侧身", "侧对",
+    "three-quarter", "3/4 view", "side view", "profile",
+    "向前伸", "前伸", "伸手", "伸出手", "hand extended",
+)
+# 制造前后遮挡的常见部件
+_OCCLUDERS = ("背包", "双肩包", "书包", "挎包", "handbag", "backpack", "斜挎", "手提")
+
+# 只有人/动物/角色才有"手"。机械件、器皿加一句"一只手向前伸出"是荒谬的
+# （实测：给"机械法兰盘"补深度线索时也加上了手，必须挡掉）。
+_LIVING = ("角色", "人物", "卡通", "女孩", "男孩", "女生", "男生", "人", "少女",
+           "少年", "机器人", "动物", "猫", "狗", "熊", "兔", "吉祥物",
+           "character", "girl", "boy", "figure", "mascot", "animal", "robot")
+
+# 细节数量词：数字 + 量词 + 细节名词（"12 道褶"、"20 根卷发"）
+_DETAIL_COUNT_RE = re.compile(
+    r"(\d+)\s*(道|根|条|束|缕|片)\s*[^\d，。,\.]{0,3}?"
+    r"(褶|卷发|发丝|波浪|褶裥|螺纹|棱|齿|孔)")
+# 超过这个数就认为密度过高（面片表达不出来）
+_MAX_DETAIL_FEATURES = 8
+
+# 细节被模型采到的安全阈值（打印尺寸下），单位 mm
+_PATCH_EDGE_MM = 6.0
+
+
+def ensure_depth_cue(text: str) -> tuple[str, bool]:
+    """保证提示词里有深度线索。返回 (新提示词, 是否改动过)。
+
+    为什么必须这一步：用户写「一个卡通女孩，百褶裙」这种正面描述，
+    模型对每个像素只能猜深度，结果就是一张 0.6-0.7% 厚的纸片 ——
+    出图看着没问题，建模完全没法用。加一句「四分之三侧面站姿、
+    一只手向前伸出」成本几乎为零，但把厚度从 0.7% 拉到 56%。
+    """
+    low = text.lower()
+    has_cue = any(c in text or c in low for c in _DEPTH_CUES)
+    has_occl = any(c in text or c in low for c in _OCCLUDERS)
+    if has_cue and has_occl:
+        return text, False
+
+    low2 = text.lower()
+    # 先删掉和"侧面"矛盾的词，否则 LLM 会两个都写、然后选正面
+    _CONFLICT = ("正面站立", "正面站姿", "正面朝前", "正对镜头", "正面", "正对",
+                 "front-facing", "front view", "facing forward")
+    for w in _CONFLICT:
+        text = re.sub(re.escape(w), "", text)
+    text = re.sub(r"[，,]{2,}", "，", text).strip(" ，,")
+    is_living = any(k in text or k in low2 for k in _LIVING)
+    parts = []
+    if not has_cue:
+        parts.append("四分之三侧面站姿")
+    if not has_occl:
+        # 只有活物才加"手"；死物改成"侧前方再放一个部件"这种不荒谬的说法
+        parts.append("一只手向前伸出" if is_living
+                     else "从侧前方斜视，能看到主体的正侧面和厚度")
+    if not parts:
+        return text, False
+    return text.rstrip("，。 ,.") + "，" + "，".join(parts), True
+
+
+def density_guard(text: str) -> tuple[str, list[str]]:
+    """把过密的细节数量降下来。返回 (新提示词, 改动说明)。
+
+    为什么：模型的面数预算固定（2.1 的 512 octree 是 200k 面），
+    平均面片边长约 5-6mm（80mm 打印时）。「12 道细褶」= 6.7mm 间距，
+    刚好卡在面片分辨率上，建出来是一片平的；「6 道深褶」= 13mm，能看见。
+
+    规则：超过 _MAX_DETAIL_FEATURES 的，减到一半（12 → 6，20 → 10）。
+    只降数量，不动形容词 —— 「细褶」改成「深褶」是另一回事，那需要
+    用户自己决定，这里只处理「数量太多」这个机械问题。
+    """
+    notes: list[str] = []
+
+    def repl(m):
+        n = int(m.group(1))
+        unit, noun = m.group(2), m.group(3)
+        if n <= _MAX_DETAIL_FEATURES:
+            return m.group(0)
+        new_n = max(3, n // 2)
+        # 顺带把"细/薄/小"改成"粗/深/宽"：数量减半但形容词还是"细"的话，
+        # 出图仍会画得很密，等于没改。
+        noun2 = (noun.replace("细", "深").replace("薄", "厚").replace("小", "大"))
+        notes.append(f"{n}{unit}{noun} → {new_n}{unit}{noun2}"
+                     f"（面片约 {_PATCH_EDGE_MM:.0f}mm，太密的建不出来）")
+        return f"{new_n}{unit}{noun2}"
+
+    out = _DETAIL_COUNT_RE.sub(repl, text)
+    return out, notes
+
+
+def geometry_report(text: str) -> dict:
+    """把两项检查跑一遍，返回结论（不改文案）。给日志/UI 用。"""
+    low = text.lower()
+    return {
+        "has_depth_cue": any(c in text or c in low for c in _DEPTH_CUES),
+        "has_occluder": any(c in text or c in low for c in _OCCLUDERS),
+        "detail_counts": [int(m.group(1)) for m in _DETAIL_COUNT_RE.finditer(text)],
+        "over_dense": any(int(m.group(1)) > _MAX_DETAIL_FEATURES
+                          for m in _DETAIL_COUNT_RE.finditer(text)),
+        "patch_edge_mm": _PATCH_EDGE_MM,
+    }

@@ -320,9 +320,23 @@ def enhance_local(prompt: str, negative_prompt: str = "", timeout: int = 300) ->
     #   但"六条等长边 + 六个 120° 内角"这种**可验证的约束**它自己想不起来；
     #   而模型缺的正是这个。词典负责准确的硬约束，LLM 负责补部件与关系。
     try:
-        from .shape_brief import shape_brief as _brief, strip_empty_words as _strip
-        _geo = _brief(prompt)
+        from .shape_brief import (shape_brief as _brief,
+                                  strip_empty_words as _strip,
+                                  ensure_depth_cue as _depth,
+                                  density_guard as _density)
         _clean = _strip(prompt)
+        # ★ 2026-11-14：两项硬检查，顺序不能反。
+        #   ① 先补深度线索 —— 正面描述的物件建出来是 0.6-0.7% 厚的纸片，
+        #      这是实测最致命的失败模式，比"细节不够"严重得多。
+        #   ② 再降细节密度 —— 面片约 6mm，12 道褶 / 20 根卷发建不出来。
+        #   先补线索再降密度：如果反过来，补进去的"侧面"可能被后续改写打乱。
+        _clean, _cue_added = _depth(_clean)
+        _clean, _density_notes = _density(_clean)
+        if _cue_added:
+            logger.info("[geo] 补了深度线索：%s", _clean[-40:])
+        if _density_notes:
+            logger.info("[geo] 降了细节密度：%s", "; ".join(_density_notes))
+        _geo = _brief(_clean)
     except Exception:
         _geo, _clean = "", prompt
 
