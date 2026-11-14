@@ -962,7 +962,7 @@ class Pipeline:
                 if torch.cuda.is_available():
                     _vram = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
                     _oc = int(params["octree_resolution"])
-                    _floor = 384 if _vram >= 12 else (512 if _vram >= 24 else 0)
+                    _floor = 512 if _vram >= 24 else (384 if _vram >= 12 else 0)
                     if _floor and _oc < _floor:
                         self._log(f"🧊 octree {_oc} → {_floor}（显存 {_vram:.0f} GB 跑得动，"
                                   f"256 的表面台阶太明显）")
@@ -980,6 +980,11 @@ class Pipeline:
                       + (f" 面数上限={params['max_facenum']:,}" if params.get("max_facenum") else " 面数=按档自动"))
         
         try:
+            from PIL import Image
+            with Image.open(input_image) as reference:
+                params["remove_background_done"] = (
+                    "A" in reference.getbands()
+                    and reference.getchannel("A").getextrema()[0] < 255)
             workflow_data = self.comfy.build_workflow("3d", params)
             t_start = time.time()   # 本次任务起点：兜底只认此后生成的文件
             prompt_id = self.comfy.submit_workflow(workflow_data, stage="3d")

@@ -263,7 +263,9 @@ class Studio:
                     try:
                         self.command([self.python, '-m', 'pip', 'install', _hy, *PIP_ARGS])
                     except Exception:
-                        self._log('gh-proxy failed for hy3dgen, falling back to GitHub direct...')
+                        if self.cancelled.is_set():
+                            raise RuntimeError('任务已取消，可重试续传')
+                        self.log('gh-proxy failed for hy3dgen, falling back to GitHub direct...')
                         self.command([self.python, '-m', 'pip', 'install',
                                       'https://github.com/Tencent-Hunyuan/Hunyuan3D-2/archive/refs/heads/main.zip'])
                     self.command([self.python, '-c', 'import torch; from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline; assert torch.cuda.is_available(), "CUDA 不可用，请检查显卡驱动"'])

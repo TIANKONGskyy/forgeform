@@ -94,6 +94,12 @@ def normalize_config_paths(cfg: dict) -> dict:
     paths = cfg.get("paths")
     if not isinstance(paths, dict):
         paths = cfg["paths"] = {}
+    comfy = paths.get("comfyui", "")
+    if not comfy or "${" in os.path.expandvars(str(comfy)):
+        from .backends.detect import guess_comfy_dir
+        paths["comfyui"] = guess_comfy_dir() or str(COMFYUI_DIR)
+    if not paths.get("models") or "${COMFYUI_DIR}" in str(paths["models"]):
+        paths["models"] = str(Path(paths["comfyui"]) / "models")
     for key, raw in list(paths.items()):
         if not raw:
             continue

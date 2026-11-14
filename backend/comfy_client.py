@@ -938,8 +938,8 @@ class ComfyUIClient:
         steps = int(params.get("steps") or model.get("steps") or 30)
         subfolder = model.get("subfolder") or "hunyuan3d-dit-v2-1"
         output_path = params.get("output_path", "")
-        # 图已经去过背景（文件名带 _prep 或者显式传了）就不再让节点去一次
-        already_cut = bool(params.get("remove_background_done")) or "_prep" in str(input_image)
+        # 仅接受调用方检查 alpha 后传入的标记，不按文件名猜测。
+        already_cut = bool(params.get("remove_background_done"))
 
         if seed == -1:
             import random
@@ -949,19 +949,31 @@ class ComfyUIClient:
         wf["1"] = {"class_type": "[Comfy3D] Load Hunyuan3D 21 ShapeGen Pipeline",
                    "inputs": {"subfolder": subfolder}}
         wf["2"] = {"class_type": "LoadImage", "inputs": {"image": input_image}}
+        if already_cut:
+            alpha = ["2", 1]  # LoadImage returns the inverted alpha mask.
+        else:
+            wf["5"] = {"class_type": "LoadBackgroundRemovalModel", "inputs": {
+                "bg_removal_name": model.get("bg_removal", "birefnet.safetensors")}}
+            wf["6"] = {"class_type": "RemoveBackground", "inputs": {
+                "bg_removal_model": ["5", 0], "image": ["2", 0]}}
+            wf["7"] = {"class_type": "InvertMask", "inputs": {"mask": ["6", 0]}}
+            alpha = ["7", 0]
+        wf["8"] = {"class_type": "JoinImageWithAlpha", "inputs": {
+            "image": ["2", 0], "alpha": alpha}}
         wf["3"] = {"class_type": "[Comfy3D] Hunyuan3D 21 ShapeGen",
-                   "inputs": {"shapegen_pipe": ["1", 0], "image": ["2", 0],
+                   "inputs": {"shapegen_pipe": ["1", 0], "image": ["8", 0],
                               "seed": seed, "steps": steps,
                               "guidance_scale": guidance,
                               "octree_resolution": octree_res,
-                              "remove_background": not already_cut,
+                              "remove_background": False,
+                              "max_facenum": int(params.get("max_facenum") or 0),
                               "auto_cleanup": False}}
         wf["4"] = {"class_type": "[Comfy3D] Save 3D Mesh",
                    "inputs": {"mesh": ["3", 0],
                               "save_path": str(output_path or "forgeform_21.glb")}}
         print(f"[2.1] octree={octree_res} guidance={guidance} steps={steps} "
-              f"remove_bg={not already_cut}", flush=True)
-        return wf
+              f"foreground={'input alpha' if already_cut else 'segmentation'}", flush=True)
+        return {"prompt": wf, "negative_prompt": ""}
 
     def _build_multiview_workflow(self, params: Dict) -> Dict:
         """多视图 3D 工作流（2026-08-14）：解决单图 3D 空间关系错乱

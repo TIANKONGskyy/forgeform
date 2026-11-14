@@ -1407,7 +1407,7 @@ class TestTunedServiceWiring(unittest.TestCase):
         self.assertEqual(inverted['class_type'],'InvertMask')
         self.assertEqual(wf[inverted['inputs']['mask'][0]]['class_type'],'RemoveBackground')
         self.assertIs(sg.get('remove_background'),False,'前景已由必需节点提取，不再调用可能静默失败的内部分割')
-        self.assertIs(sg.get("auto_cleanup"), True)
+        self.assertIs(sg.get("auto_cleanup"), False)
 
     def test_gate_detects_background_slab(self):
         """质量闸要能识破"物体 + 一片背景板"（只数连通块会被它骗过）。"""
