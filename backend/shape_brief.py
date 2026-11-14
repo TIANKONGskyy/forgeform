@@ -68,6 +68,70 @@ SHAPE_LEXICON: dict[str, str] = {
     "齿轮": "a cylindrical body with teeth of identical profile and equal spacing around the whole circumference",
 }
 
+# ── 曲面词典：把"文科"的描述翻成几何参数 ───────────────────────
+# 用户说"柔和的褶皱""飘逸的发丝"，这些话对建模没有约束力。
+# 但每一句背后其实都对应一组几何量：
+#   褶皱 = 周期性起伏（波长 λ、峰谷高差 a、折角 θ、走向 v）
+#   花纹 = 曲面上的重复母题（周期 p、对称群、振幅 a）
+#   发丝 = 管状细长体（半径 r、分组数 n、弯曲曲率半径 R）
+# 词典的输出是**两段**：先给几何参数（模型能验），再给一句文学描述
+# （出图模型对自然语言更敏感）。两者缺一不可 —— 只有几何会干瘪，
+# 只有文学会飘。
+SURFACE_LEXICON: dict[str, str] = {
+    "褶皱": "periodic surface folds: alternating ridges and grooves of constant wavelength "
+            "(equal distance between crests), constant fold amplitude, fold direction "
+            "consistent along the whole garment, depth tapering toward seams — "
+            "reads as soft fabric draping, not rigid pleats",
+    "折痕": "sharp creases along straight lines: two flat faces meeting at a V-shaped edge, "
+            "constant dihedral angle along the crease, crease lines do not curve — "
+            "reads as sharp paper/board folds",
+    "百褶": "knife pleats: identical flat panels folded at equal angular intervals around "
+           "one axis, every pleat same width and same fold angle, edges parallel — "
+           "reads as a crisp school-uniform skirt",
+    "发丝": "tube-like hair strands: individual strands of constant radius, grouped into tufts, "
+            "each tuft bending along one smooth curvature, strand tips taper to a point, "
+            "groups separated by visible grooves — "
+            "reads as layered hair with clear highlight and shadow bands",
+    "卷发": "helical hair curls: each curl is a tube wound along a helix of constant pitch "
+            "and constant radius, adjacent curls do not intersect — "
+            "reads as bouncy ringlets",
+    "花纹": "repeated surface motif: identical unit repeated on a regular grid, constant "
+            "period in both directions, motif raised a small constant height above the base "
+            "surface, motif edges closed — reads as an embossed ornamental pattern",
+    "鳞片": "overlapping scale plates: identical plates tiled in staggered rows, each plate "
+            "overlaps the one below by a constant fraction, plates curve along the body — "
+            "reads as reptilian/fish scale armour",
+    "编织": "interlaced strands: two sets of bands crossing at a constant angle, "
+            "over-under alternation, constant band width and constant gap — "
+            "reads as woven basketry/knit texture",
+    "镂空": "through-cut openings in a plate: identical openings on a regular grid, "
+            "every opening fully pierces the wall with clean vertical inner walls, "
+            "remaining material forms a continuous connected lattice — "
+            "reads as pierced filigree",
+    "浮雕": "raised relief on a flat base: motif protrudes a constant depth above the base "
+            "plane, all relief edges chamfered, background stays flat — "
+            "reads as a carved bas-relief plaque",
+    "波纹": "sinusoidal surface waves: one-directional periodic undulation of constant "
+            "wavelength and constant amplitude, phase continuous across the surface — "
+            "reads as flowing water ripples",
+    "扭曲": "twisted prism: cross-section unchanged, rotated progressively about the long axis "
+            "at a constant rate from one end to the other — "
+            "reads as a spiralling bar",
+    "流线": "streamlined surfaces: curvature changes continuously with no abrupt direction "
+            "reverse, no flat spots, all transitions tangential — "
+            "reads as aerodynamic forms",
+}
+
+
+def _found_surfaces(text: str) -> list[tuple[str, str]]:
+    out = []
+    for key, desc in SURFACE_LEXICON.items():
+        if key in text:
+            out.append((key, desc))
+    out.sort(key=lambda kv: -len(kv[0]))
+    return out
+
+
 # 数值归一：用户写"3mm"就用 3mm，没写就用比例
 _UNIT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(mm|cm|m|毫米|厘米|米)\b", re.I)
 _COUNT_RE = re.compile(r"(\d+)\s*(个|条|根|片|块|颗|只|孔|边|面)")
@@ -127,6 +191,12 @@ def shape_brief(text: str, max_len: int = 900) -> str:
         lines.append("GEOMETRY — count and verify these, do not approximate:")
         for name, constraint in shapes[:4]:
             lines.append(f"  - {name}: {constraint}")
+
+    surfaces = _found_surfaces(text)
+    if surfaces:
+        lines.append("SURFACES — describe these as geometry, then in plain words:")
+        for name, desc in surfaces[:3]:
+            lines.append(f"  - {name}: {desc}")
 
     if nums:
         lines.append("EXACT VALUES — keep these numbers unchanged, do not round:")
