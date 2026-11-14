@@ -157,14 +157,33 @@ def _fetch_range(url: str, start: int, end: int, part: Path, stop: threading.Eve
 
 
 def _stream_download(url: str, dest: Path, size: int, retries: int = 10) -> bool:
-    """单线程流式下载，**完全不用 Range**。
+    """单线程流式下载（不用多线程分片，但**会用 Range 续传**）。
+
+    ## 为什么不用多线程分片
 
     2026-11-13：hf-mirror 在大文件上 Range 行为不稳定 —— 有时返回 200（整个文件）
     而不是 206，导致分片被写进远超预期的数据。实测 4.7 GB 的文件下到
     "170%" 还报"分片传输提前结束"。
 
-    单线程不用 Range，虽然有中断风险，但**每次中断都能从 .part 续**，
-    而且不会出现"分片越来越大"这种诡异状态。
+    ## 2026-11-15 的三处修正（笔记本用户卡在 15% 的根因）
+
+    ① `read(n)` → `read1(n)`
+       read(n) 会等收满 n 字节；慢速链路 30 秒只到几百 KB，直接超时，
+       **一个字节都写不进 .stream** —— 这才是"进度条永远停在同一处"的技术原因。
+
+    ② 每次 write 后 flush
+       看门狗强制 close 时，文件缓冲区里的数据不 flush 就丢。
+
+    ③ 30 秒无数据看门狗
+       socket timeout 只防"完全不动"，防不住"每隔几十秒挤一点"的心跳式慢速发送
+       —— 那种情况连接永远不断、read() 永远阻塞。
+
+    ## 续传
+
+    中断后从 `.stream` 已下字节数发 `Range: bytes=N-`。
+    hf-mirror 实测支持 206 + Content-Range（2026-11-15 验证）。
+    如果镜像不支持 Range（返回 200），只重试 1 次就放弃换镜像 ——
+    否则会陷入"每次从头开始 → 又被掐断 → 又从头"的死循环。
     """
     part = dest.with_suffix(dest.suffix + ".stream")
 
