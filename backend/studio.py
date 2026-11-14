@@ -612,9 +612,9 @@ class Studio:
             info = netboost.latest_installer()
             if not info.get('ok'):
                 return {'ok': False, 'error': info.get('error') or '查不到安装包'}
-            self._log(f"开始下载 {info['name']}（{info['size_mb']} MB）…")
+            self.log(f"开始下载 {info['name']}（{info['size_mb']} MB）…")
             res = netboost.install_steampp(progress=self._log)
-            self._log(f"安装结果: {'成功' if res.get('ok') else res.get('error')}")
+            self.log(f"安装结果: {'成功' if res.get('ok') else res.get('error')}")
             return {'ok': bool(res.get('ok')), **res}
         except Exception as exc:
             return {'ok': False, 'error': f'{type(exc).__name__}: {exc}'}
