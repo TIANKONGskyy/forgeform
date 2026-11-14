@@ -315,8 +315,19 @@ def enhance_local(prompt: str, negative_prompt: str = "", timeout: int = 300) ->
         backend = "ollama"
         logger.warning("Qwen3-Coder-30B 服务未就绪，改走 Ollama")
 
+    # ★ 2026-11-14：先把口语翻译成可验证的几何约束，再让 LLM 扩写。
+    #   为什么放在 LLM 前面 —— LLM 会把"六边形"扩成 "hexagonal shape"，
+    #   但"六条等长边 + 六个 120° 内角"这种**可验证的约束**它自己想不起来；
+    #   而模型缺的正是这个。词典负责准确的硬约束，LLM 负责补部件与关系。
+    try:
+        from .shape_brief import shape_brief as _brief, strip_empty_words as _strip
+        _geo = _brief(prompt)
+        _clean = _strip(prompt)
+    except Exception:
+        _geo, _clean = "", prompt
+
     instruction = (
-        f"为 3D 打印生成一个{prompt.strip()}的精细建模提示词。"
+        f"为 3D 打印生成一个{_clean.strip() or prompt.strip()}的精细建模提示词。"
         "输出必须严格分为两段：第一段以【IMAGE】开头，第二段以【3D】开头，"
         "不要用 markdown 标题，每段一段话。"
         "3D 段必须包含：底部先加 3mm 底座再切平确保底面平整，且模型无任何浮空结构。"
@@ -364,6 +375,18 @@ def enhance_local(prompt: str, negative_prompt: str = "", timeout: int = 300) ->
         "【保留硬信息】用户给的数字、尺寸、颜色、专名必须原样保留，一个字都不许改。"
         "【长度】IMAGE 段控制在 60-110 个英文词，3D 段 30-60 个；宁可少写细节也别注水。"
     )
+    if _geo:
+        # 几何约束放在最后、用清晰的标记隔开：LLM 对这种"必须原样保留"的块
+        # 遵从度最高；放在前面容易被它改写成模糊说法。
+        instruction += (
+            "\n\n【几何约束｜必须原样抄进 IMAGE 段，一个字都不许改】\n"
+            + _geo +
+            "\n\n把上面【几何约束】整块**逐字**附在 IMAGE 段末尾。"
+            "不许改写、不许翻译、不许合并、不许省略任何一条。"
+            "这些约束就是在替代人建模时的尺寸标注和关系标注 —— "
+            "形状类别词（如 hexagonal）只是标签，"
+            "而『6 equal-length edges + 6 interior angles of 120 degrees』才是可验证的。"
+        )
     if negative_prompt:
         instruction += f"，避免：{negative_prompt}"
     # Ollama 那条路：直接用 /api/generate，不走 chat completions
