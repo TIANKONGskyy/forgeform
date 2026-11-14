@@ -218,7 +218,35 @@ def main() -> int:
                                             probe_hardware, summarize_assets)
 
     hw = probe_hardware(str(ROOT))
-    comfy_dir = args.comfy_dir or os.environ.get("COMFYUI_DIR", "")
+
+    # ★ 2026-11-14：CANDIDATE 扫描。
+    #   原来只看 --comfy-dir 和 COMFYUI_DIR 环境变量，两个都没给 →
+    #   探测不到 ComfyUI → 推荐"标准 22.96 GB"方案。
+    #   但用户机器上明明装着 ComfyUI（240 GB 权重），等于白告诉他要再下 23 GB。
+    #   实测：解压后直接跑 setup.py 就是这个问题（本机 D:\ComfyUI-New 被漏掉）。
+    def _guess_comfy() -> str:
+        cands = []
+        env = os.environ.get("COMFYUI_DIR", "").strip()
+        if env:
+            cands.append(env)
+        # 常见安装位置：各盘根目录 + 用户目录 + 与铸想同级
+        for drive in ("C:", "D:", "E:", "F:"):
+            for name in ("ComfyUI", "ComfyUI-New", "ComfyUI_windows_portable",
+                         "comfyui", "ComfyUI-new"):
+                cands.append(os.path.join(drive + os.sep, name))
+        for parent in (Path.home(), Path.home() / "Desktop",
+                       Path.home() / "Documents", ROOT.parent):
+            for name in ("ComfyUI", "ComfyUI-New", "ComfyUI_windows_portable"):
+                cands.append(str(parent / name))
+        for c in cands:
+            # 判定标准：有 main.py 且 models/ 目录存在（不是空壳）
+            if (Path(c) / "main.py").exists() and (Path(c) / "models").is_dir():
+                return c
+        return ""
+
+    comfy_dir = args.comfy_dir or _guess_comfy()
+    if comfy_dir and not args.comfy_dir:
+        print(f"自动找到 ComfyUI: {comfy_dir}（可用 --comfy-dir 覆盖）")
     fws = D.probe_all(comfy_dir=comfy_dir or None)
     assets = summarize_assets(fws)
 

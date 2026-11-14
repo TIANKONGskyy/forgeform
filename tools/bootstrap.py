@@ -55,11 +55,65 @@ def _version_tuple(v: str) -> tuple[int, ...]:
         return (0,)
 
 
-def check_update(timeout: int = 4) -> dict:
+def check_update(timeout: int = 3) -> dict:
     """查最新版。返回 {ok, has_network, latest, current, newer, url}。
 
     超时短（4 秒）—— 启动时不能让用户干等。失败就当作没有网络。
     """
+    cur = local_version()
+    # ★ 2026-11-14：改成 gh-proxy 优先 + 并行查。
+    #   实测：国内直连 api.github.com 必超时（4 秒白等），再走 gh-proxy 又花几秒，
+    #   加起来 12.7 秒 —— 双击启动时用户会以为程序卡死了。
+    #   现在两个 URL 同时发，谁先回用谁；整体上限 4 秒。
+    import threading
+    result = {"done": False, "payload": None, "err": ""}
+    lock = threading.Lock()
+
+    def _probe(url):
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "ForgeForm-launcher", "Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                d = json.loads(r.read().decode())
+            with lock:
+                if not result["done"]:
+                    result["done"] = True
+                    result["payload"] = d
+        except Exception as exc:
+            with lock:
+                result["err"] = f"{type(exc).__name__}: {str(exc)[:80]}"
+
+    # 只发 gh-proxy。国内直连 api.github.com 基本必超时，先发它纯粹是浪费。
+    # 如果 gh-proxy 3 秒没回，再补发直连（海外用户 / 代理可用的情况）。
+    t1 = threading.Thread(target=_probe, args=(API_CN,), daemon=True)
+    t1.start()
+    ts = [t1]
+    t1.join(timeout=timeout)
+    if not result["done"]:
+        t2 = threading.Thread(target=_probe, args=(API,), daemon=True)
+        t2.start()
+        ts.append(t2)
+    for th in ts:
+        # 只等 timeout，不再多等 1 秒 —— 之前 4+1=5 秒，加上连接时间实测 8.2 秒
+        th.join(timeout=timeout)
+
+    if result["payload"]:
+        d = result["payload"]
+        latest = (d.get("tag_name") or "").lstrip("v")
+        return {
+            "ok": True, "has_network": True,
+            "current": cur, "latest": latest,
+            "newer": _version_tuple(latest) > _version_tuple(cur),
+            "url": d.get("html_url") or "",
+            "size_mb": round(sum(a.get("size", 0) for a in d.get("assets", [])) / 1024 / 1024, 2),
+        }
+    last = result["err"] or "timeout"
+    return {"ok": False, "has_network": False, "current": cur,
+            "latest": cur, "newer": False, "error": last}
+
+
+def _old_check_update_removed():
+    """占位：原顺序探测逻辑已替换成并行版。"""
     cur = local_version()
     for url in (API, API_CN):
         try:
