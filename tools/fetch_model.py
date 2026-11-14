@@ -156,7 +156,7 @@ def _fetch_range(url: str, start: int, end: int, part: Path, stop: threading.Eve
                 raise RuntimeError('分片传输提前结束')
 
 
-def _stream_download(url: str, dest: Path, size: int, retries: int = 5) -> bool:
+def _stream_download(url: str, dest: Path, size: int, retries: int = 10) -> bool:
     """单线程流式下载，**完全不用 Range**。
 
     2026-11-13：hf-mirror 在大文件上 Range 行为不稳定 —— 有时返回 200（整个文件）
@@ -167,6 +167,17 @@ def _stream_download(url: str, dest: Path, size: int, retries: int = 5) -> bool:
     而且不会出现"分片越来越大"这种诡异状态。
     """
     part = dest.with_suffix(dest.suffix + ".stream")
+
+    # ★ 2026-11-15：加"无数据看门狗"。
+    #
+    # 症状（用户笔记本实测）：下载卡在 15% 超过 30 分钟不动，也不报错。
+    # 根因：`urlopen(timeout=90)` 的 timeout 是 **socket 超时**，只要服务器
+    #   还肯发**一个字节**就不算超时。hf-mirror 在某些节点上会进入
+    #   "心跳式慢速发送" —— 每隔几十秒挤一点，连接永远不断，
+    #   read() 永远阻塞，进度条永远停在原地。
+    # 修法：起一个看门狗线程，**N 秒没读到新数据就强制 r.close()**，
+    #   让 read() 抛异常退出，然后走已有的"续传"逻辑（.stream 文件保留）。
+    STALL_SECONDS = 30
     for attempt in range(retries):
         have = part.stat().st_size if part.exists() else 0
         if size and have >= size:
@@ -174,30 +185,72 @@ def _stream_download(url: str, dest: Path, size: int, retries: int = 5) -> bool:
         headers = {"User-Agent": UA}
         if have:
             headers["Range"] = f"bytes={have}-"
+        resp_holder = {"r": None, "last": time.time(), "closed": False}
+        stop_wd = threading.Event()
+
+        def _watchdog():
+            while not stop_wd.is_set():
+                time.sleep(3)
+                if stop_wd.is_set():
+                    return
+                idle = time.time() - resp_holder["last"]
+                if idle > STALL_SECONDS and not resp_holder["closed"]:
+                    resp_holder["closed"] = True
+                    try:
+                        resp_holder["r"].close()
+                    except Exception:
+                        pass
+                    print(f"    ⚠ {idle:.0f}s 没收到数据，强制重连", flush=True)
+                    return
+
         try:
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=90) as r:
-                # 服务器忽略 Range 时只能从头写，把已有分片清掉
+            wd = threading.Thread(target=_watchdog, daemon=True)
+            wd.start()
+            with urllib.request.urlopen(req, timeout=STALL_SECONDS) as r:
+                resp_holder["r"] = r
+                # 服务器忽略 Range 时只能从头写，把已有分片清掉。
+                # ★ 2026-11-15：这时**必须把重试次数降到 1**，否则会死循环 ——
+                #   每次重连都从头开始、又被看门狗掐断、又从头开始，
+                #   永远到不了 100%。实测慢速服务器（不支持 Range）跑了 184 秒
+                #   三次全失败，.stream 还是 0 字节。
                 if have and r.status != 206:
                     have = 0
                     part.unlink(missing_ok=True)
+                    if attempt == 0:
+                        print("    ℹ 服务器不支持断点续传，本次只能一次下完"
+                              "（断了就得从头来）", flush=True)
+                    if attempt >= 1 and r.status != 206:
+                        # 已经从头试过一次还是断，说明这条链路撑不住整文件
+                        print("    ✗ 该镜像不支持续传且单次下完会断，换镜像重试", flush=True)
+                        return False
                 mode = "ab" if have else "wb"
                 with open(part, mode) as f:
                     done = have
                     while True:
-                        chunk = r.read(1 << 20)
+                        # read1 = 有多少拿多少；read(n) 会等收满 n 字节，
+                        # 慢速链路上等不满就超时，一个字节都拿不到。
+                        chunk = r.read1(1 << 20) if hasattr(r, "read1") else r.read(1 << 20)
                         if not chunk:
                             break
+                        resp_holder["last"] = time.time()
                         f.write(chunk)
+                        f.flush()          # 看门狗 close 时缓冲区别丢
                         done += len(chunk)
                         if size and done % (64 << 20) < (1 << 20):
                             print(f"    {done / size * 100:5.1f}%  "
                                   f"{done / 1024 / 1024:8.1f}/{size / 1024 / 1024:.1f} MB  "
                                   f"({dest.name})", flush=True)
         except Exception as exc:
-            print(f"    中断: {type(exc).__name__}（第 {attempt + 1} 次），续传…", flush=True)
+            if resp_holder["closed"]:
+                print(f"    重连（第 {attempt + 1}/{retries} 次），从 "
+                      f"{part.stat().st_size / 1024 / 1024:.1f} MB 续传…", flush=True)
+            else:
+                print(f"    中断: {type(exc).__name__}（第 {attempt + 1} 次），续传…", flush=True)
             time.sleep(2)
             continue
+        finally:
+            stop_wd.set()
         if not size or part.stat().st_size == size:
             part.replace(dest)
             return True
