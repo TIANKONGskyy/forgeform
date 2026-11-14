@@ -1199,9 +1199,43 @@ def register_model_library(sa) -> None:
 
 if __name__ == "__main__":
     app = build()
+    # ★ 2026-11-15：端口被占时自动换一个，而不是硬绑 7860。
+    #
+    # 为什么必须这一步：实测这台机器上 7860 被**旧版铸想**（AI-Workshop 的
+    # foundry_ondemand.py）占着，Gradio 在 Windows 上带着 SO_REUSEADDR
+    # 仍然能"启动成功"并打印 "Running on local URL: 127.0.0.1:7860"，
+    # 但浏览器连过去拿到的是**旧版**的界面 —— 用户看到的现象是"新装的打不开"。
+    def _port_taken(host: str, port: int) -> bool:
+        """端口是否已经被别人占着。
+
+        ★ Windows 上**不能**用 bind 来判断 —— `SO_REUSEADDR` 在那里允许
+        多个 socket 绑同一个端口（和 Linux 语义相反）。实测：7860 被旧版占着，
+        带 SO_REUSEADDR 的 bind 照样成功，于是换端口逻辑形同虚设。
+        改用 connect：能连上就是有人。
+        """
+        import socket as _s
+        with _s.socket(_s.AF_INET, _s.SOCK_STREAM) as s:
+            s.settimeout(0.3)
+            return s.connect_ex((host if host != "0.0.0.0" else "127.0.0.1", port)) == 0
+
+    def _pick_port(preferred: int) -> int:
+        host = os.environ.get("FOUNDRY_HOST", "127.0.0.1")
+        for cand in [preferred] + list(range(preferred + 2, preferred + 20)):
+            if cand <= 0:
+                continue
+            if not _port_taken(host, cand):
+                return cand
+        return preferred
+
+    _want = int(os.environ.get("FOUNDRY_PORT", "7860"))
+    _port = _pick_port(_want)
+    if _port != _want:
+        print(f"[port] {_want} 已被占用（可能是旧版铸想），改用 {_port}")
+        print(f"[port] 浏览器请打开 http://127.0.0.1:{_port}")
+
     app.launch(
         server_name=os.environ.get("FOUNDRY_HOST", "127.0.0.1"),
-        server_port=int(os.environ.get("FOUNDRY_PORT", "7860")),
+        server_port=_port,
         share=False,
         allowed_paths=[
             str(ROOT / "outputs"),
