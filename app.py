@@ -233,6 +233,54 @@ def build_sidebar(state: dict) -> str:
     if u:
         rows.append(("📦", "打印模型 .stl", _fsize(stl), u))
 
+    # ★ 2026-11-15：模型详情（厂商/量化/框架/本机实测耗时）。
+    #   之前只显示名字，用户不知道 Q5_K_M 是几 bit、哪个公司的、跑一张要多久。
+    detail_html = ""
+    try:
+        _cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
+        from backend.model_info import describe as _describe
+        _pk = ((_cfg.get("stages") or {}).get("image") or {}).get("default_model", "")
+        _mk = ((_cfg.get("stages") or {}).get("3d") or {}).get("default_model", "")
+        _pi = _describe(_pk, (((_cfg.get("models") or {}).get("image") or {}).get(_pk) or {}))
+        _mi = _describe(_mk, (((_cfg.get("models") or {}).get("3d") or {}).get(_mk) or {}))
+        from backend.model_info import describe_llm as _describe_llm
+        _cl = _describe_llm()
+
+        def _row(label, val):
+            if not val:
+                return ""
+            return (f'<div class="kv"><span class="k">{label}</span>'
+                    f'<span class="v">{val}</span></div>')
+
+        detail_html = (
+            '<div class="sb-sec"><div class="sb-label">模型详情</div>'
+            '<div class="mi-head">出图 · ' + str(_pi.get("family") or _pi.get("name") or "—") + '</div>'
+            + _row("厂商", _pi.get("vendor", ""))
+            + _row("参数", _pi.get("params", ""))
+            + _row("量化", _pi.get("quant", ""))
+            + _row("框架", _pi.get("backend", ""))
+            + _row("耗时", _pi.get("timing", ""))
+            + _row("许可", _pi.get("license", ""))
+            + '<div class="mi-head" style="margin-top:10px">建模 · '
+            + str(_mi.get("family") or _mi.get("name") or "—") + '</div>'
+            + _row("厂商", _mi.get("vendor", ""))
+            + _row("参数量", _mi.get("params", ""))
+            + _row("量化", _mi.get("quant", ""))
+            + _row("框架", _mi.get("backend", ""))
+            + _row("耗时", _mi.get("timing", ""))
+            + _row("许可", _mi.get("license", ""))
+            + '<div class="mi-head" style="margin-top:10px">对话 · LLM</div>'
+            + _row("厂商", _cl.get("vendor", ""))
+            + _row("模型", _cl.get("family", "") or _cl.get("name", ""))
+            + _row("架构", _cl.get("arch", ""))
+            + _row("量化", _cl.get("quant", ""))
+            + _row("框架", _cl.get("backend", ""))
+            + _row("吞吐", _cl.get("timing", ""))
+            + '</div>'
+        )
+    except Exception as _e:
+        detail_html = ""
+
     # ★ 2026-11-15：当前模型 + 质量档。用户看不到"现在到底用哪个模型、
     #   什么精度档"，只能靠猜。这里从 config 里读真实值显示出来。
     model_html = ""
@@ -289,6 +337,7 @@ def build_sidebar(state: dict) -> str:
     <div class="sb-body">
         {params_html}
         {model_html}
+        {detail_html}
         {art_html}
         {glb_html}
         {stl_html}
@@ -446,6 +495,20 @@ def _buttons_for_phase(phase: str, state: dict = None) -> dict:
         return with_stl({"refine": v(False), "gen": v(False), "edit": v(False),
                         "model": v(False), "new": v(True)})
     return with_stl(off)
+
+
+def on_model_change(img_key: str, key_3d: str, state: dict):
+    """切换出图/建模模型：写进 state，刷新侧栏，顺便落盘。"""
+    state = dict(state or {})
+    if img_key:
+        state["image_model"] = img_key
+    if key_3d:
+        state["model_3d"] = key_3d
+    try:
+        pm.save_project(state)
+    except Exception:
+        pass
+    return state, build_sidebar(state)
 
 
 def on_quality_change(q: str, state: dict):
@@ -1103,6 +1166,33 @@ def build():
                         elem_id="quality_radio",
                     )
 
+                # ★ 2026-11-15：模型切换。config 里有 5 个出图 + 5 个建模模型，
+                #   但之前只能改 config.json —— 界面上完全没有入口。
+                #   现在两个下拉直接从 config 拿候选，选了就写进 state，
+                #   conversation 里的 _pick_image_model / td_key 优先读 state。
+                _img_choices, _3d_choices = [], []
+                _img_def, _3d_def = "", ""
+                try:
+                    _c = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
+                    for _k, _v in ((_c.get("models") or {}).get("image") or {}).items():
+                        _img_choices.append((_v.get("name") or _k, _k))
+                    for _k, _v in ((_c.get("models") or {}).get("3d") or {}).items():
+                        _3d_choices.append((_v.get("name") or _k, _k))
+                    _img_def = ((_c.get("stages") or {}).get("image") or {}).get("default_model", "")
+                    _3d_def = ((_c.get("stages") or {}).get("3d") or {}).get("default_model", "")
+                except Exception:
+                    pass
+
+                with gr.Row(elem_classes="model-bar"):
+                    img_model_dd = gr.Dropdown(
+                        choices=_img_choices, value=_img_def or None,
+                        label="出图模型", show_label=True, container=True,
+                        elem_id="img_model_dd", scale=1)
+                    model_3d_dd = gr.Dropdown(
+                        choices=_3d_choices, value=_3d_def or None,
+                        label="建模模型", show_label=True, container=True,
+                        elem_id="model_3d_dd", scale=1)
+
                 # 动作按钮行（对话里紧跟的交互按键，初始按阶段显示）
                 with gr.Row(elem_classes="action-bar"):
                     btn_refine = gr.Button("✨ 继续细化", variant="secondary", visible=_init_btns["refine"]["visible"], elem_id="btn_refine")
@@ -1168,6 +1258,11 @@ def build():
 
         quality_radio.change(fn=on_quality_change, inputs=[quality_radio, state],
                          outputs=[state, sidebar])
+
+        img_model_dd.change(fn=on_model_change, inputs=[img_model_dd, model_3d_dd, state],
+                        outputs=[state, sidebar])
+        model_3d_dd.change(fn=on_model_change, inputs=[img_model_dd, model_3d_dd, state],
+                       outputs=[state, sidebar])
 
         send.click(fn=on_submit, inputs=[msg, state], outputs=[msg, state] + ui_outputs).then(
             fn=arm_heartbeat, inputs=[state], outputs=[auto_timer])

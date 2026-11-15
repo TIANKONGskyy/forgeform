@@ -174,8 +174,12 @@ MODEL_HINTS = {
 }
 
 
-def _pick_image_model() -> str:
-    """从 config.json 读 stages.image.default_model。fallback z_image（保证不崩）。"""
+def _pick_image_model(state: dict | None = None) -> str:
+    """出图模型：优先 state["image_model"]（UI 下拉选的），否则读 config。"""
+    if state:
+        _m = (state.get("image_model") or "").strip()
+        if _m:
+            return _m
     try:
         cfg_path = Path(__file__).resolve().parent.parent / "config.json"
         cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
@@ -1327,7 +1331,7 @@ class ConversationManager:
                 prompt, count=_n_cand,
                 resolution=_PREVIEW_RES,
                 quality_name="快速",           # 预览档：始终快速，高精度留给主图
-                model_key=_pick_image_model(),
+                model_key=_pick_image_model(state),
                 skip_cache=True,              # 否则 ComfyUI 命中缓存 → "改了参数却没变"
             )
             cand_paths = []
@@ -1372,7 +1376,7 @@ class ConversationManager:
                   f" → 自动用 {self.autopilot_cfg()['model']} 建模")
 
         style = params.get("style", "写实")
-        model_info = _pick_image_model()
+        model_info = _pick_image_model(state)
         color_txt = params.get("color", "未指定")
         size_txt = params.get("size_mm", state.get("stl_size", 120))
         # 把实际使用的英文提示词亮出来（用户要能看出"到底细不细"）
@@ -1493,7 +1497,7 @@ class ConversationManager:
             _free_tuned_for_gpu_work("高清重绘")     # img2img 也要 ComfyUI 显存
             hd = pipe.enhance_image(
                 cur, prompt,
-                model_key=_pick_image_model(),
+                model_key=_pick_image_model(state),
                 quality_name=(state.get("quality") or "标准"),
                 resolution=_HD_RES,
             )
@@ -1564,7 +1568,8 @@ class ConversationManager:
 
         # 用 config 里的默认 3D 模型（triposplat：原生前馈管线，快），
         # 不再依赖 pipeline 写死的 hunyuan3d（Hunyuan 20步，要好几分钟）。
-        td_key = pipe.config.get("stages", {}).get("3d", {}).get("default_model", "triposplat")
+        td_key = ((state or {}).get("model_3d")
+                  or pipe.config.get("stages", {}).get("3d", {}).get("default_model", "triposplat"))
         # 旧版「一句话生成」流程同样会设置这个，pipeline 内部多处会读它
         try:
             pipe.state.selected_image_path = str(selected_img)

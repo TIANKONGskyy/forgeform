@@ -167,3 +167,23 @@ body{overflow-y:auto!important}
 /* 模型名太长时允许换行显示完整 */
 #sidebar .kv{align-items:flex-start!important;gap:10px!important}
 #sidebar .kv .v{white-space:normal!important;word-break:break-word!important;line-height:1.55!important}
+/* ══ 模型切换：两个下拉并排，标签小字 ══ */
+.model-bar{margin:0 0 8px!important;gap:10px!important}
+#img_model_dd, #model_3d_dd{
+  background:rgba(255,255,255,.028)!important;
+  border:1px solid var(--ff-line)!important;
+  border-radius:12px!important;
+  padding:8px 12px!important}
+#img_model_dd label, #model_3d_dd label{
+  font-size:11px!important;color:var(--ff-muted)!important;
+  margin-bottom:2px!important;letter-spacing:.04em}
+#img_model_dd .wrap input, #model_3d_dd .wrap input{
+  border:0!important;background:transparent!important;
+  padding:0!important;height:auto!important;font-size:13px!important}
+/* 模型详情：小标题 + 紧凑的 kv 行 */
+.mi-head{
+  font-size:11.5px;font-weight:600;color:var(--ff-accent);
+  margin:8px 0 4px;letter-spacing:.03em}
+#sidebar .sb-sec .kv{padding:2px 0!important;font-size:11.5px!important}
+#sidebar .sb-sec .kv .k{color:var(--ff-muted)!important}
+#sidebar .sb-sec .kv .v{color:var(--ff-text)!important;font-size:11.5px!important}
