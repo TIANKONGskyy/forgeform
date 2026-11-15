@@ -1185,7 +1185,7 @@ class ConversationManager:
             try:
                 stage_results = pipe.generate_images(
                     zh_prompt, count=1,
-                    resolution=_HD_RES, quality_name="标准",
+                    resolution=_HD_RES, quality_name=(state.get("quality") or "标准"),
                     model_key="qwen21_ref", skip_cache=True,
                     reference_image=_ref or None,
                 )
@@ -1326,7 +1326,7 @@ class ConversationManager:
             stage_results = pipe.generate_images(
                 prompt, count=_n_cand,
                 resolution=_PREVIEW_RES,
-                quality_name="快速",           # 预览档：步数减半
+                quality_name=("快速" if (state.get("quality") or "标准") == "快速" else "标准"),  # 预览档
                 model_key=_pick_image_model(),
                 skip_cache=True,              # 否则 ComfyUI 命中缓存 → "改了参数却没变"
             )
@@ -1494,7 +1494,7 @@ class ConversationManager:
             hd = pipe.enhance_image(
                 cur, prompt,
                 model_key=_pick_image_model(),
-                quality_name="标准",
+                quality_name=(state.get("quality") or "标准"),
                 resolution=_HD_RES,
             )
             if getattr(self, '_interactive', True):

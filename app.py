@@ -2,6 +2,7 @@
 对话确认需求 → 生图 → 对话确认/修改 → 建模（自动新建对话组）
 """
 import sys, json, time, re
+import json
 import os
 from pathlib import Path
 import threading
@@ -232,6 +233,30 @@ def build_sidebar(state: dict) -> str:
     if u:
         rows.append(("📦", "打印模型 .stl", _fsize(stl), u))
 
+    # ★ 2026-11-15：当前模型 + 质量档。用户看不到"现在到底用哪个模型、
+    #   什么精度档"，只能靠猜。这里从 config 里读真实值显示出来。
+    model_html = ""
+    try:
+        _cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
+        _img_key = ((_cfg.get("stages") or {}).get("image") or {}).get("default_model", "")
+        _3d_key = ((_cfg.get("stages") or {}).get("3d") or {}).get("default_model", "")
+        _img_m = ((_cfg.get("models") or {}).get("image") or {}).get(_img_key) or {}
+        _3d_m = ((_cfg.get("models") or {}).get("3d") or {}).get(_3d_key) or {}
+        _img_name = _img_m.get("name") or _img_key or "—"
+        _3d_name = _3d_m.get("name") or _3d_key or "—"
+        _oct = _3d_m.get("octree_resolution") or _3d_m.get("octree") or "—"
+        _guid = _3d_m.get("guidance_scale") or "—"
+        _stp = _3d_m.get("steps") or "—"
+        model_html = (
+            '<div class="sb-sec"><div class="sb-label">当前模型</div>'
+            f'<div class="kv"><span class="k">出图</span><span class="v">{_img_name}</span></div>'
+            f'<div class="kv"><span class="k">建模</span><span class="v">{_3d_name}</span></div>'
+            f'<div class="kv"><span class="k">精度</span><span class="v">octree {_oct} · {_stp} 步 · gs {_guid}</span></div>'
+            '</div>'
+        )
+    except Exception:
+        model_html = ""
+
     art_html = ""
     if rows:
         body = "".join(
@@ -263,6 +288,7 @@ def build_sidebar(state: dict) -> str:
     </div>
     <div class="sb-body">
         {params_html}
+        {model_html}
         {art_html}
         {glb_html}
         {stl_html}
@@ -420,6 +446,21 @@ def _buttons_for_phase(phase: str, state: dict = None) -> dict:
         return with_stl({"refine": v(False), "gen": v(False), "edit": v(False),
                         "model": v(False), "new": v(True)})
     return with_stl(off)
+
+
+def on_quality_change(q: str, state: dict):
+    """精度档切换：写进 state 的两处，刷新侧栏显示。"""
+    state = dict(state or {})
+    q = q or "高质量"
+    state["quality"] = q
+    ap = dict(state.get("auto_params") or {})
+    ap["quality_3d"] = q
+    state["auto_params"] = ap
+    try:
+        pm.save_project(state)
+    except Exception:
+        pass
+    return state, build_sidebar(state)
 
 
 def ring_html(stage: str = "", elapsed: float = 0.0, done: bool = False) -> str:
@@ -1019,7 +1060,7 @@ def build():
                 scale=2,
                 min_width=220,
             )
-            btn_new_top = gr.Button("＋ 新建作品", variant="secondary", scale=1, min_width=96)
+            btn_new_top = gr.Button("➕ 新建作品", variant="secondary", scale=1, min_width=96)
 
         # ── 主体：左侧对话区（宽）+ 右侧侧边栏（窄）────
         with gr.Row(elem_classes="main-wrap"):
@@ -1047,14 +1088,29 @@ def build():
                     elem_id="glb_viewer",
                 )
 
+                # ★ 2026-11-15：精度档一键选择。
+                #   原来只能靠对话里说"高质量"来改，用户根本不知道有这个开关。
+                #   现在四个档位直接点，写进 state.quality（生图）和
+                #   state.auto_params.quality_3d（建模）两个位置 —— 它们本来
+                #   分别被 conversation 的两条路径读。
+                with gr.Row(elem_classes="quality-bar"):
+                    quality_radio = gr.Radio(
+                        choices=["快速", "标准", "高质量", "极致"],
+                        value="高质量",
+                        label="",
+                        show_label=False,
+                        container=False,
+                        elem_id="quality_radio",
+                    )
+
                 # 动作按钮行（对话里紧跟的交互按键，初始按阶段显示）
                 with gr.Row(elem_classes="action-bar"):
-                    btn_refine = gr.Button("继续细化", variant="secondary", visible=_init_btns["refine"]["visible"], elem_id="btn_refine")
-                    btn_gen = gr.Button("生成图片", variant="primary", visible=_init_btns["gen"]["visible"], elem_id="btn_gen")
-                    btn_edit = gr.Button("修改图片", variant="secondary", visible=_init_btns["edit"]["visible"], elem_id="btn_edit")
-                    btn_model = gr.Button("生成 3D", variant="primary", visible=_init_btns["model"]["visible"], elem_id="btn_model")
-                    btn_new = gr.Button("新建作品", variant="secondary", visible=_init_btns["new"]["visible"], elem_id="btn_new")
-                    btn_stl = gr.Button("导出 STL", variant="secondary", visible=_init_btns["stl"]["visible"], elem_id="btn_stl")
+                    btn_refine = gr.Button("✨ 继续细化", variant="secondary", visible=_init_btns["refine"]["visible"], elem_id="btn_refine")
+                    btn_gen = gr.Button("🎨 生成图片", variant="primary", visible=_init_btns["gen"]["visible"], elem_id="btn_gen")
+                    btn_edit = gr.Button("✏️ 修改图片", variant="secondary", visible=_init_btns["edit"]["visible"], elem_id="btn_edit")
+                    btn_model = gr.Button("🧊 生成 3D", variant="primary", visible=_init_btns["model"]["visible"], elem_id="btn_model")
+                    btn_new = gr.Button("➕ 新建作品", variant="secondary", visible=_init_btns["new"]["visible"], elem_id="btn_new")
+                    btn_stl = gr.Button("📦 导出 STL", variant="secondary", visible=_init_btns["stl"]["visible"], elem_id="btn_stl")
                     # 「🎯 采用为参考图」：联网找图后必须确认 → 端到端 bug A 修
                     btn_adopt = gr.Button("🎯 采用为参考图", variant="primary",
                                          visible=_init_btns.get("adopt", {"visible": False})["visible"],
@@ -1078,7 +1134,7 @@ def build():
                         show_label=False,
                         container=False,
                     )
-                    send = gr.Button("发送", variant="primary", scale=1, elem_id="send_btn")
+                    send = gr.Button("↗ 发送", variant="primary", scale=1, elem_id="send_btn")
                 with gr.Row(elem_classes="input-row input-row-upload"):
                     ref_up = gr.UploadButton("🖼 上传图片", file_types=["image"],
                                              size="sm", scale=0, min_width=100, elem_id="ref_up")
@@ -1087,7 +1143,7 @@ def build():
                         lines=1, scale=8, show_label=False, container=False,
                         elem_id="edit_prompt",
                     )
-                    btn_edit_submit = gr.Button("按提示词修改", variant="secondary",
+                    btn_edit_submit = gr.Button("✏️ 按提示词修改", variant="secondary",
                                                 scale=2, elem_id="btn_edit_submit")
 
                 # 「自动继续」心跳：**默认不跳**（active=False）。
@@ -1109,6 +1165,9 @@ def build():
         # 「🎯 采用」是 selecting 阶段新加的（联网找图后用户必须确认 → 端到端 bug A 修）
         ui_outputs = [chatbot, hero, viewer, btn_refine, btn_gen, btn_edit, btn_model, btn_new,
                       btn_stl, btn_adopt, sidebar, history_dd, progress, stl_file]
+
+        quality_radio.change(fn=on_quality_change, inputs=[quality_radio, state],
+                         outputs=[state, sidebar])
 
         send.click(fn=on_submit, inputs=[msg, state], outputs=[msg, state] + ui_outputs).then(
             fn=arm_heartbeat, inputs=[state], outputs=[auto_timer])
