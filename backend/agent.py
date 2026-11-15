@@ -672,7 +672,22 @@ def _call_model(prompt: str, timeout: int = 180) -> str:
 
 
 def _stream_model(prompt: str, timeout: int = 600, status: dict = None):
-    """流式取回复，逐块 yield「累积文本」（Ollama 或微调服务，接口一致）。"""
+    """流式取回复，逐块 yield「累积文本」（Strata / Ollama / 微调服务，接口一致）。
+
+    ★ 2026-11-15 修：原来只区分 tuned / 非 tuned。provider=strata 时也掉进
+    "非 tuned" 分支去调 Ollama —— 而 config 里 `models.llm.default_model`
+    是 `zykt-scratch-default:latest`（一个 scratch 训练产物），它会把
+    系统信息当答案吐出来。实测用户输入"一个红色小苹果"，聊天框显示的是
+    `DEVICEDEVICE 0x6 ... 0 个待排查 · 0 个设备` 这种完全无关的乱码。
+
+    `_call_model`（非流式）当时是对的（它走 _call_ollama → _call_strata），
+    只有流式这条漏了。on_submit 走流式，所以只有聊天会乱、其它接口正常。
+    """
+    if _provider() == "strata":
+        st = status if status is not None else {}
+        for acc in describer._stream_strata(prompt, timeout, st, json_mode=True):
+            yield acc
+        return
     if _provider() != "tuned":
         p = describer._profile()
         for acc in describer._stream_once(prompt, describer.OLLAMA_MODEL, p["think"],
