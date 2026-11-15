@@ -160,7 +160,7 @@ class CheckResult:
 def _read_agent_cfg() -> dict:
     """读 config.json 的 agent 段（provider/tuned_url/…），读不到就当 ollama"""
     try:
-        cfg = json.loads((APP_DIR / "config.json").read_text(encoding="utf-8"))
+        cfg = json.loads((APP_DIR / "config.json").read_text(encoding="utf-8-sig"))
         return cfg.get("agent", {}) or {}
     except Exception:
         return {}

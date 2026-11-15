@@ -80,7 +80,7 @@ def _background_bootstrap():
     try:
         from backend import idle_watchdog
         _cfg = json.loads(
-            (Path(__file__).parent / "config.json").read_text(encoding="utf-8")
+            (Path(__file__).parent / "config.json").read_text(encoding="utf-8-sig")
         )
         idle_watchdog.start(_cfg)
     except Exception as e:
@@ -542,7 +542,7 @@ def _default_3d_model() -> str:
     """config.json 里的默认 3D 模型（别用 conv.config —— ConversationManager 没有 self.config，
     照 backend/conversation.agent_enabled() 的读法直接读文件）。"""
     try:
-        cfg = json.loads((Path(__file__).parent / "config.json").read_text(encoding="utf-8"))
+        cfg = json.loads((Path(__file__).parent / "config.json").read_text(encoding="utf-8-sig"))
         return cfg.get("stages", {}).get("3d", {}).get("default_model") or "hunyuan21"
     except Exception:
         return "hunyuan21"

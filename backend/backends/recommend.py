@@ -443,9 +443,13 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             backend_mode="direct",
             image_model="sd15", mesh_model=mesh_pick,
             downloads=dls, est_gb=total,
-            fits=(hw.vram_gb >= 7 and hw.ram_gb >= 17 and hw.disk_free_gb >= total + 10),
-            reason=("显存 ≥ 7 GB / 内存 ≥ 17 GB / 磁盘 ≥ "
-                    f"{total + 10:.0f} GB" if not (hw.vram_gb >= 7 and hw.ram_gb >= 17
+            # 2026-11-15：7G/17G → 5.5G/15G。实测 2mini 512oct 峰值 5.35 GB 显存、
+            #   1.74 GB 内存；starter 用的是 192 octree，比 512 还省一大截。
+            #   6G 显存 + 16G 内存的笔记本（RTX 3050 Laptop 那一档）实测跑得动，
+            #   却被原门槛挡掉 —— 用户看到"不行"就直接放弃了。
+            fits=(hw.vram_gb >= 5.5 and hw.ram_gb >= 15 and hw.disk_free_gb >= total + 10),
+            reason=("显存 ≥ 5.5 GB / 内存 ≥ 15 GB / 磁盘 ≥ "
+                    f"{total + 10:.0f} GB" if not (hw.vram_gb >= 5.5 and hw.ram_gb >= 15
                                                   and hw.disk_free_gb >= total + 10) else "够用"),
             config_patch={
                 "backend": {"mode": "direct"},

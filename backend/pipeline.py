@@ -81,7 +81,10 @@ class Pipeline:
         if config_path is None:
             config_path = str(Path(__file__).parent.parent / "config.json")
         
-        with open(config_path, "r", encoding="utf-8") as f:
+        # ★ 2026-11-15：用 utf-8-sig。用户拿记事本改过 config.json 就会带 BOM，
+        #   而 utf-8 读 BOM 会抛 "Unexpected UTF-8 BOM" —— 应用直接起不来。
+        #   utf-8-sig 对无 BOM 的文件完全等价，是安全的一刀切。
+        with open(config_path, "r", encoding="utf-8-sig") as f:
             self.config = json.load(f)
 
         # paths.* 统一展开成绝对路径（相对值按仓库根解析，${COMFYUI_DIR} 按环境变量展开）。

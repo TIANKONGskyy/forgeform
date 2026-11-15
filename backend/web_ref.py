@@ -115,7 +115,7 @@ def cutout_white_bg(img: Image.Image, comfy=None, pad_ratio: float = 0.08) -> Op
     """抠主体 + 纯白底（走 ComfyUI 的 birefnet 拿 alpha，再本地合成）。"""
     try:
         from .comfy_client import ComfyUIClient
-        cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
+        cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
         c = comfy or ComfyUIClient(cfg)
         stage = "image"
         uploaded = _upload_pil(c, img, stage)

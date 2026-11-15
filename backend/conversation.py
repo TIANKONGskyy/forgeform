@@ -178,7 +178,7 @@ def _pick_image_model() -> str:
     """从 config.json 读 stages.image.default_model。fallback z_image（保证不崩）。"""
     try:
         cfg_path = Path(__file__).resolve().parent.parent / "config.json"
-        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
         m = cfg.get("stages", {}).get("image", {}).get("default_model")
         if m:
             return m
@@ -413,7 +413,7 @@ def agent_enabled() -> bool:
         return _AGENT_CFG_CACHE
     try:
         cfg = json.loads((Path(__file__).parent.parent / "config.json")
-                         .read_text(encoding="utf-8"))
+                         .read_text(encoding="utf-8-sig"))
         _AGENT_CFG_CACHE = bool(cfg.get("agent", {}).get("enabled", True))
     except Exception:
         _AGENT_CFG_CACHE = True
@@ -1779,7 +1779,7 @@ class ConversationManager:
         """
         try:
             cfg = json.loads((Path(__file__).parent.parent / "config.json")
-                             .read_text(encoding="utf-8")).get("autopilot", {}) or {}
+                             .read_text(encoding="utf-8-sig")).get("autopilot", {}) or {}
         except Exception:
             cfg = {}
         return {

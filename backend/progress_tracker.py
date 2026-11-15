@@ -22,7 +22,7 @@ def _cfg_ports() -> list:
     try:
         import json as _json
         from pathlib import Path as _P
-        cfg = _json.loads((_P(__file__).resolve().parent.parent / "config.json").read_text(encoding="utf-8"))
+        cfg = _json.loads((_P(__file__).resolve().parent.parent / "config.json").read_text(encoding="utf-8-sig"))
         pc = cfg.get("comfyui_ports", {})
         img = pc.get("image", 8188)
         media = pc.get("media", img)

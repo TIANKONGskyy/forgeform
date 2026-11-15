@@ -645,7 +645,7 @@ def validate_args(name: str, args: dict) -> dict:
 def _agent_cfg() -> dict:
     try:
         cfg = json.loads((Path(__file__).resolve().parent.parent / "config.json")
-                         .read_text(encoding="utf-8"))
+                         .read_text(encoding="utf-8-sig"))
         return cfg.get("agent", {}) or {}
     except Exception:
         return {}

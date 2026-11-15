@@ -25,7 +25,7 @@ def _resolve_translate_model() -> str:
     SDXL/FLUX，出图质量明显变差。改为复用已常驻的对话模型，零额外显存开销。
     """
     try:
-        cfg = json.loads((Path(__file__).parent.parent / "config.json").read_text(encoding="utf-8"))
+        cfg = json.loads((Path(__file__).parent.parent / "config.json").read_text(encoding="utf-8-sig"))
         m = cfg.get("models", {}).get("llm", {}).get("default_model")
         if m:
             return m
@@ -76,7 +76,7 @@ def _free_comfyui_vram() -> None:
     try:
         import json as _json
         from pathlib import Path as _P
-        cfg = _json.loads((_P(__file__).resolve().parent.parent / "config.json").read_text(encoding="utf-8"))
+        cfg = _json.loads((_P(__file__).resolve().parent.parent / "config.json").read_text(encoding="utf-8-sig"))
         pc = cfg.get("comfyui_ports", {})
         img = pc.get("image", 8188)
         media = pc.get("media", img)

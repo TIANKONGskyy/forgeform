@@ -621,7 +621,7 @@ def _agent_cfg_light() -> dict:
     """读 config.json 的 agent 段（不 import backend.agent，避免循环依赖）"""
     try:
         cfg = json.loads((Path(__file__).resolve().parent.parent / "config.json")
-                         .read_text(encoding="utf-8"))
+                         .read_text(encoding="utf-8-sig"))
         return cfg.get("agent", {}) or {}
     except Exception:
         return {}
@@ -1553,7 +1553,7 @@ def _default_image_model() -> str:
     """
     try:
         cfg_path = Path(__file__).resolve().parent.parent / "config.json"
-        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
         m = (cfg.get("stages", {}).get("image", {}).get("default_model") or "").strip()
         if m:
             return m
