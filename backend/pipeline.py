@@ -231,6 +231,39 @@ class Pipeline:
                 return en
         return prompt
 
+    def _generate_images_cloud(self, prompt: str, model_key: str, mc: dict,
+                               count: int, StageResult) -> List:
+        """云端出图。失败返回 success=False 的结果，不抛（和本地行为一致）。"""
+        from backend import cloud as _cloud
+        import time as _t
+        # `cloud` 允许两种写法：true（用 cloud.image 的全局配置）或
+        # {"size": "...", "model": "..."}（就地覆盖几个字段）。
+        _opt = mc.get("cloud")
+        overlay = _opt if isinstance(_opt, dict) else {}
+        # 云端配置优先取**本 pipeline 读的那份 config** 里的 cloud.<用途>，
+        # 这样换 config 文件（多机部署、测试）不会意外读到别处的 key 配置。
+        _cc = dict((self.config.get("cloud") or {}).get("image") or {})
+        _cc.update({k: v for k, v in overlay.items() if k != "size"}) if overlay else None
+        outs = []
+        for i in range(max(1, int(count))):
+            t0 = _t.time()
+            try:
+                dest = Path(self.config.get("paths", {}).get("output", "outputs")) \
+                    / "images" / f"cloud_{int(_t.time())}_{i}.png"
+                path = _cloud.image(prompt, str(dest),
+                                    size=overlay.get("size", "1024x1024"),
+                                    cfg=_cc or None)
+                outs.append(StageResult(
+                    success=True, output_path=path,
+                    duration_s=_t.time() - t0,
+                    metadata={"cloud": True, "model": model_key, "engine": "cloud"}))
+            except Exception as exc:
+                outs.append(StageResult(
+                    success=False, output_path="",
+                    duration_s=_t.time() - t0,
+                    error=f"云端出图失败: {type(exc).__name__}: {exc}"))
+        return outs
+
     def generate_images(self, prompt: str, count: int = 1,
                        model_key: str = "flux", quality_name: str = "标准",
                        resolution: str = "1024×1024", seed: int = -1,
@@ -245,6 +278,12 @@ class Pipeline:
             可靠路径 —— IP 角色纯文字生图只能猜 ✗）。会先上传到 ComfyUI 的 input 目录。
         """
         from .stages.base import StageResult
+
+        # ★ 2026-11-15：模型配置里写了 cloud 就走云端（本地没装权重也能出图）。
+        #   形状与本地 StageResult 保持一致，上层代码不用改。
+        _mc = ((self.config.get("models") or {}).get("image") or {}).get(model_key) or {}
+        if _mc.get("cloud"):
+            return self._generate_images_cloud(prompt, model_key, _mc, count, StageResult)
 
         _release_chat_gpu()
         # FLUX 中文漂移修复
@@ -825,6 +864,28 @@ class Pipeline:
 
     # ─── 3D 生成 ─────────────────────────────────────────
     
+    def _generate_3d_cloud(self, image_path: str, model_key: str, mc: dict,
+                           StageResult):
+        """云端建模。失败返回 success=False，不抛。"""
+        from backend import cloud as _cloud
+        import time as _t
+        _opt = mc.get("cloud")
+        overlay = _opt if isinstance(_opt, dict) else {}
+        _cc = dict((self.config.get("cloud") or {}).get("mesh") or {})
+        _cc.update({k: v for k, v in overlay.items() if k != "size"}) if overlay else None
+        t0 = _t.time()
+        try:
+            dest = Path(self.config.get("paths", {}).get("output", "outputs")) \
+                / "3d" / f"cloud_{int(_t.time())}_{model_key}.glb"
+            path = _cloud.mesh(image_path, str(dest), cfg=_cc or None)
+            self._log(f"☁️ 云端建模完成: {Path(path).name} "
+                      f"（{Path(path).stat().st_size / 1024 / 1024:.1f} MB）")
+            return StageResult(True, path, duration_s=_t.time() - t0,
+                               metadata={"cloud": True, "engine": "cloud"})
+        except Exception as exc:
+            return StageResult(False, error=f"云端建模失败: {type(exc).__name__}: {exc}",
+                               duration_s=_t.time() - t0)
+
     def generate_3d(self, model_key: str = "hunyuan3d", quality_name: str = "标准",
                     image_path: str = None, _fallback_tried: bool = False,
                     max_facenum: int = 0, octree_override: int = 0) -> object:
@@ -868,6 +929,13 @@ class Pipeline:
         except Exception as _e:
             self._log(f"🖼 参考图预处理跳过（{type(_e).__name__}）")
         
+        # ★ 2026-11-15：模型配置里写了 cloud 就走云端建模。
+        #   好处是这台机器不用装 4~7 GB 权重也能出模型；
+        #   产物形状与本地一致（StageResult），上层（质量闸/STL/UI）不用改。
+        _td_probe = ((self.config.get("models") or {}).get("3d") or {}).get(model_key) or {}
+        if _td_probe.get("cloud"):
+            return self._generate_3d_cloud(input_image, model_key, _td_probe, StageResult)
+
         # 获取模型配置
         td_models = self.config.get("models", {}).get("3d", {})
         model_cfg = td_models.get(model_key)

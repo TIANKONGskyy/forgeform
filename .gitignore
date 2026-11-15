@@ -97,3 +97,6 @@ desktop.ini
 direct-bench/
 docs/showcase/_bench/
 config.json.bak
+
+# 加密后的 API key 与签发的对外 key（绝不进 git）
+.secrets/

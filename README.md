@@ -159,3 +159,28 @@ AGPL-3.0。水密修复链入了 `pymeshselab`（GPL-3.0）和 `pymeshfix`（AGP
 用它产出的模型和打印件归使用者，不受 AGPL 约束。
 
 第三方组件清单：[NOTICE](NOTICE)
+
+## 三个新入口（v3.5.0）
+
+**本机能力 API** —— 把出图/建模/STL/对话开给别的程序调：
+
+```bash
+PYTHONPATH= python tools/api_key.py issue --label 我   # 签发一把 ff_ key
+PYTHONPATH= python tools/api_server.py                # 127.0.0.1:7863
+# 文档 http://127.0.0.1:7863/docs   规范 docs/API-SPEC.md
+```
+
+**云端 API** —— 扩写/出图/建模可以接云端（本地没装权重也能用），key 用
+Windows DPAPI 加密只落本机：
+
+```
+config.json → cloud.enhancer / cloud.image / cloud.mesh
+Studio 的 /api/cloud 读写，或用 GET /api/cloud 看缺什么
+```
+
+**运行信息留存** —— GPU/内存/CPU/磁盘每 3 分钟一行，`logs/metrics-*.jsonl`
+滚动 14 天；`outputs/` 中间产物 30 天可清，`projects/` 作品永不清理：
+
+```bash
+PYTHONPATH= python tools/calibrate.py --summary   # 看本机实测与占用
+```

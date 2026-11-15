@@ -1431,8 +1431,52 @@ def register_model_library(sa) -> None:
         return {"ok": True, "id": model_id}
 
 
+def _start_maintenance() -> None:
+    """启动运行信息留存 + 定时清理。
+
+    ★ 2026-11-15：机器运行信息（GPU/内存/CPU/磁盘）每 3 分钟落一行到
+    `logs/metrics-YYYY-MM-DD.jsonl`，滚动保留 14 天（同目录的日志一起）。
+    中间产物按目录定策略（outputs/* 30 天、temp 1 天）；**projects/ 永不清理**
+    —— 那是用户的作品，删了只能重新生成。
+
+    启动时先清一次（把上次跑完留下的过期文件处理掉），之后每 6 小时一次。
+    """
+    try:
+        import threading as _th
+        from backend import maintenance as _mt
+        try:
+            r = _mt.auto(apply=True)
+            if r.get("removed"):
+                print(f"[maint] 启动清理 {r['removed']} 个过期文件，"
+                      f"释放 {r['total_mb']:.1f} MB", flush=True)
+        except Exception as exc:
+            print(f"[maint] 启动清理跳过: {type(exc).__name__}", flush=True)
+
+        def _note() -> str:
+            try:
+                return (state.latest or {}).get("phase", "") if state else ""
+            except Exception:
+                return ""
+
+        _mt.Sampler(minutes=3, note_fn=_note).start()
+
+        def _loop() -> None:
+            while True:
+                _th.Event().wait(6 * 3600)
+                try:
+                    _mt.auto(apply=True)
+                except Exception:
+                    pass
+
+        _th.Thread(target=_loop, daemon=True, name="ff-maint").start()
+        print("[maint] 运行采样已启动（3 分钟一次，保留 14 天）", flush=True)
+    except Exception as exc:
+        print(f"[maint] 启动失败（不影响主线）: {type(exc).__name__}: {exc}", flush=True)
+
+
 if __name__ == "__main__":
     app = build()
+    _start_maintenance()
     # ★ 2026-11-15：端口被占时自动换一个，而不是硬绑 7860。
     #
     # 为什么必须这一步：实测这台机器上 7860 被**旧版铸想**（AI-Workshop 的

@@ -310,6 +310,26 @@ def enhance_local(prompt: str, negative_prompt: str = "", timeout: int = 300) ->
     """
     if not prompt or not prompt.strip():
         return prompt
+
+    # ★ 2026-11-15：云端扩写优先（如果配了）。
+    #   为什么放在最前 —— 本地扩写要先把 30B（或 Strata 125B）拉进显存，
+    #   而扩写之后紧接着就要出图，显卡来回腾挪是最慢的一环。
+    #   配了云端就完全绕开显存争抢；失败了自动往下走本地路径，不阻断。
+    try:
+        from . import cloud as _cloud
+        _c = _cloud.use_cfg("enhancer")
+        if _c and _cloud.available("enhancer"):
+            _t0 = __import__("time").time()
+            _out = _cloud.chat(prompt, timeout=int(_c.get("timeout") or 120),
+                               cfg=_c)
+            if _out and len(_out.strip()) >= 8:
+                logger.info("[cloud] 扩写走云端 %s（%.1fs）",
+                            _c.get("model") or "", __import__("time").time() - _t0)
+                return _out.strip()
+            logger.warning("[cloud] 云端扩写返回过短，回退本地")
+    except Exception as _ce:
+        logger.warning("[cloud] 云端扩写失败，回退本地: %s", _ce)
+
     backend = "llama-server"
     if not _llamacpp_start(timeout=120):
         backend = "ollama"

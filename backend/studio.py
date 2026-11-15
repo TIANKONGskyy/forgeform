@@ -697,6 +697,13 @@ def make_server(studio, port=7861):
                 if self.path == '/api/netboost': return self.send(studio.netboost_advice())
                 if self.path == '/api/netboost/pack': return self.send(studio.netboost_pack())
                 if self.path == '/api/purge-plan': return self.send(studio.purge_plan())
+                if self.path == '/api/cloud':
+                    from backend import cloud
+                    return self.send(cloud.status())
+                if self.path == '/api/maintenance':
+                    from backend import maintenance as mt
+                    return self.send({'status': mt.status(), 'plan': mt.plan(),
+                                      'summary': mt.retention_report()})
                 if self.path == '/api/catalog': return self.send({'models': studio.catalog(), 'config': {
                     'stages': studio.config().get('stages', {}), 'backend': studio.config().get('backend', {})}})
                 if self.path in ('/', '/index.html'):
@@ -726,6 +733,28 @@ def make_server(studio, port=7861):
                 elif self.path == '/api/install': result = studio.start_job('准备安装方案', lambda: studio.install(data.get('key', ''), data.get('llm', '')))
                 elif self.path == '/api/runtime': result = studio.start_job('安装基础环境', studio.runtime_install)
                 elif self.path == '/api/launch': result = studio.start_job('启动创作空间', studio.launch)
+                elif self.path == '/api/cloud':
+                    # 写云端配置 / 存 key。key 走 DPAPI 加密，不回显。
+                    from backend import cloud
+                    from backend import secrets as _sec_store
+                    use = (data.get('use') or '').strip()
+                    if data.get('key'):
+                        _sec_store.put_secret(data.get('key_name') or use, data['key'])
+                    cfg = studio.config()
+                    cloud_cfg = cfg.setdefault('cloud', {})
+                    cloud_cfg.setdefault('enabled', True)
+                    if use:
+                        section = cloud_cfg.setdefault(use, {})
+                        for k in ('provider', 'base_url', 'model', 'key_name',
+                                  'mode', 'timeout'):
+                            if data.get(k) is not None:
+                                section[k] = data[k]
+                        section['enabled'] = bool(data.get('enabled', True))
+                    save_config(studio.root, {'cloud': cloud_cfg})
+                    result = {'ok': True, 'cloud': cloud.status()}
+                elif self.path == '/api/maintenance':
+                    from backend import maintenance as mt
+                    result = mt.run(apply=bool(data.get('apply')))
                 elif self.path == '/api/calibrate':
                     # 2026-11-15：本机实测校准。deep=true 才跑完整链路（出图/建模/STL，
                     # 几分钟，要求模型已装且显存空闲）；默认只测对话吞吐（约 2 秒）。
