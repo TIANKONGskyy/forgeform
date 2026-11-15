@@ -335,9 +335,11 @@ def describe_llm(model: str = "qwen3.8-flash-next-iq3_s") -> dict:
     b = llm_bench()
     if b.get("predicted_tok_s"):
         lo, hi = b.get("predicted_min", 0), b.get("predicted_max", 0)
+        # 本机实测；样本 <3 条时标一下"样本少"，别让人以为已经稳定
+        tag = "本机实测" if b["n"] >= 3 else "本机实测·样本少"
         d["timing"] = (f'中位 {b["predicted_tok_s"]} tok/s 生成'
                        f'（区间 {lo}–{hi}）· 预填 {b.get("prompt_tok_s")} tok/s'
-                       f'· n={b["n"]}/{b["window"]}，最近 {b.get("last_at")}')
+                       f'· {tag} n={b["n"]}/{b["window"]}，最近 {b.get("last_at")}')
     else:
         d["timing"] = "未测（跑一次 tools/bench_llm.py，或正常对话几轮后自动累积）"
     return d
@@ -374,11 +376,13 @@ def describe(model_key: str, cfg_model: dict, global_mode: str = "",
                 med, hi = T.estimate(_ts)
                 # ★ 2026-11-15：标清数据来源。本机样本（滚动窗口）和出厂参考
                 #   不是一回事 —— 换显卡能差 4 倍，用户有权知道看的是哪个。
-                src = "本机" if T.is_local(_ts) else "出厂参考"
+                # ★ 2026-11-15：措辞如实。非本机样本不能叫"出厂参考"假装有依据 ——
+                #   那是别台机器/别的权重量化跑出来的，换台机器能差 4 倍。
+                src = "本机实测" if T.is_local(_ts) else "未校准·示例"
                 timing = (f"中位 {T.human(med)}（最长 {T.human(hi)}，"
                           f"n={T.samples(_ts)}，{src}）")
             else:
-                timing = "本机未测（没有样本）"
+                timing = "未校准（跑一次生成会自动记录）"
         except Exception:
             timing = "未测"
     return {

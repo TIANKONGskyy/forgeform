@@ -330,6 +330,28 @@ def main() -> int:
     print(f"后端模式：{picked.backend_mode}   出图：{picked.image_model or '不变'}"
           f"   建模：{picked.mesh_model or '不变'}")
     run_doctor()
+
+    # ★ 2026-11-15：装完跑一次本机实测（只测对话吞吐，约 2 秒）。
+    #
+    #   出厂包里**不带任何耗时样本**（outputs/ 不进 git 也不进 zip），
+    #   因为同一个模型换显卡，3D 建模能差 4 倍 —— 拿别的机器的数字当基准，
+    #   进度环会一直"卡在 95%"或者提前跳满，比没有进度更难受。
+    #   所以每台机器装完先测一次对话（最便宜、最有代表性），
+    #   出图/建模的数字等用户第一次真跑时自然累积（那时模型已在显存里，
+    #   测出来比冷启动更接近日常体验）。
+    if not args.yes:
+        pass
+    try:
+        cal = Path(__file__).resolve().parent / "calibrate.py"
+        if cal.exists():
+            print("\n── 本机实测校准（只测对话吞吐，约 2 秒）──")
+            import subprocess
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+            subprocess.run([sys.executable, str(cal), "--quick"], env=env, check=False)
+    except Exception as exc:
+        print(f"（校准跳过：{type(exc).__name__}: {exc}）")
+
     print("\n下一步：python app.py  →  http://127.0.0.1:7860")
     return 0
 

@@ -497,6 +497,28 @@ def _buttons_for_phase(phase: str, state: dict = None) -> dict:
     return with_stl(off)
 
 
+def on_calibrate(state: dict):
+    """跑一次本机实测（对话吞吐），刷新侧栏。
+
+    出图/建模不在这里测 —— 那要占着显存跑几分钟，而用户点这个按钮通常
+    只是想知道"我这台机器大概多快"。它们的样本在第一次真实生成时自动累积。
+    """
+    msg = ""
+    try:
+        import subprocess
+        import sys as _sys
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(ROOT)
+        proc = subprocess.run(
+            [_sys.executable, "-u", str(ROOT / "tools" / "calibrate.py"), "--quick"],
+            cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=180)
+        lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if "tok/s" in ln]
+        msg = lines[-1] if lines else "校准完成（没拿到吞吐数字）"
+    except Exception as exc:
+        msg = f"校准失败：{type(exc).__name__}: {exc}"
+    return build_sidebar(state or {}), msg
+
+
 def on_model_change(img_key: str, key_3d: str, state: dict):
     """切换出图/建模模型：写进 state，刷新侧栏，顺便落盘。"""
     state = dict(state or {})
@@ -1183,6 +1205,14 @@ def build():
                 except Exception:
                     pass
 
+                # ★ 2026-11-15：本机实测校准按钮。
+                #   出厂包不带任何耗时样本，每台机器要跑一次自己的。
+                #   装完 setup/Studio 会自动测对话；这里的按钮是给"想重新测"用的
+                #   （换了显卡、换了权重、或觉得数字不对时点一下）。
+                with gr.Row(elem_classes="calib-bar"):
+                    btn_calib = gr.Button("📏 校准本机耗时", variant="secondary",
+                                          size="sm", elem_id="btn_calib")
+
                 with gr.Row(elem_classes="model-bar"):
                     img_model_dd = gr.Dropdown(
                         choices=_img_choices, value=_img_def or None,
@@ -1258,6 +1288,9 @@ def build():
 
         quality_radio.change(fn=on_quality_change, inputs=[quality_radio, state],
                          outputs=[state, sidebar])
+
+        btn_calib.click(fn=on_calibrate, inputs=[state],
+                        outputs=[sidebar, msg])
 
         img_model_dd.change(fn=on_model_change, inputs=[img_model_dd, model_3d_dd, state],
                         outputs=[state, sidebar])

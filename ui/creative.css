@@ -187,3 +187,16 @@ body{overflow-y:auto!important}
 #sidebar .sb-sec .kv{padding:2px 0!important;font-size:11.5px!important}
 #sidebar .sb-sec .kv .k{color:var(--ff-muted)!important}
 #sidebar .sb-sec .kv .v{color:var(--ff-text)!important;font-size:11.5px!important}
+/* 校准按钮：一排小按钮，别抢精度档的视觉重心 */
+.calib-bar{margin:2px 0 4px!important}
+#btn_calib{
+  background:transparent!important;
+  border:1px dashed var(--ff-line)!important;
+  color:var(--ff-muted)!important;
+  font-size:11.5px!important;
+  border-radius:999px!important;
+  padding:3px 12px!important;
+  min-height:0!important;
+  height:auto!important;
+  width:fit-content!important}
+#btn_calib:hover{border-color:var(--ff-accent)!important;color:var(--ff-accent)!important}

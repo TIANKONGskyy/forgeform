@@ -302,6 +302,27 @@ class Studio:
         self.job['step'] = self.job['total']
         self.log('模型及配置已保存。可以进入创作。')
 
+        # ★ 2026-11-15：装完在本机跑一次实测，把真实吞吐写成样本。
+        #   出厂包里不带任何耗时样本（outputs/ 不进发布包）—— 换台机器差几倍，
+        #   拿别的机器的数字当基准只会让进度环乱跳。
+        #   这里只测对话（约 2 秒）；出图/建模留给用户第一次真跑时自然累积。
+        if not self.cancelled.is_set():
+            try:
+                self.log('本机实测校准（对话吞吐，约 2 秒）…')
+                env = dict(os.environ)
+                env['PYTHONPATH'] = str(self.root)
+                proc = subprocess.run(
+                    [self.python, '-u', str(self.root / 'tools/calibrate.py'), '--quick'],
+                    cwd=str(self.root), env=env, capture_output=True, text=True,
+                    timeout=180)
+                tail = [ln for ln in (proc.stdout or '').splitlines() if 'tok/s' in ln]
+                if tail:
+                    self.log('校准完成：' + tail[-1].strip())
+                else:
+                    self.log('校准跳过（对话服务未就绪，首次生成时会自动累积）')
+            except Exception as exc:
+                self.log(f'校准跳过：{type(exc).__name__}')
+
     def catalog(self):
         from backend.plugins.spec import registry
         config = self.config()
@@ -705,6 +726,14 @@ def make_server(studio, port=7861):
                 elif self.path == '/api/install': result = studio.start_job('准备安装方案', lambda: studio.install(data.get('key', ''), data.get('llm', '')))
                 elif self.path == '/api/runtime': result = studio.start_job('安装基础环境', studio.runtime_install)
                 elif self.path == '/api/launch': result = studio.start_job('启动创作空间', studio.launch)
+                elif self.path == '/api/calibrate':
+                    # 2026-11-15：本机实测校准。deep=true 才跑完整链路（出图/建模/STL，
+                    # 几分钟，要求模型已装且显存空闲）；默认只测对话吞吐（约 2 秒）。
+                    _deep = bool(data.get('deep'))
+                    _argv = [studio.python, '-u', str(studio.root / 'tools' / 'calibrate.py')]
+                    _argv += [] if _deep else ['--quick']
+                    result = studio.start_job('完整实跑校准' if _deep else '校准对话吞吐',
+                                              lambda: studio.command(_argv))
                 elif self.path == '/api/cancel': result = studio.cancel()
                 elif self.path == '/api/config': result = studio.configure(data)
                 elif self.path == '/api/netboost': result = studio.netboost_launch()
