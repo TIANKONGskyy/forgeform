@@ -172,6 +172,33 @@ def save_project(state: dict):
         meta["selected"] = state.get("selected")
     if state.get("selected_idx") is not None:
         meta["selected_idx"] = state.get("selected_idx")
+
+    # ★★ 2026-11-15：产物归拢到项目目录 ★★
+    #
+    # 问题：模型原来只落在全局 outputs/3d/（44 个文件混在一起），
+    # 项目目录 projects/<ts>/ 里只有 candidates/ 图片。
+    # load_project 读的是 `folder/model.glb`，所以**切换作品后模型永远是空的** ——
+    # 用户看到的是"图片在、3D 不见了"，也没法从项目里下载。
+    #
+    # 修法：save_project 时把 state 里的 glb/stl **复制**进项目目录（不移动，
+    # 全局 outputs 留着做兜底）。rename 成 model.glb / model.stl，正好对上
+    # _get_file() 的约定。用 mtime 比对，避免每次保存都重写几 MB。
+    for key, ext in (("glb_path", "glb"), ("stl_path", "stl")):
+        src = str(state.get(key) or "")
+        if not src:
+            continue
+        sp = Path(src)
+        if not sp.is_file() or sp.stat().st_size <= 0:
+            continue
+        dst = folder / f"model.{ext}"
+        try:
+            if (not dst.exists()
+                    or sp.stat().st_mtime > dst.stat().st_mtime
+                    or sp.stat().st_size != dst.stat().st_size):
+                shutil.copy2(sp, dst)
+        except Exception as exc:
+            print(f"[pm] 复制 {ext} 到项目目录失败: {type(exc).__name__}: {exc}")
+
     _write_meta(folder, meta)
 
     # 保存对话历史
