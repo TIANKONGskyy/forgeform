@@ -335,20 +335,59 @@ async function refreshQuick(){
 }
 
 $('qs-go')?.addEventListener('click', async ()=>{
-  const btn = $('qs-go');
+  const btn = $('qs-go'), msg = $('qs-msg');
   btn.disabled = true;
-  $('qs-msg').textContent = '正在配置…';
+  msg.textContent = '正在配置…';
   try{
     const r = await api('firstrun', {mode:'auto', launch:true});
     const healed = (r.healed||[]).map(h=>`${h.stage}: ${h.from} → ${h.to}`).join('；');
-    $('qs-msg').textContent = r.need_download
-      ? `${r.name}：还要下载约 ${r.gb} GB（在「安装与环境」里点开始）`
+    if(r.download_started){
+      // 下载已经开起来了 —— 就地显示进度，别让用户再去别的页面点一次
+      msg.textContent = `${r.name}：开始下载约 ${r.gb} GB，界面现在就能用`;
+      pollQuickDownload();
+      return;
+    }
+    msg.textContent = r.need_download
+      ? `${r.name}：要下载约 ${r.gb} GB`
       : `已用「${r.name}」启动${healed ? ' · 自动修正 '+healed : ''}`;
-    setTimeout(()=>{ location.hash='#create'; location.reload(); }, 900);
+    if(!r.need_download){
+      setTimeout(()=>{ location.hash='#create'; location.reload(); }, 900);
+    }else{
+      btn.disabled = false;
+    }
   }catch(e){
-    $('qs-msg').textContent = '失败：' + (e.message||e);
+    msg.textContent = '失败：' + (e.message||e);
     btn.disabled = false;
   }
 });
+
+// 下载进度就地显示；下完自动应用配置并进入创作空间
+let _qsTimer = null;
+function pollQuickDownload(){
+  const msg = $('qs-msg');
+  clearInterval(_qsTimer);
+  _qsTimer = setInterval(async ()=>{
+    try{
+      const s = await api('status'), j = s.job || {};
+      if(j.status === 'running' || j.status === 'queued'){
+        const pct = (j.percent||0).toFixed(0);
+        const eta = j.eta_sec ? ` · 约 ${Math.ceil(j.eta_sec/60)} 分钟` : '';
+        msg.textContent = `${j.label||'下载中'} ${pct}%${eta}`;
+        return;
+      }
+      clearInterval(_qsTimer);
+      if(j.status === 'failed'){
+        msg.textContent = '下载失败：' + (j.logs||[]).slice(-1)[0] || '看「安装与环境」的日志';
+        const b = $('qs-go'); if(b) b.disabled = false;
+        return;
+      }
+      // 成功 → 再跑一次 auto，这次不需要下载了，直接应用 + 启动
+      msg.textContent = '下载完成，正在启用…';
+      const r = await api('firstrun', {mode:'auto', launch:true});
+      msg.textContent = `已用「${r.name}」启动`;
+      setTimeout(()=>{ location.hash='#create'; location.reload(); }, 1000);
+    }catch(e){ /* 轮询失败继续等下一轮 */ }
+  }, 2500);
+}
 
 refreshQuick();

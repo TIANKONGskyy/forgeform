@@ -118,6 +118,37 @@ def _probe() -> dict:
 # ══════════════════════════════════════════════════════════════════
 # 候选路径
 # ══════════════════════════════════════════════════════════════════
+def _starter_profile(p: dict) -> dict:
+    """从 recommend 里挑一个"装完能出图 + 能建模"的方案，取它的真实体积。
+
+    不写死数字：显卡不同、已有框架不同，体积能差一倍。
+    """
+    fallback = {"key": "starter", "name": "下载最小方案", "gb": 14.4}
+    try:
+        from backend.backends.recommend import (Hardware, build_profiles,
+                                                summarize_assets)
+        hw = Hardware(vram_gb=float(p.get("vram_gb") or 0),
+                      vram_free_gb=float(p.get("vram_gb") or 0) * 0.87,
+                      ram_gb=16.0, disk_free_gb=120.0,
+                      gpu_name=str(p.get("gpu") or ""))
+        assets = summarize_assets([])
+        plans = build_profiles(hw, assets, str(ROOT / "models"))
+        # 优先 starter，其次任何"同时含 image 与 mesh"的方案
+        for want in ("starter", "minimal"):
+            hit = next((x for x in plans if x.key == want), None)
+            if hit:
+                gb = sum(d.size_gb for d in hit.downloads)
+                return {"key": hit.key, "name": hit.name, "gb": round(gb, 1)}
+        for x in plans:
+            kinds = {d.kind for d in x.downloads}
+            if {"image", "mesh"} <= kinds:
+                return {"key": x.key, "name": x.name,
+                        "gb": round(sum(d.size_gb for d in x.downloads), 1)}
+    except Exception:
+        pass
+    return fallback
+
+
 def plan() -> list[dict]:
     """按"最快能跑起来"排序的候选。"""
     p = _probe()
@@ -156,13 +187,15 @@ def plan() -> list[dict]:
             "note": "直连模式，不需要 ComfyUI",
         })
 
-    # ④ 最小下载 —— 约 10 GB
+    # ④ 最小下载 —— 体积和方案 key 都从 recommend 真实算，不写死
     if p["gpu"]:
+        prof = _starter_profile(p)
         out.append({
-            "key": "minimal", "name": "下载最小方案",
-            "gb": 10.3, "ok": p["vram_gb"] >= 5.5, "stages": ["image", "mesh"],
+            "key": "minimal", "name": prof["name"],
+            "gb": prof["gb"], "ok": p["vram_gb"] >= 5.5 and prof["gb"] > 0,
+            "stages": ["image", "mesh"], "profile": prof["key"],
             "how": f'{p["gpu"]} {p["vram_gb"]}G',
-            "note": ("SD1.5 出图 + 2mini 建模 + 2B 对话，约 10 GB；"
+            "note": (f'要下载 {prof["gb"]:.1f} GB（出图 + 建模 + 对话全装）；'
                      "下载期间界面已经能用"),
         })
 
@@ -216,7 +249,7 @@ def apply(key: str) -> dict:
         # 由 Studio 的安装流程去执行；这里保证界面先能用。
         return {"ok": True, "key": key, "name": c["name"],
                 "need_download": True, "gb": c["gb"], "note": c["note"],
-                "stages": c["stages"]}
+                "stages": c["stages"], "profile": c.get("profile") or "starter"}
     healed = heal_defaults()
     cfg = _cfg()
     new = _merge(cfg, _patch_for(key))

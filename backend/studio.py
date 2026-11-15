@@ -228,6 +228,12 @@ class Studio:
         (venv / '.deps-ok').touch()
 
     def install(self, key, llm=""):
+        # 调试/自检用：把"下载"跳过去，只走流程。默认关闭。
+        # 加这个是因为"一键开始会不会真的开下载"只能这样验 —— 否则测一次要下 14 GB。
+        if os.environ.get("FORGEFORM_INSTALL_DRYRUN") == "1":
+            self.log(f"[dry-run] 跳过下载，方案 = {key}")
+            self.job["step"] = self.job["total"]
+            return
         if key not in self.plans:
             raise ValueError('请先重新扫描，再选择方案')
         plan = copy.deepcopy(self.plans[key])
@@ -777,11 +783,23 @@ def make_server(studio, port=7861):
                 elif self.path == '/api/launch': result = studio.start_job('启动创作空间', studio.launch)
                 elif self.path == '/api/firstrun':
                     # mode: auto（默认，自己挑最快的） / 指定某个候选 key
+                    #
+                    # 关键：如果挑中的方案**需要下载**，这里直接把下载作业开起来，
+                    # 而不是"告诉用户去另一个页面点开始"。用户点一次就够 ——
+                    # 界面此刻已经能用，下载在后台跑，跑完再自动应用配置。
                     from backend import firstrun
                     mode = (data.get('mode') or 'auto').strip()
                     result = firstrun.auto() if mode == 'auto' else firstrun.apply(mode)
+                    if (result.get('need_download') and result.get('ok')
+                            and data.get('start_download', True)
+                            and studio.job.get('status') not in ('running', 'queued')):
+                        prof = result.get('profile') or 'starter'
+                        job = studio.start_job(f'下载 {result.get("name") or prof}',
+                                               lambda: studio.install(prof))
+                        result['download_started'] = bool(job)
+                        result['download_profile'] = prof
                     result['status'] = firstrun.status()
-                    if data.get('launch') and result.get('ok'):
+                    if data.get('launch') and result.get('ok') and not result.get('need_download'):
                         studio.launch()
                     result['ok'] = bool(result.get('ok', True))
                     return self.send(result)
