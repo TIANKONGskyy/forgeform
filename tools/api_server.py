@@ -244,7 +244,17 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     # ── 基础 ──
+    def _audit(self, code: int, note: str = "") -> None:
+        """每次响应记一条。key id 从 _auth 存在 self._key_id 上。"""
+        try:
+            S.audit(getattr(self, "_key_id", "-"), self.command, self.path,
+                    code, self.client_address[0] if self.client_address else "",
+                    note=note)
+        except Exception:
+            pass
+
     def _send(self, obj, code: int = 200, mime: str = "application/json") -> None:
+        self._audit(code)
         body = obj if isinstance(obj, bytes) else json.dumps(
             obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
@@ -267,10 +277,14 @@ class Handler(BaseHTTPRequestHandler):
         if not m:
             self._problem(401, "unauthorized", "需要 Authorization: Bearer <key>")
             return None
-        rec = S.verify_api_key(m.group(1).strip())
+        ip = self.client_address[0] if self.client_address else ""
+        rec = S.verify_api_key(m.group(1).strip(), ip=ip)
         if not rec:
-            self._problem(401, "invalid-key", "key 无效或已撤销")
+            # 审计里只记"被拒"这件事，不记 token 片段（日志也是泄露面）
+            S.audit("-", self.command, self.path, 401, ip, note="rejected")
+            self._problem(401, "invalid-key", "key 无效、已撤销或已过期")
             return None
+        self._key_id = rec.get("id") or "-"
         if not _rate_ok(rec.get("label") or "default", bucket):
             self.send_response(429)
             self.send_header("Retry-After", "10")
@@ -329,6 +343,7 @@ class Handler(BaseHTTPRequestHandler):
                              f'attachment; filename="{fp.name}"')
             self.end_headers()
             self.wfile.write(fp.read_bytes())
+            self._audit(200, note="file")
             return
         self._problem(404, "not-found", f"没有 {path}")
 
@@ -381,6 +396,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Location", loc)
         self.end_headers()
         self.wfile.write(payload)
+        self._audit(202, note=f"job:{j['id']}")
 
     def _post_chat(self, body: dict):
         msgs = body.get("messages") or []

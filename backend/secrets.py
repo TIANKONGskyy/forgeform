@@ -33,6 +33,7 @@ import json
 import os
 import secrets as _secrets_mod
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -230,63 +231,184 @@ def _now() -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
-# 对外签发的 API key（给"本地模型输出封装成 API"用）
+# 对外签发的 API key
 # ══════════════════════════════════════════════════════════════════
-def issue_api_key(label: str = "default") -> str:
-    """签发一把给外部调用者的 key。**只存 sha256**，明文只在签发这一刻出现。"""
-    token = "ff_" + _secrets_mod.token_urlsafe(32)
-    rec = {"label": str(label or "default")[:60],
-           "sha256": hashlib.sha256(token.encode()).hexdigest(),
-           "at": _now(), "calls": 0, "last_at": ""}
-    data = _load_issued()
-    data.append(rec)
-    _save_issued(data)
-    return token
+# 安全约束（这几条是这套东西能不能交给别人的底线）：
+#   ① **明文永不落盘** —— 只存 sha256。256 bit 随机串不需要慢哈希，
+#      sha256 就够（字典攻击对 32 字节随机数无意义）。
+#   ② **整个签发库也要加密** —— 虽然只有哈希，但哈希库被人拿走就能离线比对；
+#      用 DPAPI 封一层，拷到别的机器等于废文件。
+#   ③ **每条 key 有独立 id** —— 删除/撤销按 id 而不是 label。按 label 撤销是
+#      灾难：两个人 label 都叫 "test"，删一个等于把另一个也弄没了。
+#   ④ **可设有效期** —— 默认 90 天，到期自动失效；`ttl_days=0` 才永久。
+#   ⑤ **每次调用写审计** —— 只记 key id + 路径 + 状态码 + IP，**不记 token**。
+#   ⑥ **撤销立刻生效** —— 校验时读库，没有缓存，删掉就 401。
 
-
-def verify_api_key(token: str) -> dict | None:
-    """校验 key。命中返回那条记录（并累加调用计数），否则 None。"""
-    if not token:
-        return None
-    digest = hashlib.sha256(str(token).encode()).hexdigest()
-    data = _load_issued()
-    for rec in data:
-        if _secrets_mod.compare_digest(rec.get("sha256", ""), digest):
-            rec["calls"] = int(rec.get("calls") or 0) + 1
-            rec["last_at"] = _now()
-            _save_issued(data)
-            return rec
-    return None
-
-
-def list_api_keys() -> list[dict]:
-    """已签发的 key 列表（无明文，只有尾号与调用统计）。"""
-    return [{k: r.get(k) for k in ("label", "at", "calls", "last_at")}
-            for r in _load_issued()]
-
-
-def revoke_api_key(label: str) -> int:
-    data = _load_issued()
-    kept = [r for r in data if r.get("label") != label]
-    n = len(data) - len(kept)
-    if n:
-        _save_issued(kept)
-    return n
+ISSUED_FILE = SECRET_DIR / "issued.dat"
+AUDIT_DIR = ROOT / "logs"
+DEFAULT_TTL_DAYS = 90
 
 
 def _load_issued() -> list:
+    """读签发库（DPAPI 加密）。坏文件当空库，不抛。"""
     try:
-        return json.loads(ISSUED_FILE.read_text(encoding="utf-8")) or []
+        raw = ISSUED_FILE.read_text(encoding="utf-8")
+        if not raw.strip():
+            return []
+        data = json.loads(raw)
+        if isinstance(data, dict) and "enc" in data:
+            data = json.loads(_decrypt(data["enc"]))
+        return data if isinstance(data, list) else []
     except Exception:
         return []
 
 
 def _save_issued(data: list) -> None:
     SECRET_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {"enc": _encrypt(json.dumps(data, ensure_ascii=False)),
+               "v": 1}
     tmp = ISSUED_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     tmp.replace(ISSUED_FILE)
     try:
         os.chmod(ISSUED_FILE, 0o600)
+    except Exception:
+        pass
+
+
+
+def _is_expired(exp: str) -> bool:
+    """'2026-11-15 19:30' 是否已过。格式坏就当没过期（宁可放行也不误杀）。"""
+    try:
+        return time.strptime(exp, "%Y-%m-%d %H:%M") < time.localtime()
+    except Exception:
+        return False
+
+
+def _new_key_id() -> str:
+    return "k_" + _secrets_mod.token_hex(4)
+
+
+def issue_api_key(label: str = "default", ttl_days: int = DEFAULT_TTL_DAYS) -> dict:
+    """签发一把给外部调用者的 key。
+
+    返回 {"token": 明文（只此一次）, "id", "label", "expires_at"}。
+    """
+    token = "ff_" + _secrets_mod.token_urlsafe(32)
+    kid = _new_key_id()
+    exp = ""
+    if ttl_days and int(ttl_days) > 0:
+        exp = time.strftime("%Y-%m-%d %H:%M",
+                            time.localtime(time.time() + int(ttl_days) * 86400))
+    rec = {"id": kid,
+           "label": str(label or "default")[:60],
+           "sha256": hashlib.sha256(token.encode()).hexdigest(),
+           "at": _now(), "expires_at": exp,
+           "calls": 0, "last_at": "", "last_ip": "", "revoked": False}
+    data = _load_issued()
+    data.append(rec)
+    _save_issued(data)
+    return {"token": token, "id": kid, "label": rec["label"], "expires_at": exp}
+
+
+def verify_api_key(token: str, ip: str = "") -> dict | None:
+    """校验 key。命中返回记录（累加计数），否则 None。
+
+    ⚠️ 返回的记录里**不含 sha256**，避免被上层顺手写进日志。
+    """
+    if not token:
+        return None
+    digest = hashlib.sha256(str(token).encode()).hexdigest()
+    data = _load_issued()
+    for rec in data:
+        stored = str(rec.get("sha256") or "")
+        if not stored:
+            continue
+        if _secrets_mod.compare_digest(stored, digest):
+            if rec.get("revoked"):
+                return None
+            exp = str(rec.get("expires_at") or "")
+            if exp and _is_expired(exp):
+                return None
+            rec["calls"] = int(rec.get("calls") or 0) + 1
+            rec["last_at"] = _now()
+            if ip:
+                rec["last_ip"] = str(ip)[:64]
+            _save_issued(data)
+            return {k: rec.get(k) for k in
+                    ("id", "label", "at", "expires_at", "calls", "last_at", "last_ip")}
+    return None
+
+
+def list_api_keys() -> list[dict]:
+    """已签发的 key（无明文、无哈希，只有元信息）。"""
+    out = []
+    for rec in _load_issued():
+        exp = str(rec.get("expires_at") or "")
+        expired = bool(exp) and _is_expired(exp)
+        out.append({
+            "id": rec.get("id") or "",
+            "label": rec.get("label") or "",
+            "at": rec.get("at") or "",
+            "expires_at": exp,
+            "expired": expired,
+            "revoked": bool(rec.get("revoked")),
+            "calls": int(rec.get("calls") or 0),
+            "last_at": rec.get("last_at") or "",
+            "last_ip": rec.get("last_ip") or "",
+        })
+    out.sort(key=lambda r: (r["revoked"], r["expired"], r["at"]), reverse=False)
+    return out
+
+
+def revoke_api_key(key_id: str = "", label: str = "") -> int:
+    """撤销（保留记录，便于审计）。按 id 优先，label 仅作兼容。"""
+    data = _load_issued()
+    n = 0
+    for rec in data:
+        if key_id and rec.get("id") == key_id:
+            if not rec.get("revoked"):
+                rec["revoked"] = True
+                n += 1
+        elif label and not key_id and rec.get("label") == label and not rec.get("revoked"):
+            rec["revoked"] = True
+            n += 1
+    if n:
+        _save_issued(data)
+    return n
+
+
+def delete_api_key(key_id: str) -> bool:
+    """彻底删掉一条 key 记录（用户要"删除"，不是只标记）。"""
+    data = _load_issued()
+    kept = [r for r in data if r.get("id") != key_id]
+    if len(kept) == len(data):
+        return False
+    _save_issued(kept)
+    return True
+
+
+def delete_all_api_keys() -> int:
+    """清空所有签发记录（换机器、或怀疑泄露时用）。"""
+    n = len(_load_issued())
+    if n:
+        _save_issued([])
+    return n
+
+
+# ── 审计 ──────────────────────────────────────────────────────
+def audit(key_id: str, method: str, path: str, status: int, ip: str = "",
+          note: str = "") -> None:
+    """记一条调用。**绝不写 token 本身**，只写 key id。"""
+    try:
+        AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+        f = AUDIT_DIR / f"api-{time.strftime('%Y-%m-%d')}.jsonl"
+        rec = {"ts": round(time.time(), 1), "at": _now(),
+               "key": key_id or "-", "method": method, "path": path[:120],
+               "status": int(status), "ip": str(ip)[:64]}
+        if note:
+            rec["note"] = note[:200]
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except Exception:
         pass

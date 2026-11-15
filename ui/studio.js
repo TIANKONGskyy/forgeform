@@ -2,8 +2,10 @@ const $=id=>document.getElementById(id);let selected='',lastScan=0,lastAction=nu
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(s){$('toast').textContent=s;$('toast').hidden=false;clearTimeout(window.toastTimer);window.toastTimer=setTimeout(()=>$('toast').hidden=true,6500)}
 async function api(path,data){const r=await fetch('/api/'+path,{method:data===undefined?'GET':'POST',headers:{'Content-Type':'application/json','X-Studio-Token':window.STUDIO_TOKEN},body:data===undefined?undefined:JSON.stringify(data)});const j=await r.json();if(!r.ok)throw Error(j.error||'请求失败');return j}
-function page(id){document.querySelectorAll('.page').forEach(e=>e.hidden=e.id!==id);document.querySelectorAll('nav button').forEach(e=>e.classList.toggle('active',e.dataset.page===id));$('breadcrumb').textContent=({overview:'工作台',setup:'安装与环境',models:'模型与配置',create:'创作空间'})[id];if(id==='models'){catalog();refreshDelModel();}if(id==='overview'){hwStart();}else{hwStop();}}
+function page(id){document.querySelectorAll('.page').forEach(e=>e.hidden=e.id!==id);document.querySelectorAll('nav button').forEach(e=>e.classList.toggle('active',e.dataset.page===id));$('breadcrumb').textContent=({overview:'工作台',setup:'安装与环境',models:'模型与配置',create:'创作空间'})[id];if(id==='models'){catalog();refreshDelModel();if(typeof refreshKeys==='function')refreshKeys();}if(id==='overview'){hwStart();}else{hwStop();}}
 document.querySelectorAll('[data-page]').forEach(b=>b.addEventListener('click',()=>page(b.dataset.page)));
+// 深链接：#models / #setup / #create 直接落到对应页
+(function(){const h=(location.hash||'').replace('#','');if(h&&document.getElementById(h))page(h);})();
 $('theme').onclick=()=>{document.body.classList.toggle('light');localStorage.setItem('forgeform-theme',document.body.classList.contains('light')?'light':'dark')};if(localStorage.getItem('forgeform-theme')==='light')document.body.classList.add('light');
 async function action(name,data={}){try{if(name!=='cancel')lastAction={name,data};await api(name,data);await poll()}catch(e){toast(e.message)}}
 $('scan').onclick=()=>action('scan',{model_root:$('model-root').value});$('runtime').onclick=()=>action('runtime');$('install').onclick=()=>{if(selected)action('install',{key:selected,llm:$('install-llm').value})};$('cancel').onclick=()=>action('cancel');$('launch').onclick=()=>{launchPending=true;action('launch')};
@@ -236,3 +238,72 @@ $('net-install')?.addEventListener('click', async () => {
   setText('net-msg', '已提交安装任务，进度看页面底部的日志…');
   await action('netboost/install', {});
 });
+
+// ══ API 密钥管理（生成 / 撤销 / 删除）══
+// 安全点：
+//   · 明文只在 issue 的响应里出现一次，本函数只把它写进 DOM 一次，不缓存、不写外部
+//   · 列表里永远不显示明文
+//   · 删除/撤销都要二次确认（删除不可恢复）
+async function refreshKeys(){
+  const box = $('key-list');
+  if(!box) return;
+  try{
+    const s = await api('keys');
+    const rows = s.keys || [];
+    if(s.weak){
+      $('key-msg').textContent = '⚠️ 当前加密后端是弱兜底（非 Windows），密钥只做了掩码，不是真加密。';
+    }
+    if(!rows.length){
+      box.innerHTML = '<p class="muted">还没有密钥。填个备注，点「生成密钥」。</p>';
+      return;
+    }
+    box.innerHTML = `<div class="key-table">${
+      rows.map(k=>{
+        const state = k.revoked ? '已撤销' : (k.expired ? '已过期' : '有效');
+        const cls = (k.revoked||k.expired) ? 'muted' : '';
+        return `<div class="key-row ${cls}" data-id="${esc(k.id)}">
+          <code>${esc(k.id)}</code>
+          <span class="key-label">${esc(k.label||'—')}</span>
+          <span class="key-state">${state}</span>
+          <span class="key-meta">${esc(k.expires_at||'永久')} · ${k.calls} 次${k.last_ip?' · '+esc(k.last_ip):''}</span>
+          <span class="key-ops">
+            ${(!k.revoked && !k.expired) ? `<button data-op="revoke" data-id="${esc(k.id)}">撤销</button>` : ''}
+            <button class="danger" data-op="delete" data-id="${esc(k.id)}">删除</button>
+          </span>
+        </div>`;
+      }).join('')
+    }</div>`;
+  }catch(e){ box.innerHTML = '<p class="muted">读取失败：'+esc(e.message||e)+'</p>'; }
+}
+
+$('key-issue')?.addEventListener('click', async ()=>{
+  const label = ($('key-label')?.value || '').trim() || 'default';
+  const ttl = parseInt($('key-ttl')?.value || '90', 10);
+  $('key-msg').textContent = '正在生成…';
+  try{
+    const r = await api('keys', {action:'issue', label, ttl});
+    $('key-new').innerHTML = `已生成（<b>只显示这一次</b>，请现在复制）：<br><code class="key-plain">${esc(r.token)}</code><br><span class="muted">id ${esc(r.id)} · 有效至 ${esc(r.expires_at||'永久')}</span>`;
+    $('key-msg').textContent = '';
+    $('key-label').value = '';
+    refreshKeys();
+  }catch(e){ $('key-msg').textContent = '生成失败：'+(e.message||e); }
+});
+
+$('key-list')?.addEventListener('click', async (ev)=>{
+  const btn = ev.target.closest('button[data-op]');
+  if(!btn) return;
+  const id = btn.dataset.id, op = btn.dataset.op;
+  if(op === 'revoke'){
+    if(!confirm(`撤销 ${id}？\n撤销后立刻无法调用，但记录保留（便于查谁调用过）。`)) return;
+  } else {
+    if(!confirm(`删除 ${id}？\n记录会从本机彻底消失，不可恢复。`)) return;
+  }
+  btn.disabled = true;
+  try{
+    await api('keys', {action: op, id});
+    $('key-msg').textContent = op === 'revoke' ? '已撤销' : '已删除';
+    refreshKeys();
+  }catch(e){ $('key-msg').textContent = '操作失败：'+(e.message||e); btn.disabled = false; }
+});
+
+refreshKeys();

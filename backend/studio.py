@@ -697,6 +697,12 @@ def make_server(studio, port=7861):
                 if self.path == '/api/netboost': return self.send(studio.netboost_advice())
                 if self.path == '/api/netboost/pack': return self.send(studio.netboost_pack())
                 if self.path == '/api/purge-plan': return self.send(studio.purge_plan())
+                if self.path == '/api/keys':
+                    from backend import secrets as _sec
+                    return self.send({'keys': _sec.list_api_keys(),
+                                      'crypto': _sec.backend_name(),
+                                      'weak': _sec.is_weak(),
+                                      'default_ttl_days': _sec.DEFAULT_TTL_DAYS})
                 if self.path == '/api/cloud':
                     from backend import cloud
                     return self.send(cloud.status())
@@ -733,6 +739,31 @@ def make_server(studio, port=7861):
                 elif self.path == '/api/install': result = studio.start_job('准备安装方案', lambda: studio.install(data.get('key', ''), data.get('llm', '')))
                 elif self.path == '/api/runtime': result = studio.start_job('安装基础环境', studio.runtime_install)
                 elif self.path == '/api/launch': result = studio.start_job('启动创作空间', studio.launch)
+                elif self.path == '/api/keys':
+                    # 动作：issue / revoke / delete / delete-all
+                    from backend import secrets as _sec
+                    act = (data.get('action') or 'list').strip()
+                    out = {'ok': True}
+                    if act == 'issue':
+                        # ttl=0 表示永久，不能写 `data.get('ttl') or 默认值`
+                        # —— 0 是 falsy，会被悄悄改成 90 天（实测踩到）。
+                        _ttl = data.get('ttl')
+                        _ttl = _sec.DEFAULT_TTL_DAYS if _ttl is None else int(_ttl)
+                        rec = _sec.issue_api_key(data.get('label') or 'default',
+                                                 ttl_days=_ttl)
+                        out['token'] = rec['token']   # 只回这一次
+                        out['id'] = rec['id']
+                        out['expires_at'] = rec['expires_at']
+                    elif act == 'revoke':
+                        out['count'] = _sec.revoke_api_key(key_id=data.get('id') or '')
+                    elif act == 'delete':
+                        out['deleted'] = _sec.delete_api_key(data.get('id') or '')
+                    elif act == 'delete-all':
+                        out['count'] = _sec.delete_all_api_keys()
+                    else:
+                        return self.send({'error': '未知操作'}, 400)
+                    out['keys'] = _sec.list_api_keys()
+                    result = out
                 elif self.path == '/api/cloud':
                     # 写云端配置 / 存 key。key 走 DPAPI 加密，不回显。
                     from backend import cloud

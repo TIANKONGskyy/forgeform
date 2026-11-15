@@ -184,3 +184,8 @@ Studio 的 /api/cloud 读写，或用 GET /api/cloud 看缺什么
 ```bash
 PYTHONPATH= python tools/calibrate.py --summary   # 看本机实测与占用
 ```
+
+**API 密钥安全** —— 明文只在生成时显示一次，库里只存 sha256，且整个库用本机
+DPAPI 加密（拷到别的机器解不开）；每把有独立 id、可选有效期（默认 90 天）、
+可撤销可删除，每次调用写 `logs/api-*.jsonl` 审计（只记 key id 与 IP，不记 token）。
+界面在「模型与配置 → API 密钥」，命令行 `tools/api_key.py`。
