@@ -194,16 +194,62 @@ def build_sidebar(state: dict) -> str:
             '</div>'
         )
 
+    # ★ 2026-11-15：产物清单。之前这里只有「✓ 已就绪 / ✓ 已导出」两行字，
+    #   用户拿不到文件 —— 模型和 STL 明明已经生成了，却只能自己去 outputs/ 里翻。
+    #   现在每个产物一行：名字 + 大小 + 下载。
+    #   Gradio 5.x 的可访问路径是 /gradio_api/file=<绝对路径>。
+    def _furl(path_str: str) -> str:
+        if not path_str:
+            return ""
+        pth = Path(path_str)
+        if not pth.is_file() or pth.stat().st_size <= 0:
+            return ""
+        return "/gradio_api/file=" + pth.as_posix()
+
+    def _fsize(path_str: str) -> str:
+        try:
+            n = Path(path_str).stat().st_size
+            return f"{n / 1024 / 1024:.1f} MB" if n >= 1024 * 1024 else f"{n / 1024:.0f} KB"
+        except Exception:
+            return ""
+
+    rows = []
+    sel = state.get("selected") or ""
+    if not sel:
+        cands = state.get("candidates") or []
+        sel = cands[0] if cands else ""
+    u = _furl(sel)
+    if u:
+        rows.append(("🖼", "选中图", _fsize(sel), u))
+
     glb = state.get("glb_path", "")
-    glb_html = ""
-    if glb and Path(glb).exists():
-        glb_html = '<div class="sb-sec"><div class="sb-label">3D 模型</div><div class="ok-badge">✓ 已就绪</div></div>'
+    u = _furl(glb)
+    if u:
+        rows.append(("🧊", "3D 模型 .glb", _fsize(glb), u))
 
     stl = state.get("stl_path", "")
+    u = _furl(stl)
+    if u:
+        rows.append(("📦", "打印模型 .stl", _fsize(stl), u))
+
+    art_html = ""
+    if rows:
+        body = "".join(
+            f'<a class="art-row" href="{u}" target="_blank" rel="noopener" download>'
+            f'<span class="art-ico">{ico}</span>'
+            f'<span class="art-name">{name}</span>'
+            f'<span class="art-size">{size}</span>'
+            f'<span class="art-dl">下载</span></a>'
+            for ico, name, size, u in rows
+        )
+        art_html = ('<div class="sb-sec"><div class="sb-label">产物（点击下载）</div>'
+                    f'{body}</div>')
+    else:
+        art_html = ('<div class="sb-sec"><div class="sb-label">产物</div>'
+                    '<div class="art-empty">还没有产物 —— 先描述需求，再点「生成图片」</div></div>')
+
+    glb_html = ""
     stl_html = ""
-    if stl and Path(stl).exists():
-        stl_html = (f'<div class="sb-sec"><div class="sb-label">STL</div>'
-                    f'<div class="ok-badge">✓ {state.get("stl_size",120)}mm 已导出</div></div>')
 
     folder_html = (f'<div class="sb-sec"><div class="sb-label">项目文件夹</div>'
                    f'<div class="folder-name">{folder_short}</div></div>')
@@ -217,6 +263,7 @@ def build_sidebar(state: dict) -> str:
     </div>
     <div class="sb-body">
         {params_html}
+        {art_html}
         {glb_html}
         {stl_html}
         <div class="sb-sec">

@@ -113,3 +113,26 @@ ul.options li:hover, .gradio-container ul[role="listbox"] li:hover{
 /* ══ 底部按钮组：最后一排别被视口裁掉 ══ */
 .gradio-container .main{padding-bottom:40px!important}
 body{overflow-y:auto!important}
+/* ══ 产物清单：每行 = 图标 + 名字 + 大小 + 下载 ══ */
+.art-row{
+  display:flex; align-items:center; gap:9px;
+  padding:9px 11px; margin-top:7px;
+  border:1px solid var(--ff-line); border-radius:10px;
+  background:rgba(255,255,255,.028);
+  color:var(--ff-text)!important; text-decoration:none!important;
+  font-size:12.5px; transition:border-color .14s, background .14s}
+.art-row:hover{
+  border-color:rgba(156,228,218,.5);
+  background:rgba(156,228,218,.07)}
+.art-ico{font-size:14px;line-height:1}
+.art-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.art-size{color:var(--ff-muted);font-size:11.5px;font-variant-numeric:tabular-nums}
+.art-dl{
+  color:#08302b;background:var(--ff-accent);
+  border-radius:7px;padding:2px 9px;font-size:11px;font-weight:600}
+.art-empty{
+  margin-top:6px;padding:10px 11px;border:1px dashed var(--ff-line);
+  border-radius:10px;color:var(--ff-muted);font-size:11.5px;line-height:1.7}
+
+/* 时间/进度：进度环旁边那行小字 */
+.ring-time{font-variant-numeric:tabular-nums;color:var(--ff-muted);font-size:11.5px}
