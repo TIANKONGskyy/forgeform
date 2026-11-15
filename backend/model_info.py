@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 
 # ── 厂商 / 系列 ───────────────────────────────────────────────
@@ -170,25 +171,129 @@ LLM_VENDOR = {
     "backend": "llama.cpp（Strata 0.1.47 封装，127.0.0.1:8091）",
 }
 
-_BENCH_FILE = Path(__file__).resolve().parent.parent / "outputs" / "llm_bench.json"
+_BENCH_JSONL = Path(__file__).resolve().parent.parent / "outputs" / "llm_bench.jsonl"
+_BENCH_LEGACY = Path(__file__).resolve().parent.parent / "outputs" / "llm_bench.json"
+# 滚动窗口：只保留最近 N 次。样本太多没意义（驱动/负载变了老数据就该淘汰），
+# 太少又会被单次抖动带偏 —— 20 次约等于"最近几天的真实感受"。
+_BENCH_KEEP = 20
+_MIN_TOK_S = 1.0        # 低于这个当异常样本丢弃（模型刚加载时会有 0.3 tok/s 的假值）
+
+
+def _read_samples() -> list[dict]:
+    """读全部样本（按时间正序）。会顺手把旧的单条 json 迁进 jsonl。"""
+    out: list[dict] = []
+    if _BENCH_JSONL.exists():
+        try:
+            for line in _BENCH_JSONL.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if float(rec.get("predicted_tok_s") or 0) >= _MIN_TOK_S:
+                    out.append(rec)
+        except Exception:
+            pass
+    # 旧版只存一条 json —— 迁移一次，迁完删掉避免重复
+    if _BENCH_LEGACY.exists():
+        try:
+            rec = json.loads(_BENCH_LEGACY.read_text(encoding="utf-8")) or {}
+            if float(rec.get("predicted_tok_s") or 0) >= _MIN_TOK_S:
+                rec.setdefault("source", "legacy")
+                out.append(rec)
+                append_sample(rec, trim=False)
+            _BENCH_LEGACY.unlink()
+        except Exception:
+            pass
+    return out
+
+
+def append_sample(rec: dict, trim: bool = True) -> None:
+    """追加一条样本，超窗口就裁掉最老的。任何异常都不往外抛（不影响主流程）。"""
+    try:
+        rec = dict(rec)
+        rec.setdefault("measured_at", time.strftime("%Y-%m-%d %H:%M"))
+        _BENCH_JSONL.parent.mkdir(parents=True, exist_ok=True)
+        with open(_BENCH_JSONL, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        if not trim:
+            return
+        lines = [ln for ln in _BENCH_JSONL.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        if len(lines) > _BENCH_KEEP:
+            _BENCH_JSONL.write_text("\n".join(lines[-_BENCH_KEEP:]) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _median(vals: list[float]) -> float:
+    if not vals:
+        return 0.0
+    s = sorted(vals)
+    n = len(s)
+    mid = n // 2
+    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
 
 
 def llm_bench() -> dict:
-    """读最近一次 LLM 吞吐实测。没有就返回空 dict。"""
-    try:
-        return json.loads(_BENCH_FILE.read_text(encoding="utf-8")) or {}
-    except Exception:
+    """聚合最近几次样本：中位生成速度 / 中位预填 / 样本数 / 最近一次。
+
+    用中位不用均值 —— 冷启动、显存争抢、投机解码接受率波动都会拉出长尾，
+    均值会被单次坏样本带偏。
+    """
+    samples = _read_samples()
+    if not samples:
         return {}
+    pred = [float(s.get("predicted_tok_s") or 0) for s in samples if s.get("predicted_tok_s")]
+    prm = [float(s.get("prompt_tok_s") or 0) for s in samples if s.get("prompt_tok_s")]
+    last = samples[-1]
+    return {
+        "n": len(samples),
+        "predicted_tok_s": round(_median(pred), 1),
+        "predicted_min": round(min(pred), 1) if pred else 0.0,
+        "predicted_max": round(max(pred), 1) if pred else 0.0,
+        "prompt_tok_s": round(_median(prm), 1),
+        "last_predicted": last.get("predicted_tok_s"),
+        "last_at": last.get("measured_at"),
+        "window": _BENCH_KEEP,
+        "samples": samples[-8:],
+    }
+
+
+def record_usage(timings: dict | None, usage: dict | None = None,
+                 wall_sec: float | None = None, source: str = "chat") -> None:
+    """从一次真实对话调用的返回里抽吞吐并记样本。
+
+    llama.cpp 的 `timings.predicted_per_second` 是纯生成速度，最准。
+    流式没有 timings 时退而用 `completion_tokens / (wall - 首字延迟)`，
+    这仍然比"总时间 / token"准（后者把预填和排队都算进去了）。
+    """
+    tim = timings or {}
+    usg = usage or {}
+    pred = float(tim.get("predicted_per_second") or 0)
+    prm = float(tim.get("prompt_per_second") or 0)
+    if pred <= 0 and usg.get("completion_tokens") and wall_sec:
+        # 粗略兜底：按整段墙钟算，source 标成 estimated 以便日后区分
+        pred = float(usg["completion_tokens"]) / max(0.1, float(wall_sec))
+        source = source + "-估算"
+    if pred < _MIN_TOK_S:
+        return
+    append_sample({
+        "model": usg.get("model") or "qwen3.8-flash-next-iq3_s",
+        "predicted_tok_s": round(pred, 1),
+        "prompt_tok_s": round(prm, 1),
+        "prompt_tokens": usg.get("prompt_tokens"),
+        "completion_tokens": usg.get("completion_tokens"),
+        "draft_accepted": f'{tim.get("draft_n_accepted", 0)}/{tim.get("draft_n", 0)}',
+        "wall_sec": round(wall_sec, 2) if wall_sec else None,
+        "source": source,
+    })
 
 
 def bench_llm(url: str = "http://127.0.0.1:8091/v1", model: str = "",
               timeout: int = 180) -> dict:
-    """实测一次对话吞吐，结果写进 outputs/llm_bench.json。
-
-    用 llama.cpp 返回的 `timings.predicted_per_second` —— 那是它自己算的
-    纯生成速度，比"墙钟 / token 数"准（后者把预填也摊进去了）。
-    """
-    import time
+    """主动跑一次基准，样本进滚动窗口。返回这一次的记录（不是聚合值）。"""
     import urllib.request
 
     body = {
@@ -216,30 +321,25 @@ def bench_llm(url: str = "http://127.0.0.1:8091/v1", model: str = "",
         "predicted_tok_s": round(float(tim.get("predicted_per_second") or 0), 1),
         "prompt_tok_s": round(float(tim.get("prompt_per_second") or 0), 1),
         "draft_accepted": f'{tim.get("draft_n_accepted", 0)}/{tim.get("draft_n", 0)}',
-        "measured_at": time.strftime("%Y-%m-%d %H:%M"),
+        "source": "bench",
     }
-    try:
-        _BENCH_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _BENCH_FILE.write_text(json.dumps(rec, ensure_ascii=False, indent=2),
-                               encoding="utf-8")
-    except Exception:
-        pass
+    append_sample(rec)
     return rec
 
 
 def describe_llm(model: str = "qwen3.8-flash-next-iq3_s") -> dict:
-    """对话模型的画像（含实测吞吐）。"""
+    """对话模型的画像（吞吐 = 最近 N 次的中位，不是单次）。"""
     d = dict(LLM_VENDOR)
     d["name"] = model
     d["key"] = "llm"
     b = llm_bench()
     if b.get("predicted_tok_s"):
-        d["timing"] = (f'{b["predicted_tok_s"]} tok/s 生成'
-                       f'（预填 {b.get("prompt_tok_s")} tok/s，'
-                       f'投机接受 {b.get("draft_accepted")}，'
-                       f'{b.get("measured_at")} 实测）')
+        lo, hi = b.get("predicted_min", 0), b.get("predicted_max", 0)
+        d["timing"] = (f'中位 {b["predicted_tok_s"]} tok/s 生成'
+                       f'（区间 {lo}–{hi}）· 预填 {b.get("prompt_tok_s")} tok/s'
+                       f'· n={b["n"]}/{b["window"]}，最近 {b.get("last_at")}')
     else:
-        d["timing"] = "未测（跑一次 bench_llm() 会记录）"
+        d["timing"] = "未测（跑一次 tools/bench_llm.py，或正常对话几轮后自动累积）"
     return d
 
 
@@ -272,7 +372,11 @@ def describe(model_key: str, cfg_model: dict, global_mode: str = "",
             import backend.timings as T
             if T.samples(_ts) > 0:
                 med, hi = T.estimate(_ts)
-                timing = f"中位 {T.human(med)}（最长 {T.human(hi)}，n={T.samples(_ts)}）"
+                # ★ 2026-11-15：标清数据来源。本机样本（滚动窗口）和出厂参考
+                #   不是一回事 —— 换显卡能差 4 倍，用户有权知道看的是哪个。
+                src = "本机" if T.is_local(_ts) else "出厂参考"
+                timing = (f"中位 {T.human(med)}（最长 {T.human(hi)}，"
+                          f"n={T.samples(_ts)}，{src}）")
             else:
                 timing = "本机未测（没有样本）"
         except Exception:

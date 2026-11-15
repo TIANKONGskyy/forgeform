@@ -16,6 +16,10 @@
 """
 from __future__ import annotations
 
+import json
+import time
+from pathlib import Path
+
 # 阶段 → (中位秒, 上限秒, 样本数)
 # 上限取"多数情况不会超过"的值：极端值是显存争抢/大件造成的，不该写进常规估算
 MEASURED: dict[str, tuple[float, float, int]] = {
@@ -47,13 +51,25 @@ _LABEL = {
 
 
 def estimate(stage: str) -> tuple[float, float]:
-    """(中位秒, 上限秒)。未知阶段给一个保守值而不是崩掉。"""
+    """(中位秒, 上限秒)。优先本机实测样本，攒不够才用 MEASURED 出厂值。"""
+    local = _local_read().get(stage, [])[-_LOCAL_WINDOW:]
+    if len(local) >= _LOCAL_MIN:
+        return _median(local), max(_pct(local, 0.9), _median(local) * 1.3)
     med, hi, _n = MEASURED.get(stage, (20.0, 120.0, 0))
     return med, hi
 
 
 def samples(stage: str) -> int:
+    """样本数：本机攒够就用本机条数，否则报出厂的 n（并在文案里说明）。"""
+    local = len(_local_read().get(stage, []))
+    if local >= _LOCAL_MIN:
+        return local
     return MEASURED.get(stage, (0, 0, 0))[2]
+
+
+def is_local(stage: str) -> bool:
+    """这个阶段的估算是本机实测的，还是出厂的？UI 用来说明数据来源。"""
+    return len(_local_read().get(stage, [])) >= _LOCAL_MIN
 
 
 def label(stage: str) -> str:
@@ -87,3 +103,94 @@ def progress_line(stage: str, elapsed: float = 0.0, done: bool = False) -> str:
     if done:
         return f"{label(stage)} 完成，实际 {human(elapsed)}"
     return f"{label(stage)} 进行中…实测通常 {human(med)}（最长见过 {human(hi)}），已用 {human(elapsed)}"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 本机实测样本（滚动窗口）
+# ══════════════════════════════════════════════════════════════════
+# MEASURED 是"出厂参考"（早期某台机器 + 某天跑出来的）。它有两个问题：
+#   ① 换一台机器就不准了 —— 显卡不同，3D 能差 4 倍
+#   ② 时间久了也不准 —— 权重换了量化、ComfyUI 升级都会变
+# 所以每个设备应该攒**自己的**样本：真实跑完一次就往 jsonl 追一条，
+# 攒够 _LOCAL_MIN 条之后 estimate() 就优先用本机数据，MEASURED 退成兜底。
+#
+# 这套机制对所有阶段一致（生图 / 高清重绘 / 3D / 多视图 / STL / LLM），
+# 换设备只要把 outputs/timings_local.jsonl 删掉就重新开始学。
+_LOCAL_FILE = Path(__file__).resolve().parent.parent / "outputs" / "timings_local.jsonl"
+_LOCAL_KEEP = 40      # 每阶段保留最近 40 次
+_LOCAL_MIN = 3        # 少于 3 条不用（单次抖动太大）
+_LOCAL_WINDOW = 20    # 只用最近 20 条算中位
+
+
+def _local_read() -> dict[str, list[float]]:
+    """{stage: [秒, ...]}，按写入顺序。"""
+    out: dict[str, list[float]] = {}
+    try:
+        for line in _LOCAL_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                stage = str(rec.get("stage") or "")
+                sec = float(rec.get("sec") or 0)
+            except Exception:
+                continue
+            if stage and sec > 0.05:
+                out.setdefault(stage, []).append(sec)
+    except Exception:
+        pass
+    return out
+
+
+def _trim() -> None:
+    """每阶段只留最近 _LOCAL_KEEP 条。"""
+    try:
+        buckets: dict[str, list[str]] = {}
+        for line in _LOCAL_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                stage = str(json.loads(line).get("stage") or "")
+            except Exception:
+                continue
+            buckets.setdefault(stage, []).append(line)
+        kept: list[str] = []
+        for lines in buckets.values():
+            kept.extend(lines[-_LOCAL_KEEP:])
+        _LOCAL_FILE.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def record(stage: str, sec: float, note: str = "") -> None:
+    """记录一次真实耗时。任何异常都不往外抛（不能因为统计把主流程搞挂）。"""
+    try:
+        if not stage or sec is None or float(sec) <= 0.05:
+            return
+        _LOCAL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        rec = {"stage": stage, "sec": round(float(sec), 2),
+               "at": time.strftime("%Y-%m-%d %H:%M"), "note": note}
+        with open(_LOCAL_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        _trim()
+    except Exception:
+        pass
+
+
+def _median(vals: list[float]) -> float:
+    if not vals:
+        return 0.0
+    s = sorted(vals)
+    n = len(s)
+    mid = n // 2
+    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+
+
+def _pct(vals: list[float], q: float) -> float:
+    if not vals:
+        return 0.0
+    s = sorted(vals)
+    idx = min(len(s) - 1, max(0, int(round(q * (len(s) - 1)))))
+    return s[idx]

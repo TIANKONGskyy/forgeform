@@ -1314,6 +1314,7 @@ class ConversationManager:
             print(f"[DSH] ⚠️ 主体检查异常（忽略，继续生成）: {e!r}")
 
         cand_paths = []
+        _t_img0 = time.time()          # 计时含"让显存"，那段时间用户也在等
         # 让显存：生图前必须把常驻对话模型（微调 11GB / Ollama 12.9GB）卸掉，
         # 否则 ComfyUI 只剩几 GB → 实测超时（这个调用点是按钮路径与 agent 路径的公共咽喉）
         _free_tuned_for_gpu_work("生图")
@@ -1342,6 +1343,13 @@ class ConversationManager:
                     cand_paths.append(path_str)
                 else:
                     print(f"[DSH] 生图失败: success={result.success} path={result.output_path}")
+            # 2026-11-15：本次真实耗时进本机滚动窗口（侧栏/进度环之后就用它当基准）
+            if cand_paths:
+                try:
+                    import backend.timings as _T
+                    _T.record("image_512", time.time() - _t_img0, note=_pick_image_model(state))
+                except Exception:
+                    pass
         except Exception as e:
             print(f"[DSH] 生图异常: {e!r}")
             state["phase"] = "confirm"
@@ -1591,6 +1599,13 @@ class ConversationManager:
                 _rewarm_tuned_async()
             _elapsed = _t.time() - _t0
             if result and result.success and result.output_path:
+                # 本机真实耗时进滚动窗口：下次 estimate() 就按这台机器说话，
+                # 不再拿别的机器的出厂值糊弄（换显卡差 4 倍）
+                try:
+                    import backend.timings as _T3
+                    _T3.record(_T3.stage_for_3d(td_key, _quality), _elapsed, note=td_key)
+                except Exception:
+                    pass
                 img_bytes = Path(result.output_path).read_bytes()
                 glb_path = pm.save_glb(Path(state["path"]), img_bytes)
                 state["glb_path"] = glb_path

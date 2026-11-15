@@ -1191,6 +1191,14 @@ def _call_strata(prompt: str, timeout: int = 180, json_mode: bool = False) -> st
             d = json.loads(resp.read().decode("utf-8", "ignore"))
         msg = ((d.get("choices") or [{}])[0].get("message") or {})
         LAST_THINKING = (msg.get("reasoning_content") or "").strip()
+        # 2026-11-15：把这次真实调用的吞吐记进滚动窗口（侧栏「对话 · LLM」读）。
+        # llama.cpp 返回的 timings 是纯生成速度，比墙钟换算准。
+        try:
+            import time as _t
+            from backend.model_info import record_usage as _rec
+            _rec(d.get("timings"), d.get("usage"), wall_sec=None, source="chat")
+        except Exception:
+            pass
         return (msg.get("content") or "").strip()
     except Exception as e:
         print(f"[DSH] Strata 调用失败: {e!r}")
@@ -1199,7 +1207,11 @@ def _call_strata(prompt: str, timeout: int = 180, json_mode: bool = False) -> st
 
 def _stream_strata(prompt: str, timeout: int, status: dict, json_mode: bool = False):
     import urllib.request
+    import time as _t
     acc = ""
+    _t0 = _t.time()
+    _ttft = 0.0
+    _tails: dict = {}
     try:
         with _strata_request(prompt, timeout, True, json_mode) as resp:
             for raw in resp:
@@ -1215,6 +1227,11 @@ def _stream_strata(prompt: str, timeout: int, status: dict, json_mode: bool = Fa
                     obj = json.loads(data)
                 except Exception:
                     continue
+                # llama.cpp 每块都可能带 timings（末块最准），先攒着
+                if obj.get("timings"):
+                    _tails["timings"] = obj["timings"]
+                if obj.get("usage"):
+                    _tails["usage"] = obj["usage"]
                 delta = ((obj.get("choices") or [{}])[0].get("delta") or {})
                 tp = delta.get("reasoning_content") or ""
                 if tp:
@@ -1222,12 +1239,32 @@ def _stream_strata(prompt: str, timeout: int, status: dict, json_mode: bool = Fa
                     status["_thinking_text"] = (status.get("_thinking_text", "") + tp)[-1200:]
                 piece = delta.get("content") or ""
                 if piece:
+                    if not _ttft:
+                        _ttft = _t.time() - _t0
                     acc += piece
                     status["chars"] = len(acc)
                     yield acc
     except Exception as e:
         print(f"[DSH] Strata 流式失败: {e!r}")
         yield f"[描述生成失败: {e}]"
+    finally:
+        # 流结束才记样本：有 timings 用 timings，没有就用
+        # 「生成段耗时 = 总耗时 - 首字延迟」配 completion_tokens 反推。
+        # 用 finally 保证用户中途打断也能留下一条（那时 tokens 少但速度仍是真实的）。
+        try:
+            _wall = _t.time() - _t0
+            _tim = _tails.get("timings")
+            _usg = dict(_tails.get("usage") or {})
+            if not _usg.get("completion_tokens") and acc:
+                # llama.cpp 不开 stream_options 就不给 usage，按字数粗估
+                _usg["completion_tokens"] = max(1, len(acc) // 2)
+            if not _tim and _wall > _ttft and _ttft > 0:
+                _gen = _wall - _ttft
+                _tim = {"predicted_per_second": len(acc) / max(0.2, _gen) * 0.5}
+            from backend.model_info import record_usage as _rec
+            _rec(_tim, _usg, wall_sec=_wall, source="chat-stream")
+        except Exception:
+            pass
 
 
 def _strata_alive() -> bool:
