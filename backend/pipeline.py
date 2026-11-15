@@ -965,11 +965,26 @@ class Pipeline:
                 if torch.cuda.is_available():
                     _vram = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
                     _oc = int(params["octree_resolution"])
+                    # 下限：小 octree 抬上来（原来的逻辑）
                     _floor = 512 if _vram >= 24 else (384 if _vram >= 12 else 0)
                     if _floor and _oc < _floor:
                         self._log(f"🧊 octree {_oc} → {_floor}（显存 {_vram:.0f} GB 跑得动，"
                                   f"256 的表面台阶太明显）")
                         params["octree_resolution"] = _floor
+                    # ★ 2026-11-15：上限。实测（限显存到 6 GB 真跑）：
+                    #   512 octree  峰值 5.34 GB  ✓
+                    #   1024 octree 采样只占 3.73 GB，但 **decode 要一次性 6.02 GB** → OOM
+                    #   所以 1024 至少要 ~8 GB 显存。
+                    #   用户显式选"最高精度"时，小显卡会直接 OOM 而不是拿到一个粗糙结果，
+                    #   OOM 报错对普通用户毫无意义 —— 这里主动降档并说明原因。
+                    _cap = (1024 if _vram >= 10 else
+                            768 if _vram >= 8 else
+                            512 if _vram >= 5.5 else
+                            384 if _vram >= 4 else 256)
+                    if _oc > _cap:
+                        self._log(f"🧊 octree {_oc} → {_cap}（显存 {_vram:.1f} GB 跑不动 "
+                                  f"{_oc}：decode 阶段要一次性分配约 6 GB，会直接 OOM）")
+                        params["octree_resolution"] = _cap
             except Exception:
                 pass
 
