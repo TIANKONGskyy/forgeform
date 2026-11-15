@@ -1326,7 +1326,7 @@ class ConversationManager:
             stage_results = pipe.generate_images(
                 prompt, count=_n_cand,
                 resolution=_PREVIEW_RES,
-                quality_name=("快速" if (state.get("quality") or "标准") == "快速" else "标准"),  # 预览档
+                quality_name="快速",           # 预览档：始终快速，高精度留给主图
                 model_key=_pick_image_model(),
                 skip_cache=True,              # 否则 ComfyUI 命中缓存 → "改了参数却没变"
             )
