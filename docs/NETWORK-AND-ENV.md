@@ -89,3 +89,21 @@ PYTHONPATH= python tools/doctor.py --json     # 给程序读
   ✓ GitHub          gh-proxy · 909 ms ← 会用这个
   ✓ HuggingFace     official · 725 ms ← 会用这个
 ```
+
+---
+
+## 附：下载后最快用上（不需要跑 doctor）
+
+双击 `启动.bat` 后，工作台顶部就是「一键开始」卡。它先显示三条链就绪度：
+
+```
+✓ 对话  Ollama @ 11434
+✓ 出图  ComfyUI qwen_image_2.1_int8_convrot.safetensors
+✓ 建模  直连 D:/models/hy3dgen/hunyuan3d-2mini
+最快路径：复用现有 ComfyUI（0 下载，直接可用）
+```
+
+点「开始用」之后它会自动：挑路径 → 写 config → 把默认模型换成真有文件的那个 →
+启动创作空间。**用户不需要知道"直连"和"ComfyUI"是什么**。
+
+只有当三条链里有 ✗ 时，才需要人去「安装与环境」补东西 —— 而且卡片上写着缺什么。

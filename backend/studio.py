@@ -713,6 +713,10 @@ def make_server(studio, port=7861):
                 if self.path == '/api/netboost': return self.send(studio.netboost_advice())
                 if self.path == '/api/netboost/pack': return self.send(studio.netboost_pack())
                 if self.path == '/api/purge-plan': return self.send(studio.purge_plan())
+                if self.path == '/api/firstrun':
+                    # 三条链就绪度 + 候选路径（给"一键开始"用）
+                    from backend import firstrun
+                    return self.send(firstrun.status())
                 if self.path == '/api/doctor':
                     # 环境 + 网络自检（联网约 10 秒；?offline=1 只查本地）
                     from urllib.parse import parse_qs
@@ -771,6 +775,16 @@ def make_server(studio, port=7861):
                 elif self.path == '/api/install': result = studio.start_job('准备安装方案', lambda: studio.install(data.get('key', ''), data.get('llm', '')))
                 elif self.path == '/api/runtime': result = studio.start_job('安装基础环境', studio.runtime_install)
                 elif self.path == '/api/launch': result = studio.start_job('启动创作空间', studio.launch)
+                elif self.path == '/api/firstrun':
+                    # mode: auto（默认，自己挑最快的） / 指定某个候选 key
+                    from backend import firstrun
+                    mode = (data.get('mode') or 'auto').strip()
+                    result = firstrun.auto() if mode == 'auto' else firstrun.apply(mode)
+                    result['status'] = firstrun.status()
+                    if data.get('launch') and result.get('ok'):
+                        studio.launch()
+                    result['ok'] = bool(result.get('ok', True))
+                    return self.send(result)
                 elif self.path == '/api/keys':
                     # 动作：issue / revoke / delete / delete-all
                     from backend import secrets as _sec

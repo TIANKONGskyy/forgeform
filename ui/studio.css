@@ -138,3 +138,12 @@
 .key-plain{display:inline-block;margin:6px 0;padding:8px 10px;border-radius:8px;
   background:rgba(156,228,218,.1);border:1px dashed rgba(156,228,218,.4);
   word-break:break-all;font-size:12.5px}
+/* ══ 一键开始卡 ══ */
+.quickstart{display:flex;flex-direction:column;gap:12px;margin-bottom:18px}
+.qs-head h2{margin:0 0 4px}
+.qs-stages{display:flex;flex-wrap:wrap;gap:8px}
+.qs-chip{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;
+  border:1px solid #273042;border-radius:999px;font-size:12.5px;color:#9da9bd}
+.qs-chip.on{border-color:rgba(156,228,218,.55);color:#9ce4da}
+.qs-chip em{font-style:normal;font-size:11px;opacity:.75}
+.qs-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}

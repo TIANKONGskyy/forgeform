@@ -307,3 +307,48 @@ $('key-list')?.addEventListener('click', async (ev)=>{
 });
 
 refreshKeys();
+
+// ══ 一键开始：先显示这台机器现在能干什么，再一键落到最快路径 ══
+async function refreshQuick(){
+  const box = $('qs-stages'), sub = $('qs-sub');
+  if(!box) return;
+  try{
+    const s = await api('firstrun');
+    const st = s.stages || {};
+    const order = [['chat','对话'],['image','出图'],['mesh','建模']];
+    box.innerHTML = order.map(([k,label])=>{
+      const v = st[k] || {};
+      return `<span class="qs-chip ${v.ready?'on':''}">${v.ready?'✓':'✗'} ${label}
+        <em>${esc((v.how||'').slice(0,42))}</em></span>`;
+    }).join('');
+    // 说明"最快能怎样"
+    const fastest = (s.candidates||[]).find(c=>c.ok && c.stages && c.stages.length);
+    if(fastest){
+      sub.textContent = fastest.gb > 0
+        ? `最快路径：${fastest.name}（要下载约 ${fastest.gb} GB）`
+        : `最快路径：${fastest.name}（0 下载，直接可用）`;
+    }else{
+      sub.textContent = '没有能直接生成的后端 —— 可以先开界面，再在「安装与环境」里补模型。';
+    }
+    window.__qs = s;
+  }catch(e){ sub.textContent = '检查失败：' + (e.message||e); }
+}
+
+$('qs-go')?.addEventListener('click', async ()=>{
+  const btn = $('qs-go');
+  btn.disabled = true;
+  $('qs-msg').textContent = '正在配置…';
+  try{
+    const r = await api('firstrun', {mode:'auto', launch:true});
+    const healed = (r.healed||[]).map(h=>`${h.stage}: ${h.from} → ${h.to}`).join('；');
+    $('qs-msg').textContent = r.need_download
+      ? `${r.name}：还要下载约 ${r.gb} GB（在「安装与环境」里点开始）`
+      : `已用「${r.name}」启动${healed ? ' · 自动修正 '+healed : ''}`;
+    setTimeout(()=>{ location.hash='#create'; location.reload(); }, 900);
+  }catch(e){
+    $('qs-msg').textContent = '失败：' + (e.message||e);
+    btn.disabled = false;
+  }
+});
+
+refreshQuick();

@@ -200,3 +200,17 @@ PYTHONPATH= python tools/doctor.py --refresh  # 忽略缓存重测网络
 它当场测 PyPI / GitHub / HF，各挑一个**实测最快**的源（不写死阿里云/清华），
 并把缓存写进 `logs/net-cache.json`（1 小时）。35 条常见问题的逐条解法见
 [docs/NETWORK-AND-ENV.md](docs/NETWORK-AND-ENV.md)。
+
+## 下载后怎么最快用上
+
+双击 `启动.bat` → Studio 打开 → 顶部「一键开始」那张卡会显示这台机器
+**现在能直接用什么**（对话 / 出图 / 建模 三条链分别标 ✓ 或 ✗），
+再点「开始用」，它自己挑最快路径并写好配置：
+
+1. **复用已有 ComfyUI / hy3dgen / diffusers** —— 0 下载（装过 AI 工具的人走这条）
+2. **云端 API** —— 0 下载（填一次 key）
+3. **下载最小方案** —— 约 10 GB，界面在下载期间已经能用
+4. **只开界面** —— 什么都跑不动时也不白屏
+
+出厂配置的默认模型可能指向没下载的权重，`backend/firstrun.py` 会自动把默认
+换成这台机器上**真有文件**的那个（例如 2.1 → 2mini），不用人排查。
