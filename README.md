@@ -189,3 +189,14 @@ PYTHONPATH= python tools/calibrate.py --summary   # 看本机实测与占用
 DPAPI 加密（拷到别的机器解不开）；每把有独立 id、可选有效期（默认 90 天）、
 可撤销可删除，每次调用写 `logs/api-*.jsonl` 审计（只记 key id 与 IP，不记 token）。
 界面在「模型与配置 → API 密钥」，命令行 `tools/api_key.py`。
+
+## 装不上？先跑自检
+
+```bash
+PYTHONPATH= python tools/doctor.py            # 环境 8 项 + 网络 3 类，逐项给修法
+PYTHONPATH= python tools/doctor.py --refresh  # 忽略缓存重测网络
+```
+
+它当场测 PyPI / GitHub / HF，各挑一个**实测最快**的源（不写死阿里云/清华），
+并把缓存写进 `logs/net-cache.json`（1 小时）。35 条常见问题的逐条解法见
+[docs/NETWORK-AND-ENV.md](docs/NETWORK-AND-ENV.md)。

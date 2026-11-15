@@ -23,8 +23,22 @@ ROOT = Path(__file__).resolve().parents[1]
 # 用 `--extra-index-url` 而不是 `--index-url`：主源仍是 PyPI，
 # 阿里云只是加速副本；这样阿里云缺包时不会直接失败。
 PIP_CN = "https://mirrors.aliyun.com/pypi/simple/"
-PIP_ARGS = ["-i", PIP_CN, "--timeout", "60", "--retries", "3",
-            "--trusted-host", "mirrors.aliyun.com"]
+# ★ 2026-11-15：不再写死阿里云，改成**当场实测挑一个能用的**。
+#   原因是各镜像在不同网络/不同时期差别很大（清华 403 过又恢复、
+#   中科大有时最快、腾讯偶尔抽风），写死一个就等于把某一时刻的状态
+#   固化成永久假设。netcheck 会把结果缓存 1 小时，不会每次都测。
+def _pick_pip_args() -> list[str]:
+    try:
+        from backend import netcheck
+        base = netcheck.pick_pypi() or PIP_CN
+    except Exception:
+        base = PIP_CN
+    host = base.split("//", 1)[-1].split("/", 1)[0]
+    return ["-i", base, "--timeout", "60", "--retries", "3",
+            "--trusted-host", host]
+
+
+PIP_ARGS = _pick_pip_args()
 # torch 的 cu126 轮子阿里云镜像没有，官方源又慢。策略：先试阿里云，
 # 拿不到再回退官方（官方只对 torch 用，2-3 GB，走一次就够）。
 TORCH_INDEX = "https://download.pytorch.org/whl/cu126"
@@ -692,11 +706,29 @@ def make_server(studio, port=7861):
         def do_GET(self):
             if not self.trusted(): return self.send({'error': '无效来源'}, 403)
             try:
+                self.path = self.path.split('?', 1)[0]   # 路由只认路径，query 单存
+                self._query = self.path.split('?', 1)[1] if '?' in self.path else ''
                 if self.path == '/api/status': return self.send(studio.status())
                 if self.path == '/api/hardware': return self.send(studio.hardware())
                 if self.path == '/api/netboost': return self.send(studio.netboost_advice())
                 if self.path == '/api/netboost/pack': return self.send(studio.netboost_pack())
                 if self.path == '/api/purge-plan': return self.send(studio.purge_plan())
+                if self.path == '/api/doctor':
+                    # 环境 + 网络自检（联网约 10 秒；?offline=1 只查本地）
+                    from urllib.parse import parse_qs
+                    q = parse_qs(getattr(self, '_query', '') or '')
+                    offline = q.get('offline', ['0'])[0] in ('1', 'true', 'yes')
+                    from backend import netcheck
+                    env = netcheck.env_checks()
+                    out = {'env': env,
+                           'bad': [e['name'] for e in env if not e['ok']]}
+                    if not offline:
+                        net = netcheck.probe_all()
+                        out['net'] = {k: net.get(k) for k in ('pypi', 'github', 'hf')}
+                        out['picks'] = {'pypi': netcheck.pick_pypi(),
+                                        'github': netcheck.pick_github(),
+                                        'hf': netcheck.pick_hf()}
+                    return self.send(out)
                 if self.path == '/api/keys':
                     from backend import secrets as _sec
                     return self.send({'keys': _sec.list_api_keys(),

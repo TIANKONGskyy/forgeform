@@ -203,6 +203,15 @@ def custom_flow(plugins, hw) -> dict | None:
 # ────────────────────────────────────────────────────────────────
 # 主流程
 # ────────────────────────────────────────────────────────────────
+def _pip_index() -> str:
+    """当场测一个能用的 PyPI 镜像（缓存 1 小时）。"""
+    try:
+        from backend import netcheck
+        return netcheck.pick_pypi()
+    except Exception:
+        return "https://mirrors.aliyun.com/pypi/simple"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="铸想配置向导")
     ap.add_argument("--profile", default="", help="reuse / minimal / standard / full-comfy / cpu-only")
@@ -270,6 +279,7 @@ def main() -> int:
             print(json.dumps(patch, ensure_ascii=False, indent=2))
             return 0
         cfg = write_config(patch, Path(args.config))
+        print(f"\npip 源（实测可用）: {_pip_index()}")
         print(f"\n配置已写入 {cfg}")
         run_doctor()
         return 0

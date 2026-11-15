@@ -1,289 +1,115 @@
 # -*- coding: utf-8 -*-
-"""装完先跑这个：告诉你缺什么、能不能开工。
+"""环境 + 网络一趟查完，每条都给"怎么修"。
 
-    python tools/doctor.py
+    PYTHONPATH= python tools/doctor.py            # 全查（联网约 10 秒）
+    PYTHONPATH= python tools/doctor.py --offline  # 只看本地环境
+    PYTHONPATH= python tools/doctor.py --json     # 给程序读
 
-不加载模型、不启动服务、不写仓库（除了首次补一份 config.json）。
-每项检查独立，任何一项失败都只是 ✗，不会中断后续检查。
+为什么要有这个：铸想装不上，九成不是代码问题，而是下面四类之一 ——
+    ① 网络层：PyPI / GitHub / HF 在某台机器上不通或极慢
+    ② 解释器层：Python 版本、pip 硬配置、venv 半成品
+    ③ 系统层：长路径、磁盘、驱动、端口被旧版占着
+    ④ 配置层：路径写错、BOM、模型目录对不上
+这个脚本把这些一次性摆出来，**不用靠问用户"你那边什么情况"**。
 """
 from __future__ import annotations
 
+import argparse
 import json
-import os
-import platform
-import shutil
-import subprocess
 import sys
-import urllib.request
+import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-OK, BAD, WARN = "✓", "✗", "!"
-
-_results: list[tuple[str, str, str, str]] = []   # (级别, 项目, 值, 建议)
-
-
-def add(level: str, item: str, value: str = "", hint: str = "") -> None:
-    _results.append((level, item, value, hint))
+OK = "\u2713"
+BAD = "\u2717"
 
 
-# ── 1. Python ──────────────────────────────────────────────
-def check_python() -> None:
-    v = sys.version_info
-    ver = f"{v.major}.{v.minor}.{v.micro}"
-    if v >= (3, 11):
-        add(OK, "Python", f"{ver} ({platform.system()})")
-    else:
-        add(BAD, "Python", ver, "需要 3.11 或更高")
-
-
-# ── 2. 依赖 ────────────────────────────────────────────────
-PKGS = [
-    # (import 名, pip 名, 是否必需, 缺了会怎样)
-    ("gradio", "gradio", True, "无界面"),
-    ("fastapi", "fastapi", True, "无自定义路由"),
-    ("trimesh", "trimesh", True, "无法导出 STL"),
-    ("numpy", "numpy", True, "无法处理网格"),
-    ("requests", "requests", True, "连不上 ComfyUI"),
-    ("psutil", "psutil", True, "无硬件监控"),
-    ("PIL", "Pillow", True, "无法处理图片"),
-    ("websocket", "websocket-client", True, "无实时进度"),
-    ("pymeshlab", "pymeshlab", False, "补洞降级"),
-    ("pymeshfix", "pymeshfix", False, "水密率下降"),
-    ("fast_simplification", "fast-simplification", False, "减面变慢"),
-    ("rtree", "rtree", False, "网格查询变慢"),
-]
-
-
-def check_deps() -> None:
-    missing_required, missing_optional = [], []
-    versions = []
-    for mod, pipname, required, effect in PKGS:
-        try:
-            m = __import__(mod)
-            ver = getattr(m, "__version__", "")
-            versions.append(f"{pipname}{(' ' + ver) if ver else ''}")
-        except Exception:
-            (missing_required if required else missing_optional).append((pipname, effect))
-
-    if missing_required:
-        for name, effect in missing_required:
-            add(BAD, f"依赖 {name}", "缺失", f"{effect} → pip install {name}")
-    else:
-        add(OK, "依赖（必需）", "全部就绪")
-
-    if missing_optional:
-        for name, effect in missing_optional:
-            add(WARN, f"依赖 {name}", "缺失", f"{effect}（可选，装上更好）")
-    else:
-        add(OK, "依赖（可选）", "全部就绪")
-
-    if versions:
-        add(OK, "版本", " · ".join(versions[:6]) + (" …" if len(versions) > 6 else ""))
-
-
-# ── 3. config ──────────────────────────────────────────────
-def check_config() -> dict:
-    cfg_path = ROOT / "config.json"
-    example = ROOT / "config.example.json"
-    if not cfg_path.exists():
-        if example.exists():
-            shutil.copyfile(example, cfg_path)
-            add(WARN, "config.json", "不存在 → 已从 example 复制", "把 models 里的文件名改成你本地的")
-        else:
-            add(BAD, "config.json", "不存在且没有 example", "仓库不完整")
-            return {}
-    try:
-        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-        add(OK, "config.json", "可解析")
-        return cfg
-    except Exception as exc:
-        add(BAD, "config.json", f"解析失败: {exc}", "用 config.example.json 覆盖回去")
-        return {}
-
-
-# ── 4. 路径 ────────────────────────────────────────────────
-def resolve_paths(cfg: dict) -> dict:
-    try:
-        from backend.env import normalize_config_paths, COMFYUI_DIR
-    except Exception:
-        return cfg.get("paths", {}) or {}
-    try:
-        normalize_config_paths(cfg)
-    except Exception:
-        pass
-    return cfg.get("paths", {}) or {}
-
-
-def check_paths(paths: dict) -> None:
-    comfy = paths.get("comfyui", "")
-    shown = "(未设置)" if (not comfy or "${" in str(comfy)) else comfy
-    if comfy and "${" not in str(comfy) and Path(comfy).exists():
-        add(OK, "ComfyUI 目录", comfy)
-    else:
-        add(BAD, "ComfyUI 目录", shown,
-            '设环境变量 COMFYUI_DIR，或在 config.json 的 paths.comfyui 里写绝对路径')
-
-    for key in ("output", "temp"):
-        p = paths.get(key, "")
-        if not p:
-            continue
-        try:
-            Path(p).mkdir(parents=True, exist_ok=True)
-            add(OK, f"目录 {key}", p)
-        except OSError as exc:
-            add(BAD, f"目录 {key}", f"{p} ({exc})", "检查磁盘权限/空间")
-
-
-# ── 5. ComfyUI 服务 ────────────────────────────────────────
-def check_comfy_service() -> None:
-    url = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188")
-    try:
-        with urllib.request.urlopen(f"{url}/system_stats", timeout=4) as r:
-            data = json.loads(r.read().decode("utf-8", "ignore"))
-        devs = data.get("devices") or []
-        name = devs[0].get("name", "?") if devs else "?"
-        vram = devs[0].get("vram_total", 0) / 1024**3 if devs else 0
-        add(OK, "ComfyUI 服务", f"{url}  ({name}{f', {vram:.0f}G' if vram else ''})")
-    except Exception:
-        add(BAD, "ComfyUI 服务", f"{url} 无响应",
-            "先起 ComfyUI；Windows 上记得 PYTHONIOENCODING=utf-8，V100 别加 --lowvram")
-
-
-# ── 6. 模型文件 ────────────────────────────────────────────
-def check_models(cfg: dict, paths: dict) -> None:
-    comfy = Path(paths.get("comfyui") or "")
-    if not comfy.exists():
-        add(WARN, "模型文件", "跳过", "ComfyUI 目录不可用")
-        return
-
-    # ComfyUI 的模型可能落在这些目录（不同节点读不同位置）
-    search_dirs = ["diffusion_models", "checkpoints", "unet", "vae", "text_encoders",
-                   "clip", "loras", "3d"]
-    index = {}
-    for sub in search_dirs:
-        d = comfy / "models" / sub
-        if d.exists():
-            for f in d.rglob("*"):
-                if f.is_file():
-                    index[f.name] = sub
-
-    models = cfg.get("models") or {}
-    for stage in ("image", "video", "3d"):
-        table = models.get(stage) or {}
-        for key, mcfg in table.items():
-            if not isinstance(mcfg, dict):
-                continue
-            want = [v for k, v in mcfg.items()
-                    if k in ("checkpoint", "vae", "clip_l", "clip_t5", "clip", "lora",
-                             "turbo_lora", "video_vae", "audio_vae", "model", "clip_vision")
-                    and isinstance(v, str) and v.strip()]
-            if not want:
-                continue
-            hit = [w for w in want if Path(w).name in index]
-            miss = [w for w in want if Path(w).name not in index]
-            label = f"{stage}.{key}"
-            if miss:
-                add(WARN, label, f"{len(hit)}/{len(want)} 找到",
-                    "缺: " + ", ".join(Path(x).name for x in miss[:3])
-                    + (" …" if len(miss) > 3 else ""))
-            else:
-                add(OK, label, f"{len(hit)}/{len(want)} 找到")
-
-
-# ── 7. GPU ─────────────────────────────────────────────────
-# ── 6. 推理框架探测（决定 auto 模式怎么路由）────────────
-CAP_CN = {"text": "对话", "image": "出图", "mesh": "建模", "video": "视频"}
-
-
-def check_frameworks(paths: dict) -> None:
-    """这台机器上有什么能用的推理框架 —— auto 模式靠这个决定走谁。"""
-    try:
-        from backend.backends import detect as D
-    except Exception as exc:
-        add(WARN, "框架探测", f"跳过（{type(exc).__name__}）")
-        return
-
-    fws = D.probe_all(comfy_dir=paths.get("comfyui") or None)
-    for f in fws:
-        if not f.alive:
-            continue
-        caps = "、".join(CAP_CN.get(c, c) for c in sorted(f.caps)) or "?"
-        add(OK, f.label, f"{f.url}  能: {caps}" + (f"  （{f.detail}）" if f.detail else ""))
-        if f.note:
-            add(WARN, f.label + " 备注", f.note)
-
-    for f in fws:
-        if not f.alive and f.key == "hy3dgen":
-            add(WARN, "hy3dgen", "未安装", "想用直连建模就 pip install hy3dgen")
-        if not f.alive and f.key == "diffusers":
-            add(WARN, "本地 diffusers 模型", "没找到", "出图想直连就得先 fetch_model 拉一个")
-
-    plan = D.recommend(fws)
-    pretty = "，".join(f"{CAP_CN.get(k, k)}→{v}" for k, v in plan.items())
-    missing = [CAP_CN.get(k, k) for k in ("image", "mesh") if k not in plan]
-    if missing:
-        add(BAD, "自动路由", pretty or "无",
-            f"{'、'.join(missing)} 没有可用后端：装 ComfyUI 或 "
-            f"python tools/fetch_model.py 拉一个 diffusers 模型（见 docs/BACKENDS.md）")
-    else:
-        add(OK, "自动路由", pretty)
-
-
-def check_gpu() -> None:
-    try:
-        out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,memory.total,memory.used", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=8,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        line = (out.stdout or "").strip().splitlines()
-        if line:
-            add(OK, "GPU", line[0])
-        else:
-            add(WARN, "GPU", "nvidia-smi 无输出", "无 GPU 时只能看界面，生成不可用")
-    except Exception:
-        add(WARN, "GPU", "未检测到 nvidia-smi", "无 GPU 时只能看界面，生成不可用")
-
-
-# ── 报告 ───────────────────────────────────────────────────
-def report() -> int:
-    icon = {OK: "[OK]  ", BAD: "[FAIL]", WARN: "[WARN]"}
-    width = max(len(i) for _, i, _, _ in _results) if _results else 10
-    print("\n铸想 ForgeForm 环境自检")
-    print("=" * 78)
-    for level, item, value, hint in _results:
-        print(f"{icon[level]} {item.ljust(width)}  {value}")
-        if hint:
-            print(f"          {' ' * width}  → {hint}")
-    print("=" * 78)
-
-    bad = [r for r in _results if r[0] == BAD]
-    warn = [r for r in _results if r[0] == WARN]
-    if bad:
-        print(f"结论：还不能跑。{len(bad)} 项阻塞，按上面的 → 处理后重跑本脚本。")
-        return 1
-    if warn:
-        print(f"结论：能跑。{len(warn)} 项提醒，不影响开工。")
-        return 0
-    print("结论：全部就绪。python app.py 然后打开 http://127.0.0.1:7860")
-    return 0
+def _line(name: str, ok: bool, value: str, fix: str = "", width: int = 16) -> str:
+    mark = OK if ok else BAD
+    out = f"  {mark} {name:<{width}}{value}"
+    if not ok and fix:
+        out += f"\n      → {fix}"
+    return out
 
 
 def main() -> int:
-    check_python()
-    check_deps()
-    cfg = check_config()
-    paths = resolve_paths(cfg) if cfg else {}
-    check_paths(paths)
-    check_comfy_service()
-    if cfg:
-        check_models(cfg, paths)
-    check_frameworks(paths)
-    check_gpu()
-    return report()
+    ap = argparse.ArgumentParser(description="铸想 环境与网络自检")
+    ap.add_argument("--offline", action="store_true", help="不联网")
+    ap.add_argument("--json", action="store_true", help="输出 JSON")
+    ap.add_argument("--refresh", action="store_true", help="忽略缓存重新测网络")
+    args = ap.parse_args()
+
+    from backend import netcheck as N
+
+    env = N.env_checks()
+    net = None
+    if not args.offline:
+        cache = N.CACHE
+        if args.refresh and cache.exists():
+            cache.unlink()
+        t0 = time.time()
+        net = N.probe_all()
+        net["_elapsed"] = round(time.time() - t0, 1)
+
+    if args.json:
+        print(json.dumps({"env": env, "net": net}, ensure_ascii=False, indent=2))
+        return 0 if all(e["ok"] for e in env) else 1
+
+    print("=" * 66)
+    print("  铸想 ForgeForm · 环境与网络自检")
+    print(f"  目录 {ROOT}")
+    print("=" * 66)
+
+    print("\n【本地环境】")
+    for e in env:
+        print(_line(e["name"], e["ok"], e["value"], e["fix"]))
+    bad_env = [e["name"] for e in env if not e["ok"]]
+
+    if net:
+        print(f"\n【网络】（实测 {net.get('_elapsed', '?')} 秒"
+              f"{'，来自缓存' if net.get('cached') else ''}）")
+        for table, label in (("pypi", "PyPI"), ("github", "GitHub"), ("hf", "HuggingFace")):
+            rows = net.get(table) or []
+            best = next((r for r in rows if r.get("ok")), None)
+            if best:
+                print(_line(label, True, f'{best["name"]} · {best["ms"]} ms ← 会用这个'))
+                for r in rows:
+                    if r is best:
+                        continue
+                    mark = OK if r.get("ok") else BAD
+                    print(f"      {mark} {r['name']:<12}{r['ms']:>6} ms  "
+                          f"{r.get('error', '') or str(r.get('status', ''))}")
+            else:
+                print(_line(label, False, "所有镜像都不通",
+                            "确认能上网；有代理的话检查 HTTPS_PROXY；"
+                            "或让同事用 U 盘拷已下好的模型目录。"))
+
+    print("\n【结论】")
+    if bad_env:
+        print(f"  {len(bad_env)} 项本地环境要注意：{', '.join(bad_env)}")
+    else:
+        print("  本地环境没有阻塞项。")
+    if net:
+        pypi = N.pick_pypi()
+        gh = N.pick_github()
+        hf = N.pick_hf()
+        print(f"  pip 源    {pypi}")
+        print(f"  GitHub    {gh}")
+        print(f"  HF 权重   {hf}")
+        print()
+        print("  装的时候直接用这个源：")
+        print(f"    set PIP_INDEX_URL={pypi}")
+        print(f"    PYTHONPATH= python tools/setup.py --yes")
+        print()
+        print("  下一步：")
+        print("    PYTHONPATH= python tools/setup.py            # 选方案并下载")
+        print("    PYTHONPATH= python tools/calibrate.py        # 装完测本机速度")
+        print("    PYTHONPATH= python tools/studio.py           # 图形化安装")
+    return 0 if not bad_env else 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
