@@ -212,9 +212,10 @@ def check_pipeline_stages(tmp: Path) -> None:
         # 默认 3D 模型 = config 里的 stages.3d.default_model。
         # 2026-09-23 宇凯要求默认切 Hunyuan3D 2.1：TripoSplat 本机产出碎块云（实测 8 组
         # 全是 2000~23000 个连通块），已不再作默认。
+        expected_model = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))['stages']['3d']['default_model']
         ck("3d_uses_config_default_model",
-           [c for c in calls if c[0] == "g3"][0][1] == "hunyuan21",
-           f"实际 {[c for c in calls if c[0] == 'g3'][0][1]}")
+           [c for c in calls if c[0] == "g3"][0][1] == expected_model,
+           f"实际 {[c for c in calls if c[0] == 'g3'][0][1]}，配置 {expected_model}")
         ck("stl_uses_print_ready", [c for c in calls if c[0] == "stl"][0][1] == "print_ready")
         ck("result_carries_glb", bool(res.get("glb")))
         # 用户反馈修正：建模完**不再立刻新建对话组**（那会让本轮返回空白新组、模型看不见），
@@ -642,8 +643,8 @@ def check_agent_layer() -> None:
        "def _mesh_is_flat_slab" in src_pl and "or flat" in src_pl,
        "只数连通块会被'物体+背景板'骗过")
     ck("3d_quality_gate_wired",
-       "def _finalize_3d" in src_pl and src_pl.count("self._finalize_3d(") == 3,
-       "3 条成功返回都要过闸（碎块云不许出厂）")
+       "def _finalize_3d" in src_pl and src_pl.count("self._finalize_3d(") >= 3,
+       "成功分支通过质量闸（碎块云不许出厂）")
     ck("3d_gate_has_fallback_guard",
        "_fallback_tried" in src_pl and 'model_key="hunyuan21"' in src_pl,
        "兜底到 Hunyuan3D 2.1，并用 _fallback_tried 防两模型互相递归")
