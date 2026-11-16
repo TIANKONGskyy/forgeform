@@ -62,6 +62,42 @@ class StudioTest(unittest.TestCase):
         self.studio.job['status'] = 'running'
         with self.assertRaises(ValueError): self.studio.start_job('duplicate', lambda: None)
 
+    def test_rescan_invalidates_only_selected_comfy_cache(self):
+        from backend.backends.detect import _SCAN_CACHE
+        comfy = self.root / 'comfy'; comfy.mkdir()
+        (self.root / 'config.json').write_text(json.dumps({'paths': {'comfyui': str(comfy)}}))
+        key = str(comfy.resolve()).lower()
+        _SCAN_CACHE[key] = {'image': ['old'], 'mesh': [], 'vae': []}
+        with patch('backend.backends.detect.probe_all', return_value=[]), \
+             patch('backend.backends.detect.probe_local_diffusers', return_value=SimpleNamespace(key='diffusers')), \
+             patch('backend.backends.recommend.probe_hardware', return_value=Hardware()), \
+             patch('backend.backends.recommend.build_profiles', return_value=[]):
+            self.studio.scan()
+        self.assertNotIn(key, _SCAN_CACHE)
+
+    def test_gguf_recommendation_requires_both_memory_budgets(self):
+        self.assertFalse(recommend_quant(10, 32, 2, prefer='gguf')['fits'])
+        self.assertFalse(recommend_quant(10, 2, 64, prefer='gguf')['fits'])
+        self.assertTrue(recommend_quant(10, 16, 32, prefer='gguf')['fits'])
+        self.assertFalse(recommend_quant(10, 0, 64)['fits'])
+
+    def test_low_memory_profile_and_current_available_memory(self):
+        from backend.backends.direct import use_low_memory
+        with patch('backend.backends.direct.low_memory_mode', return_value=False), \
+             patch('psutil.virtual_memory', return_value=SimpleNamespace(available=8 * 1024**3)):
+            self.assertTrue(use_low_memory({}))
+        with patch('backend.backends.direct.low_memory_mode', return_value=False), \
+             patch('psutil.virtual_memory', return_value=SimpleNamespace(available=64 * 1024**3)):
+            self.assertTrue(use_low_memory({'runtime': {'low_memory': True}}))
+            self.assertFalse(use_low_memory({}))
+
+    def test_reuse_with_chat_download_is_not_called_zero_download(self):
+        assets = {'comfyui': True, 'comfyui_3d': True, 'comfyui_models': ['one'], 'chat': False}
+        plan = next(p for p in build_profiles(Hardware(16, 14, 32, 200, 'GPU'), assets) if p.key == 'reuse')
+        self.assertTrue(plan.downloads)
+        self.assertNotIn('零下载', plan.name)
+        self.assertNotIn('不下载任何东西', plan.desc)
+
 
 class PlanRegressionTest(unittest.TestCase):
     def test_portable_path_and_llm_name(self):

@@ -156,6 +156,17 @@ def low_memory_mode(threshold_gb: float = 20.0) -> bool:
     return 0 < total < threshold_gb
 
 
+def use_low_memory(config: dict) -> bool:
+    """Honor the chosen profile and adapt to current available system RAM."""
+    if (config.get("runtime") or {}).get("low_memory") or low_memory_mode():
+        return True
+    try:
+        import psutil
+        return psutil.virtual_memory().available < 20 * 1024 ** 3
+    except Exception:
+        return False
+
+
 def purge(tag: str = "") -> None:
     """把能放的全放掉：Python 垃圾 + CUDA 缓存。低内存机器上每阶段调用一次。"""
     import gc
@@ -591,15 +602,12 @@ class DirectBackend:
 
         steps = int(params.get("steps") or opts.get("steps") or 30)
         octree = int(params.get("octree_resolution") or opts.get("octree") or 256)
-        guidance = float(opts.get("guidance") or 6.0)
+        guidance = float(params.get("guidance_scale") or opts.get("guidance_scale") or opts.get("guidance") or 6.0)
         dtype = getattr(torch, str(opts.get("dtype") or "float16"), torch.float16)
 
+        low_ram = use_low_memory(self.config)
         def build():
-            import psutil
-
             from .lazy_gpu_load import patch_safetensors, unpatch_safetensors
-
-            available = psutil.virtual_memory().available / (1024 ** 3)
 
             # ── 低内存机器（16 GB 级）的两个关键优化 ──
             # 实测（8 GB 显存 / 10 GB 内存限制下）：
@@ -611,7 +619,6 @@ class DirectBackend:
             #    instantiate_from_config 现场 new 出来的，默认在 CPU 上
             #    torch.empty 每个 nn.Linear 的参数 —— 11 GB 限制下会崩在
             #    Dinov2SelfOutput 的 nn.Linear(1024,1024)）
-            low_ram = low_memory_mode() or available < 20
             patch_safetensors()
             prev_default = torch.empty(0).device.type
             prev_dtype = torch.get_default_dtype()
@@ -644,7 +651,7 @@ class DirectBackend:
         t0 = time.time()
         meshes = pipe(image=image, num_inference_steps=steps,
                       guidance_scale=guidance, octree_resolution=octree,
-                      num_chunks=2000 if low_memory_mode() else 8000, output_type="trimesh")
+                      num_chunks=2000 if low_ram else 8000, output_type="trimesh")
         mesh = meshes[0] if isinstance(meshes, (list, tuple)) else meshes
         name = f"direct3d_{int(time.time())}_{uuid.uuid4().hex[:6]}.glb"
         path = self.out_root / "3d" / name

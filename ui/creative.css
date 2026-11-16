@@ -200,3 +200,13 @@ body{overflow-y:auto!important}
   height:auto!important;
   width:fit-content!important}
 #btn_calib:hover{border-color:var(--ff-accent)!important;color:var(--ff-accent)!important}
+
+
+/* Match the Studio workspace */
+:root{--ff-bg:#0d121a;--ff-panel:#151d28;--ff-line:#293746;--ff-text:#edf5f3;--ff-muted:#a5b4b9;--ff-accent:#a6e2d3}
+.gradio-container{max-width:1440px!important}.navbar{padding-bottom:18px!important}.main-wrap{gap:22px!important}.sidebar,#chatbox,.side-card,.side-section{box-shadow:0 10px 30px rgba(0,0,0,.08)!important}
+#chatbox .message.user,#chatbox .user-row .message{background:rgba(107,177,162,.20)!important;border:1px solid rgba(166,226,211,.16)!important;color:var(--ff-text)!important}
+#chatbox .message.bot,#chatbox .bot-row .message{background:rgba(255,255,255,.055)!important;border-color:var(--ff-line)!important}
+#chatbox .message,#chatbox .bubble{line-height:1.75!important}#chatbox{padding:16px!important}.input-row-chat{padding:12px 14px!important}.action-bar{gap:8px!important}.action-bar button{border-radius:10px!important}
+.gradio-container button:focus-visible,.gradio-container input:focus-visible,.gradio-container textarea:focus-visible{outline:2px solid var(--ff-accent)!important;outline-offset:2px!important}
+@media(max-width:850px){.gradio-container{padding:14px!important}.side-col{display:block!important;max-width:none!important;min-width:0!important;border-left:0!important;padding-left:0!important}.main-wrap{gap:16px!important}.sidebar{padding:16px}.model-bar{flex-wrap:wrap!important}}

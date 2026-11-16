@@ -189,8 +189,8 @@ class Studio:
         return {'ok': True}
 
     def scan(self, model_root=''):
-        from backend.backends.detect import probe_all, probe_local_diffusers, guess_comfy_dir
-        from backend.backends.recommend import probe_hardware, summarize_assets, build_profiles, pick_default, list_llm_choices
+        from backend.backends.detect import probe_all, probe_local_diffusers, guess_comfy_dir, _SCAN_CACHE
+        from backend.backends.recommend import probe_hardware, summarize_assets, build_profiles, pick_default, list_llm_choices, inspect_comfy_reuse
         if model_root:
             self.model_root = str(Path(model_root).expanduser().resolve())
         config = self.config()
@@ -200,11 +200,16 @@ class Studio:
             comfy = guess_comfy_dir()
             if comfy:
                 self.log(f'自动找到 ComfyUI: {comfy}')
+        # A user-initiated rescan must reflect weights installed or removed since the last scan.
+        if comfy:
+            _SCAN_CACHE.pop(str(Path(comfy).resolve()).lower(), None)
         fws = probe_all(comfy_dir=comfy or None)
         local = probe_local_diffusers([self.model_root])
         fws = [local if f.key == "diffusers" else f for f in fws]
         hardware = probe_hardware(self.model_root)
         assets = summarize_assets(fws)
+        if assets.get('comfyui') and assets.get('comfyui_3d'):
+            assets['comfyui_reuse_ready'], assets['comfyui_reuse_reason'] = inspect_comfy_reuse(comfy, config, fws)
         profiles = build_profiles(hardware, assets, self.model_root)
         self.plans = {p.key: p for p in profiles}
         default = pick_default(profiles)
@@ -215,7 +220,7 @@ class Studio:
 
     def config(self):
         p = self.root / 'config.json'
-        return json.loads((p if p.exists() else self.root / 'config.example.json').read_text(encoding='utf-8'))
+        return json.loads((p if p.exists() else self.root / 'config.example.json').read_text(encoding='utf-8-sig'))
 
     def runtime_install(self):
         venv = self.root / '.venv'

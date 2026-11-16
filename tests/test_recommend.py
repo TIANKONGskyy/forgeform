@@ -15,11 +15,42 @@ def hw(vram, ram=32, disk=200):
 
 def assets(comfy=False, comfy3d=False, diffusers=False, hy3d=False, chat=False):
     return {"comfyui": comfy, "comfyui_3d": comfy3d, "comfyui_models": ["a"] * 12 if comfy else [],
+            "comfyui_reuse_ready": comfy and comfy3d,
             "diffusers": diffusers, "diffusers_models": ["m"] if diffusers else [],
             "hy3dgen": hy3d, "chat": chat}
 
 
 class ProfileTest(unittest.TestCase):
+    def test_reuse_checks_specific_files_and_nodes(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from backend.backends.detect import Framework
+        from backend.backends.recommend import inspect_comfy_reuse
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'models'
+            for rel in ('diffusion_models/q.safetensors', 'text_encoders/c.safetensors',
+                        'vae/v.safetensors', 'checkpoints/tencent/Hunyuan3D-2_1/hunyuan3d-dit-v2-1/model.fp16.ckpt',
+                        'checkpoints/tencent/Hunyuan3D-2_1/hunyuan3d-vae-v2-1/model.fp16.ckpt'):
+                path = root / rel; path.parent.mkdir(parents=True, exist_ok=True); path.touch()
+            cfg = {'models': {'image': {'qwen21_ref': {'checkpoint': 'q.safetensors', 'clip_l': 'c.safetensors', 'vae': 'v.safetensors'}}}}
+            fw = [Framework('comfyui', 'ComfyUI', alive=True, url='http://127.0.0.1:8188')]
+            nodes = {name: {} for name in ('UNETLoader', 'CLIPLoader', 'VAELoader', 'TextEncodeQwenImage21',
+                     '[Comfy3D] Load Hunyuan3D 21 ShapeGen Pipeline', '[Comfy3D] Hunyuan3D 21 ShapeGen', '[Comfy3D] Save 3D Mesh')}
+            with patch('backend.backends.detect._get_json', return_value=nodes):
+                self.assertTrue(inspect_comfy_reuse(tmp, cfg, fw)[0])
+                (root / 'vae/v.safetensors').unlink()
+                self.assertFalse(inspect_comfy_reuse(tmp, cfg, fw)[0])
+
+    def test_reuse_is_not_recommended_without_matching_weights(self):
+        a = assets(comfy=True, comfy3d=True, chat=True)
+        a.update(comfyui_reuse_ready=False, comfyui_reuse_reason='缺少目标权重')
+        plans = build_profiles(hw(32, ram=64), a)
+        reuse = next(p for p in plans if p.key == 'reuse')
+        self.assertFalse(reuse.fits)
+        self.assertIn('缺少目标权重', reuse.reason)
+        self.assertNotEqual(pick_default(plans).key, 'reuse')
+
     def test_full_comfy_machine_prefers_zero_download(self):
         """已经有 ComfyUI + 3D-Pack 的机器，第一推荐应该是"零下载"。"""
         ps = build_profiles(hw(32), assets(comfy=True, comfy3d=True, chat=True))

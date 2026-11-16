@@ -29,6 +29,7 @@ class Hardware:
     ram_gb: float = 0.0
     disk_free_gb: float = 0.0
     gpu_name: str = ""
+    ram_available_gb: float | None = None
 
     @property
     def has_gpu(self) -> bool:
@@ -37,7 +38,8 @@ class Hardware:
     def to_dict(self) -> dict:
         return {"vram_gb": round(self.vram_gb, 1), "vram_free_gb": round(self.vram_free_gb, 1),
                 "ram_gb": round(self.ram_gb, 1), "disk_free_gb": round(self.disk_free_gb, 1),
-                "gpu_name": self.gpu_name, "has_gpu": self.has_gpu}
+                "gpu_name": self.gpu_name, "has_gpu": self.has_gpu,
+                "ram_available_gb": round(self.ram_available_gb, 1) if self.ram_available_gb is not None else None}
 
 
 @dataclass
@@ -103,7 +105,9 @@ def probe_hardware(disk_path: str = ".") -> Hardware:
     hw = Hardware(vram_gb=total, vram_free_gb=free, gpu_name=name)
     try:
         import psutil
-        hw.ram_gb = psutil.virtual_memory().total / GB
+        memory = psutil.virtual_memory()
+        hw.ram_gb = memory.total / GB
+        hw.ram_available_gb = memory.available / GB
     except Exception:
         if os.name == "nt":
             import ctypes
@@ -113,6 +117,7 @@ def probe_hardware(disk_path: str = ".") -> Hardware:
             mem.length = ctypes.sizeof(mem)
             if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(mem)):
                 hw.ram_gb = mem.total / GB
+                hw.ram_available_gb = mem.avail / GB
     hw.disk_free_gb = disk_free_gb(disk_path)
     return hw
 
@@ -143,6 +148,42 @@ def summarize_assets(frameworks) -> dict:
                 or bool(first_alive("lmstudio")),
         "chat_endpoints": [f.to_dict() for f in frameworks if f.alive and "text" in f.caps and f.models],
     }
+
+
+def inspect_comfy_reuse(comfy_dir: str, config: dict, frameworks: list) -> tuple[bool, str]:
+    """Check the specific models the reuse profile would configure, not arbitrary weights."""
+    comfy = next((f for f in frameworks if f.key.startswith('comfyui') and f.alive), None)
+    if not comfy or not comfy_dir:
+        return False, '未找到在线的 ComfyUI 和模型目录'
+    root = Path(comfy_dir) / 'models'
+    model = ((config.get('models') or {}).get('image') or {}).get('qwen21_ref') or {}
+    fields = {'checkpoint': ('checkpoints', 'diffusion_models', 'unet'),
+              'clip_l': ('text_encoders', 'clip'), 'vae': ('vae',)}
+    missing = []
+    for key, subdirs in fields.items():
+        name = model.get(key)
+        if not name or not any((root / sub).is_dir() and any(
+                f.is_file() and f.name.casefold() == Path(name).name.casefold()
+                for f in (root / sub).rglob('*')) for sub in subdirs):
+            missing.append(str(name or key))
+    shape = root / 'checkpoints' / 'tencent' / 'Hunyuan3D-2_1'
+    for sub in ('hunyuan3d-dit-v2-1', 'hunyuan3d-vae-v2-1'):
+        if not (shape / sub / 'model.fp16.ckpt').is_file():
+            missing.append(sub)
+    if missing:
+        return False, '复用方案缺少所需文件：' + ', '.join(missing)
+    try:
+        from .detect import _get_json
+        nodes = _get_json(comfy.url.rstrip('/') + '/object_info', timeout=8)
+        required = {'UNETLoader', 'CLIPLoader', 'VAELoader', 'TextEncodeQwenImage21',
+                    '[Comfy3D] Load Hunyuan3D 21 ShapeGen Pipeline',
+                    '[Comfy3D] Hunyuan3D 21 ShapeGen', '[Comfy3D] Save 3D Mesh'}
+        absent = sorted(required.difference(nodes))
+        if absent:
+            return False, '复用方案缺少节点：' + ', '.join(absent)
+    except Exception:
+        return False, '无法确认 ComfyUI 节点，请检查服务后重新扫描'
+    return True, '已找到方案指定的权重和节点；实际加载仍需运行验证'
 
 
 # ────────────────────────────────────────────────────────────────
@@ -313,8 +354,8 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             image_model="comfyui",
             mesh_model="comfyui",
             est_gb=0.0,
-            fits=True,
-            reason="已有可用的出图 + 3D 能力，重新下载是浪费",
+            fits=bool(assets.get("comfyui_reuse_ready")),
+            reason=assets.get("comfyui_reuse_reason") or "未确认方案所需权重和节点，请重新扫描",
             # 必须把 image / 3d 的默认模型也写进去 —— 只写 backend.mode 的话
             # config 里 stages.3d.default_model 是空的，界面进去点建模会不知道用哪个。
             config_patch={
@@ -348,7 +389,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
         out.append(Profile(
             key="minimal",
             name="最小可用（SD1.5 + 3D 2mini）",
-            desc="出图用 SD1.5，建模用 Hunyuan3D-2mini。8G 显存能跑，画质一般但链路完整。",
+            desc="出图用 SD1.5，建模用 Hunyuan3D-2mini。适合较小显存，实际运行取决于可用资源。",
             backend_mode="direct",
             image_model="sd15", mesh_model=mesh_pick,
             downloads=with_llm([sd15, mini], need_ollama=not assets.get("ollama"), vram_cap=8),
@@ -384,7 +425,7 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             downloads=with_llm([klein4b], need_ollama=not assets.get("ollama"), vram_cap=12),
             est_gb=15.0,
             fits=vram >= 12 and fits_by_ram(11) and hw.disk_free_gb >= 40,
-            reason=("显存 12 GB+；内存按完整权重加载峰值检查；磁盘 40 GB+"
+            reason=("显存和内存按完整权重加载峰值检查；磁盘 40 GB+"
                     if vram >= 12 else f"显存只有 {vram:.0f} GB，不够"),
             config_patch={
                 "backend": {"mode": "auto"},
@@ -406,8 +447,8 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             backend_mode="comfyui",
             image_model="comfyui", mesh_model="hunyuan21",
             downloads=[], est_gb=0.0,
-            fits=True,
-            reason="ComfyUI 已有权重，2.1 的权重若缺可用 docs/MODELS.md 里的链接补",
+            fits=bool(assets.get("comfyui_reuse_ready")),
+            reason=assets.get("comfyui_reuse_reason") or "未确认方案所需权重和节点，请重新扫描",
             config_patch={
                 "backend": {"mode": "comfyui"},
                 "stages": {"image": {"default_model": "qwen21_ref"},
@@ -486,6 +527,10 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             d.dest = d.dest.replace("D:/models", model_root.replace("\\", "/"))
         if p.key in ("reuse", "full-comfy") and no_chat:
             p.downloads = with_llm(p.downloads, not assets.get("ollama"))
+            if p.downloads:
+                p.name = p.name.replace("（零下载）", "（复用已有环境）")
+                p.desc = p.desc.replace("不下载任何东西。", "仍需安装下列对话组件。")
+                p.reason += "；对话组件需按清单安装"
         if p.key in ("minimal", "standard"):
             if not any(d.plugin_id == "pydeps" for d in p.downloads):
                 p.downloads.insert(0, Download("framework", "pydeps", "Python 推理环境", size_gb=4,
@@ -513,6 +558,8 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
             p.reason = "低内存模式：按阶段加载；建模前需至少 11 GB 空闲内存，先关闭其他大型应用。16 GB 实机待验证。" if hw.ram_gb < 20 else "按阶段加载"
             p.config_patch.setdefault("runtime", {})["low_memory"] = hw.ram_gb < 20
             p.config_patch["runtime"]["keep_models"] = False
+            if hw.ram_available_gb is not None and hw.ram_available_gb < 11:
+                p.reason += f" 当前可用内存约 {hw.ram_available_gb:.1f} GB，运行前请先释放内存。"
         total = sum(d.size_gb for d in p.downloads)
         if total and hw.disk_free_gb < total * 1.2 + 5:
             p.fits = False

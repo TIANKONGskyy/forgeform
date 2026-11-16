@@ -11,6 +11,19 @@ from backend.studio import Studio
 from backend.backends.recommend import Download, Profile
 
 
+class ProjectSettingsTest(unittest.TestCase):
+    def test_selected_models_and_quality_survive_reopening(self):
+        from backend import project_manager as pm
+        with tempfile.TemporaryDirectory() as tmp, patch.object(pm, 'PROJECTS_DIR', Path(tmp)):
+            state = pm.create_project()
+            state.update(quality='快速', image_model='z_image', model_3d='hunyuan21',
+                         auto_params={'quality_3d': '快速'})
+            pm.save_project(state)
+            restored = pm.load_project(state['folder'])
+            for key in ('quality', 'image_model', 'model_3d', 'auto_params'):
+                self.assertEqual(restored[key], state[key])
+
+
 class PathResolutionTest(unittest.TestCase):
     def test_unset_environment_resolves_both_comfy_paths(self):
         with patch.dict(os.environ, {}, clear=True), patch(

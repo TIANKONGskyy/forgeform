@@ -282,23 +282,23 @@ def recommend_quant(model_gb: float, vram_gb: float, ram_gb: float,
         if prefer == "gguf":
             est = model_gb * 0.30          # Q4 约 30% 的体积
             ev, er = est * vm, est * rm
-            fits = ev <= vram_budget or er <= ram_budget
+            fits = ev <= vram_budget and er <= ram_budget and vram_budget > 0
             return mk("gguf", "", fits,
                       f"指定 GGUF：权重 {est:.1f} GB，实际占显存约 {ev:.1f} / 内存约 {er:.1f} GB",
-                      min(ev, vram_budget), er, [])
+                      ev, er, [])
         need = model_gb * QUANT_RATIO.get(prefer, 1.0)
         nv, nr = need * vm, need * rm
         if nv <= vram_budget and nr <= ram_budget:
             return mk(prefer, "", True,
                       f"指定 {prefer}：实际需显存约 {nv:.1f} GB ≤ 预算 {vram_budget:.1f} GB",
                       nv, nr, [])
-        fits_ram = nr <= ram_budget
+        fits_ram = nr <= ram_budget and vram_budget > 0
         return mk(prefer, "model", fits_ram,
                   (f"指定 {prefer}：实际需显存约 {nv:.1f} GB，超出预算 {vram_budget:.1f} GB；"
                    f"offload 到内存需约 {nr:.1f} GB（预算 {ram_budget:.1f} GB）"),
                   min(nv, vram_budget), nr,
                   [{"quant": "gguf", "why": f"内存只有 {ram_budget:.0f} GB 可用，GGUF 约 "
-                                            f"{model_gb * 0.30:.1f} GB 更稳"}] if not fits_ram else [])
+                                            f"{model_gb * 0.30:.1f} GB 可供评估"}] if not fits_ram and has_gguf else [])
 
     # ── auto ──
     # 1) 原精度塞得进显存：最好，不量化、不 offload
@@ -309,26 +309,27 @@ def recommend_quant(model_gb: float, vram_gb: float, ram_gb: float,
                   [{"quant": "gguf", "why": "想省显存可以换 GGUF，质量损失很小"}] if has_gguf else [])
 
     # 2) 放不下显存，但内存够装整份权重 → offload，保持原精度
-    if r_need <= ram_budget:
+    if r_need <= ram_budget and vram_budget > 0:
         return mk("none", "model", True,
                   (f"显存放不下（需约 {v_need:.1f} > {vram_budget:.1f} GB），"
                    f"但内存够（需约 {r_need:.1f} ≤ {ram_budget:.1f} GB），用 offload 换速度"),
                   vram_budget, r_need,
                   [{"quant": "gguf", "why": f"GGUF 约 {model_gb * 0.30:.1f} GB，"
-                                            f"能全部进显存，比 offload 快 2-3 倍"}] if has_gguf else [])
+                                            f"可能减少显存占用；速度需实测"}] if has_gguf else [])
 
     # 3) 内存也装不下：**只有 GGUF 这条路**
     gguf_est = model_gb * 0.30
     gv, gr = gguf_est * vm, gguf_est * rm
-    if has_gguf and (gv <= vram_budget or gr <= ram_budget):
-        return mk("gguf", "", gv <= vram_budget,
+    if has_gguf and gv <= vram_budget and gr <= ram_budget and vram_budget > 0:
+        return mk("gguf", "", True,
                   (f"原精度实际要 {r_need:.1f} GB 内存，超出预算 {ram_budget:.1f} GB；"
                    f"必须用 GGUF 量化版（权重约 {gguf_est:.1f} GB，占显存约 {gv:.1f} GB）"),
-                  min(gv, vram_budget), gr, [])
+                  gv, gr, [])
 
     # 4) 连量化版都放不下 —— 老实说跑不动
     return mk("none", "", False,
-              (f"这个模型原精度 {model_gb:.1f} GB，实际要 {r_need:.1f} GB 内存，"
-               f"预算只有 {ram_budget:.1f} GB（{ram_gb:.0f} GB 内存）；没有更小的 GGUF 版本"),
+              (f"原精度估计需要显存 {v_need:.1f} GB、内存 {r_need:.1f} GB；"
+               f"当前预算为显存 {vram_budget:.1f} GB、内存 {ram_budget:.1f} GB，"
+               "没有确认可用的加载方案"),
               vram_budget, ram_budget,
               [{"quant": "smaller", "why": "换更小的模型（3D 用 2mini、出图用 SD1.5 / SDXL-Turbo）"}])

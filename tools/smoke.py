@@ -170,7 +170,7 @@ def t_app_chat():
     r = cli.predict("你好", api_name="/on_submit")
     chat = r[1] if len(r) > 1 else []
     reply = str(chat[-1][1])[:60] if chat else ""
-    ok = bool(reply) and "DEVICEDEVICE" not in reply
+    ok = bool(reply) and "DEVICEDEVICE" not in reply and "对话暂不可用" not in reply
     return ok, f"{time.time()-t0:.0f}s · {reply[:40]}"
 
 

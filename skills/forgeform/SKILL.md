@@ -5,7 +5,7 @@ license: AGPL-3.0
 metadata:
   author: ZYKT studio
   homepage: https://github.com/TIANKONGskyy/forgeform
-  version: "3.7.2"
+  version: "3.7.3"
 ---
 
 # 铸想 ForgeForm
@@ -17,6 +17,7 @@ metadata:
 - 确定当前安装目录和 `VERSION`，以该目录源码与配置为准，不假定固定路径、模型已安装或服务已启动。Windows 启动入口是 `启动.bat`，配置界面默认 `127.0.0.1:7861`，创作界面默认 `127.0.0.1:7860`；可在启动参数中更改。
 - Studio `GET /api/ping`、`GET /api/status`、`GET /api/catalog`、`GET /api/hardware` 可查询状态。扫描是 **POST** `/api/scan`，安装、配置、启动、取消及删除等写操作也用 POST：从本机 Studio 页面取得 `STUDIO_TOKEN`，以 `X-Studio-Token` 发送，并遵守服务的来源校验。异步任务轮询 `/api/status` 至结束，检查错误和日志。不要输出或提交令牌。
 - 生成不一定依赖 ComfyUI：`backend.mode` 可为 `auto`、`comfyui` 或 `direct`，实际路由取决于权重和运行环境。确认配置中模型 key、路径和已安装依赖；`tools/doctor.py` 和 Studio 的扫描可帮助诊断。先检查 ComfyUI `/queue` 和 GPU 使用，避开别人的运行任务；不要自行中断其他任务或卸载共享服务。
+- 扫描会检查本地模型文件、分片和复用方案节点，但这不等于验证权重可加载或完整推理成功。按实际选择的模型和质量档验证运行；显存及可用内存紧张时优先选低资源配置。低配进程限额实验不能代替真实整机测试。
 - 对程序调用，若独立 API 服务可用，先读其 `/openapi.json`：默认 `127.0.0.1:7863`，`GET /v1/health` 无需密钥，`POST /v1/generate` 提交异步任务，`GET /v1/jobs/{id}` 查状态，`GET /v1/jobs/{id}/files/{image|glb|stl}` 获取产物；需已有授权的 `Authorization: Bearer` 密钥。不要为测试随意创建或公开密钥。`tools/api_server.py` 是接口事实来源。
 
 ## 本地 Python 工作流

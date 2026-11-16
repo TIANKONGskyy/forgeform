@@ -79,14 +79,16 @@ class HybridBackend:
             self._direct = DirectBackend(cfg)
         return self._direct
 
-    def pick(self, stage: str):
+    def pick(self, stage: str, model_config: dict | None = None):
         """返回该阶段实际要用的后端实例。"""
         kind = self._stage_kind(stage)
         cfg_kind = "3d" if kind == "mesh" else kind
         selected = self.config.get("stages", {}).get(cfg_kind, {}).get("default_model", "")
-        model_cfg = self.config.get("models", {}).get(cfg_kind, {}).get(selected, {})
+        model_cfg = model_config if model_config is not None else self.config.get("models", {}).get(cfg_kind, {}).get(selected, {})
         if model_cfg.get("path") or model_cfg.get("backend") == "direct":
             return self._get_direct()
+        if model_cfg.get("backend") in ("hy21", "hy21_comfy", "multiview", "native_comfyui", "comfy3d_pipeline"):
+            return self._get_comfy()
         # ★ 2026-11-13 修：只给了 checkpoint（ComfyUI 用）而没有 path 的模型，
         #   必须走 ComfyUI。之前只判 `path` / `backend=="direct"`，于是
         #   z_image / qwen21_ref 这种"权重按文件名交给 ComfyUI"的配置会掉到
@@ -141,8 +143,8 @@ class HybridBackend:
                 pass
         return None
 
-    def upload_image(self, image_path: str, stage: str = "image") -> str:
-        return self.pick(stage).upload_image(image_path, stage=stage)
+    def upload_image(self, image_path: str, stage: str = "image", model_config: dict | None = None) -> str:
+        return self.pick(stage, model_config).upload_image(image_path, stage=stage)
 
     # ── 兼容层：ComfyUIClient 的私有方法，业务代码里有几处直接调 ──
     def _pick_url(self, stage: str | None = None) -> str:
@@ -159,15 +161,18 @@ class HybridBackend:
             return "http://127.0.0.1:8188"
 
     def build_workflow(self, stage_name: str, params: dict) -> dict:
-        wf = self.pick(stage_name).build_workflow(stage_name, params)
+        backend = self.pick(stage_name, params.get("model_config"))
+        wf = backend.build_workflow(stage_name, params)
         if isinstance(wf, dict):
             wf.setdefault("__stage__", stage_name)
+            wf["__backend__"] = "direct" if backend is self._direct else "comfyui"
         return wf
 
     def submit_workflow(self, workflow_data: dict, model_config: dict | None = None,
                         stage: str | None = None) -> str:
         stage_name = stage or (workflow_data or {}).get("__stage__") or "image"
-        backend = self.pick(stage_name)
+        route = (workflow_data or {}).get("__backend__")
+        backend = self._get_direct() if route == "direct" else self._get_comfy() if route == "comfyui" else self.pick(stage_name)
         pid = backend.submit_workflow(workflow_data, model_config=model_config, stage=stage)
         with self._lock:
             self._route[pid] = backend

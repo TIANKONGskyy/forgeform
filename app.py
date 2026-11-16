@@ -870,7 +870,7 @@ def on_btn_model(state: dict):
     conv.cancel_autopilot(state, "用户手动点了生成建模")
     import backend.timings as T
     state["phase"] = "3d"
-    _td_key = (state.get("auto_params") or {}).get("model_3d") or _default_3d_model()
+    _td_key = state.get("model_3d") or _default_3d_model()
     _q = (state.get("auto_params") or {}).get("quality_3d") or "高质量"
     _stage = T.stage_for_3d(_td_key or "hunyuan21", _q)
     conv._append_conversation(state, "assistant", "",
@@ -1181,7 +1181,7 @@ def build():
                 with gr.Row(elem_classes="quality-bar"):
                     quality_radio = gr.Radio(
                         choices=["快速", "标准", "高质量", "极致"],
-                        value="高质量",
+                        value=initial.get("quality") or "高质量",
                         label="",
                         show_label=False,
                         container=False,
@@ -1215,11 +1215,11 @@ def build():
 
                 with gr.Row(elem_classes="model-bar"):
                     img_model_dd = gr.Dropdown(
-                        choices=_img_choices, value=_img_def or None,
+                        choices=_img_choices, value=initial.get("image_model") or _img_def or None,
                         label="出图模型", show_label=True, container=True,
                         elem_id="img_model_dd", scale=1)
                     model_3d_dd = gr.Dropdown(
-                        choices=_3d_choices, value=_3d_def or None,
+                        choices=_3d_choices, value=initial.get("model_3d") or _3d_def or None,
                         label="建模模型", show_label=True, container=True,
                         elem_id="model_3d_dd", scale=1)
 
@@ -1338,7 +1338,10 @@ def build():
         btn_new_top.click(fn=on_btn_new, inputs=[state], outputs=[state] + ui_outputs)
 
         history_dd.input(fn=on_switch_project, inputs=[history_dd], outputs=[state]).then(
-            fn=_update_ui, inputs=[state], outputs=ui_outputs)
+            fn=_update_ui, inputs=[state], outputs=ui_outputs).then(
+            fn=lambda s: (s.get("quality") or "高质量", s.get("image_model") or _img_def or None,
+                          s.get("model_3d") or _3d_def or None),
+            inputs=[state], outputs=[quality_radio, img_model_dd, model_3d_dd])
 
     return app
 

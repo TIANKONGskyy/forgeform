@@ -109,6 +109,9 @@ def load_project(folder_name: str) -> dict:
         "candidates": _list_candidates(folder),
         "selected": _get_selected(folder),
         "auto_params": meta.get("auto_params") or {},   # 2026-09-22：原先不返回此键
+        "quality": meta.get("quality", "高质量"),
+        "image_model": meta.get("image_model", ""),
+        "model_3d": meta.get("model_3d", ""),
         "req_notes": meta.get("req_notes") or [],       # 需求聊天多轮上下文
         "base_prompt": meta.get("base_prompt") or meta.get("user_prompt", ""),
         "refinements": meta.get("refinements") or [],
@@ -138,6 +141,9 @@ def save_project(state: dict):
     meta["user_prompt"] = state.get("user_prompt", "")
     meta["understood"] = state.get("understood", "")
     meta["stl_size"] = state.get("stl_size", 120)
+    for key in ("quality", "image_model", "model_3d"):
+        if key in state:
+            meta[key] = state[key]
     # 2026-09-22：auto_params（颜色/尺寸/风格/模型）原先不落盘，
     # 重启后丢失 → 细化/生图回退默认值。一并持久化。
     if state.get("auto_params"):

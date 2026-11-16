@@ -181,6 +181,7 @@ def s03_chat_flow(c: Check) -> None:
         return
     reply = str(chat[-1][1])[:300]
     c("回复非空", len(reply.strip()) > 4, reply[:80])
+    c("收到实际回复而非忙碌提示", "对话暂不可用" not in reply, reply[:80])
     bad = ("DEVICEDEVICE", "auto_stop", "{" * 3)
     c("没有乱码/原始 JSON", not any(b in reply for b in bad), reply[:80])
 

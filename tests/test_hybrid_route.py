@@ -146,6 +146,29 @@ class HybridRoutingTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.b.wait_for_completion("不存在的pid")
 
+    def test_selected_model_controls_upload_build_and_submit(self):
+        from unittest.mock import Mock
+        direct, comfy = Mock(), Mock()
+        direct.build_workflow.return_value = {"params": {}}
+        comfy.build_workflow.return_value = {"prompt": {}}
+        direct.submit_workflow.return_value = "direct-job"
+        comfy.submit_workflow.return_value = "comfy-job"
+        direct.upload_image.return_value = "local.png"
+        comfy.upload_image.return_value = "uploaded.png"
+        self.b._direct, self.b._comfy = direct, comfy
+        self.b.plan = {"image": "direct", "mesh": "direct"}
+        selected = {"checkpoint": "model.safetensors"}
+        self.assertEqual(self.b.upload_image("local.png", "image", selected), "uploaded.png")
+        wf = self.b.build_workflow("image", {"model_config": selected, "model_key": "chosen"})
+        self.assertEqual(self.b.submit_workflow(wf, stage="image"), "comfy-job")
+        comfy.build_workflow.assert_called_once()
+        comfy.submit_workflow.assert_called_once()
+        direct.submit_workflow.assert_not_called()
+
+        wf = self.b.build_workflow("3d", {"model_config": {"path": "model"}, "model_key": "mini"})
+        self.assertEqual(self.b.submit_workflow(wf, stage="3d"), "direct-job")
+        self.assertEqual(self.b.pick("3d", {"backend": "hy21"}), comfy)
+
     def test_report_shape(self):
         rep = self.b.report()
         self.assertIsInstance(rep, list)
@@ -153,6 +176,64 @@ class HybridRoutingTest(unittest.TestCase):
             self.assertIn("key", item)
             self.assertIn("alive", item)
             self.assertIn("caps", item)
+
+
+class SharedQueueSafetyTest(unittest.TestCase):
+    def test_release_only_when_queue_is_confirmed_idle(self):
+        from unittest.mock import Mock, patch
+        from backend.pipeline import Pipeline
+        pipe = Pipeline.__new__(Pipeline)
+        pipe.config = {"comfyui_ports": {"image": 8188, "media": 8188}}
+        pipe._log = Mock()
+        response = Mock()
+        with patch('backend.pipeline.requests.get', return_value=response), \
+             patch('backend.pipeline.requests.post') as post, patch('backend.pipeline.time.sleep'):
+            response.json.return_value = {'queue_running': [[1]], 'queue_pending': []}
+            pipe._free_vram()
+            post.assert_not_called()
+            response.json.return_value = {'queue_running': [], 'queue_pending': []}
+            pipe._free_vram()
+            post.assert_called_once()
+
+
+class DiffusersDetectionTest(unittest.TestCase):
+    def test_hunyuan_checkpoints_are_3d_not_image_weights(self):
+        import tempfile
+        from pathlib import Path
+        from backend.backends.detect import _scan_model_dir, _SCAN_CACHE
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'custom_nodes/ComfyUI-3D-Pack-main').mkdir(parents=True)
+            shape = root / 'models/checkpoints/tencent/Hunyuan3D-2_1'
+            for name in ('hunyuan3d-dit-v2-1', 'hunyuan3d-vae-v2-1'):
+                part = shape / name; part.mkdir(parents=True)
+                (part / 'model.fp16.ckpt').write_bytes(b'weights')
+            result = _scan_model_dir(root)
+            self.assertIn('Hunyuan3D-2.1', result['mesh'])
+            self.assertEqual(result['image'], [])
+            _SCAN_CACHE.pop(str(root.resolve()).lower(), None)
+
+    def test_missing_component_and_shard_are_not_usable(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from backend.backends.detect import _diffusers_complete
+        index = {'_class_name': 'ExamplePipeline', 'unet': ['diffusers', 'UNet'],
+                 'vae': ['diffusers', 'Autoencoder'], 'tokenizer': ['transformers', 'Tokenizer']}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ('unet', 'vae', 'tokenizer'):
+                (root / name).mkdir()
+            (root / 'tokenizer' / 'tokenizer.json').write_text('{}')
+            (root / 'vae' / 'model.safetensors').write_bytes(b'v')
+            (root / 'unet' / 'model-00001-of-00002.safetensors').write_bytes(b'a')
+            (root / 'unet' / 'model.safetensors.index.json').write_text(json.dumps(
+                {'weight_map': {'a': 'model-00001-of-00002.safetensors', 'b': 'model-00002-of-00002.safetensors'}}))
+            self.assertFalse(_diffusers_complete(root, index)[0])
+            (root / 'unet' / 'model-00002-of-00002.safetensors').write_bytes(b'b')
+            self.assertTrue(_diffusers_complete(root, index)[0])
+            (root / 'vae' / 'model.safetensors').unlink()
+            self.assertFalse(_diffusers_complete(root, index)[0])
 
 
 if __name__ == "__main__":

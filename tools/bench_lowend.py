@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""在低配限制下跑完整流程，看"8G 显存 / 16G 内存的笔记本"实际要多久。
+"""对当前进程施加资源上限后测试流程；不能等同于真实低配整机。
 
     python tools/bench_lowend.py --vram 6 --ram 10
 
 两件事：
-  · 显存：torch.cuda.set_per_process_memory_fraction(6/32) —— 精确，超了直接 OOM
-  · 内存：Windows Job Object 设进程工作集上限 —— 超了分配失败
+  · 显存：限制当前进程的 PyTorch CUDA 分配，不包括其他进程或所有驱动开销。
+  · 内存：Windows Job Object 限制当前进程的提交内存，不是整机内存或工作集。
 
 这两个限制**只作用于当前进程**，不影响机器上别的服务。
 """
@@ -23,16 +23,19 @@ PROMPT = "做一个六角法兰联轴器，中心有轴孔和六个螺栓孔"
 
 
 # ── 显存限制 ────────────────────────────────────────────────
-def limit_vram(gb: float, total_gb: float = 32.0) -> float:
+def limit_vram(gb: float) -> float:
     import torch
-    frac = max(0.01, min(1.0, gb / total_gb))
+    total_gb = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
+    if gb <= 0 or gb > total_gb:
+        raise ValueError(f"显存上限须大于 0 且不超过设备容量 {total_gb:.2f} GiB")
+    frac = gb / total_gb
     torch.cuda.set_per_process_memory_fraction(frac, 0)
     return frac
 
 
 # ── 内存限制（Windows Job Object）────────────────────────────
 def limit_ram(gb: float) -> bool:
-    """给当前进程的工作集设上限。返回是否成功。"""
+    """给当前进程的提交内存设上限。返回是否成功。"""
     if os.name != "nt":
         return False
     import ctypes
@@ -102,11 +105,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--vram", type=float, default=6.0)
     ap.add_argument("--ram", type=float, default=10.0)
-    ap.add_argument("--total-vram", type=float, default=32.0)
     ap.add_argument("--home", default=str(ROOT))
     ap.add_argument("--image-model", default="z_image")
     ap.add_argument("--mesh-model", default="hunyuan21")
-    ap.add_argument("--scale", type=float, default=0.5, help="分辨率缩放（0.5 = 512²）")
+    ap.add_argument("--scale", type=float, default=0.5, help="分辨率缩放（0.5 = 512x512）")
     args = ap.parse_args()
 
     home = Path(args.home).resolve()
@@ -114,13 +116,15 @@ def main() -> int:
     os.chdir(home)
 
     print("=" * 70)
-    print(f"低配实测：显存 {args.vram} GB / 内存 {args.ram} GB")
+    print(f"当前进程限制：PyTorch 显存 {args.vram} GiB / 提交内存 {args.ram} GiB")
+    print("外部 ComfyUI、Ollama 等进程不受这些限制。")
     print("=" * 70)
 
     # 限制必须在 import torch 之后、分配模型之前设好
     import torch
-    frac = limit_vram(args.vram, args.total_vram)
-    print(f"显存限制: {frac*100:.1f}% of {args.total_vram} GB = {args.vram} GB")
+    frac = limit_vram(args.vram)
+    total_vram = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
+    print(f"PyTorch 显存限制: {frac*100:.1f}% of {total_vram:.2f} GiB = {args.vram} GiB")
     ok_ram = limit_ram(args.ram)
     print(f"内存限制: {'已设 ' + str(args.ram) + ' GB' if ok_ram else '设置失败（继续，仅靠显存限制）'}")
 

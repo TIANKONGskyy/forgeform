@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import socket
+import re
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -87,13 +88,22 @@ def _scan_model_dir(comfy: Path) -> dict[str, list[str]]:
                 continue
             for f in d.rglob("*"):
                 if f.is_file() and f.suffix.lower() in (".safetensors", ".ckpt", ".gguf", ".bin"):
+                    if kind == "image" and "hunyuan3d-2_1" in str(f).lower():
+                        continue
                     out[kind].append(f.name)
     # 3D-Pack 的权重常放在自己的目录里
-    pack = comfy / "custom_nodes" / "ComfyUI-3D-Pack-main"
-    if pack.exists():
-        for f in pack.rglob("*.ckpt"):
-            if f.is_file():
-                out["mesh"].append(f.name)
+    custom_nodes = comfy / "custom_nodes"
+    packs = [p for p in custom_nodes.iterdir() if p.is_dir() and p.name.lower().startswith('comfyui-3d-pack')] if custom_nodes.is_dir() else []
+    if packs:
+        shape = comfy / "models" / "checkpoints" / "tencent" / "Hunyuan3D-2_1"
+        shape_weights = [shape / part / "model.fp16.ckpt" for part in
+                         ("hunyuan3d-dit-v2-1", "hunyuan3d-vae-v2-1")]
+        if all(p.is_file() for p in shape_weights):
+            out["mesh"].append("Hunyuan3D-2.1")
+        for pack in packs:
+            for f in pack.rglob("*.ckpt"):
+                if f.is_file():
+                    out["mesh"].append(f.name)
 
     _SCAN_CACHE[key] = out
     return out
@@ -191,9 +201,10 @@ def probe_comfyui(host: str = "127.0.0.1", port: int = 8188,
             fw.caps.add("image")
         if found["mesh"]:
             fw.caps.add("mesh")
-        n3d = comfy / "custom_nodes" / "ComfyUI-3D-Pack-main"
+        node_dir = comfy / "custom_nodes"
+        has_pack = node_dir.is_dir() and any(p.is_dir() and p.name.lower().startswith('comfyui-3d-pack') for p in node_dir.iterdir())
         bits = [f"出图权重 {len(found['image'])}", f"VAE {len(found['vae'])}"]
-        if n3d.exists():
+        if has_pack:
             bits.append("3D-Pack 已装")
         fw.models = found["image"][:12]
         fw.detail = (fw.detail + " · " if fw.detail else "") + "，".join(bits)
@@ -215,6 +226,45 @@ def probe_comfyui(host: str = "127.0.0.1", port: int = 8188,
     return fw
 
 
+def _diffusers_complete(path: Path, index: dict) -> tuple[bool, list[str]]:
+    """Check required component directories and weight shards without loading weights."""
+    missing = []
+    weighted = 0
+    weight_components = ('unet', 'vae', 'transformer', 'text_encoder', 'image_encoder',
+                         'safety_checker', 'prior', 'decoder', 'controlnet')
+    for name, component in index.items():
+        if name.startswith('_') or not isinstance(component, list) or len(component) != 2 or not all(component):
+            continue
+        folder = path / name
+        if not folder.is_dir():
+            missing.append(name)
+            continue
+        if not any(name == prefix or name.startswith(prefix + '_') for prefix in weight_components):
+            if not any(f.is_file() and f.stat().st_size > 0 for f in folder.iterdir()):
+                missing.append(name)
+            continue
+        weighted += 1
+        weight_files = [f for f in folder.iterdir() if f.is_file() and f.suffix.lower() in ('.bin', '.safetensors', '.gguf') and f.stat().st_size > 0]
+        shard_indexes = list(folder.glob('*.index.json'))
+        complete_index = False
+        for shard_index in shard_indexes:
+            try:
+                mapping = json.loads(shard_index.read_text(encoding='utf-8')).get('weight_map') or {}
+                shard_names = set(mapping.values())
+                if shard_names and all((folder / f).is_file() and (folder / f).stat().st_size > 0 for f in shard_names):
+                    complete_index = True
+                    break
+            except (OSError, ValueError, TypeError):
+                continue
+        # Individual shard files are not complete models by themselves.
+        unsharded = [f for f in weight_files if not re.search(r'-\d{5}-of-\d{5}\.', f.name)]
+        if not unsharded and not complete_index:
+            missing.append(name + ' 权重/分片')
+    if not weighted:
+        missing.append('模型组件')
+    return not missing, missing
+
+
 def probe_local_diffusers(extra_roots: list[str | Path] | None = None) -> Framework:
     """扫本地有哪些 diffusers 格式模型（有 model_index.json 的目录）。
 
@@ -232,6 +282,8 @@ def probe_local_diffusers(extra_roots: list[str | Path] | None = None) -> Framew
     SKIP = {"blobs", "snapshots", ".locks", "node_modules", "site-packages", "__pycache__",
             ".git", ".cache"}
     found = []
+    incomplete = []
+    visited = set()
     for root in roots:
         if not root.exists():
             continue
@@ -244,8 +296,16 @@ def probe_local_diffusers(extra_roots: list[str | Path] | None = None) -> Framew
                 dirnames[:] = [d for d in dirnames if d not in SKIP]
                 if "model_index.json" in filenames:
                     try:
+                        key = str(Path(dirpath).resolve()).lower()
+                        if key in visited:
+                            continue
+                        visited.add(key)
                         idx = json.loads(Path(dirpath, "model_index.json").read_text(encoding="utf-8"))
-                        found.append((Path(dirpath), idx.get("_class_name", "?")))
+                        complete, missing = _diffusers_complete(Path(dirpath), idx)
+                        if complete:
+                            found.append((Path(dirpath), idx.get("_class_name", "?")))
+                        else:
+                            incomplete.append((Path(dirpath), missing))
                     except Exception:
                         pass
         except Exception:
@@ -253,6 +313,8 @@ def probe_local_diffusers(extra_roots: list[str | Path] | None = None) -> Framew
 
     fw.models = [f"{cls} @ {p}" for p, cls in found[:12]]
     fw.alive = bool(found)
+    if incomplete:
+        fw.note = f"{len(incomplete)} 个模型目录缺少组件或分片，未计为可用"
     if found:
         fw.caps = {"image"}
         fw.detail = f"{len(found)} 个"

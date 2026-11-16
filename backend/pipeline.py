@@ -194,6 +194,11 @@ class Pipeline:
     
     def get_log_text(self) -> str:
         return "\n".join(self._log_lines[-20:])
+
+    def _upload_image(self, path: str, stage: str, model_config: dict) -> str:
+        if self.backend_mode == "hybrid":
+            return self.comfy.upload_image(path, stage=stage, model_config=model_config)
+        return self.comfy.upload_image(path, stage=stage)
     
     # ─── 提示词扩写 ─────────────────────────────────────
     
@@ -364,7 +369,7 @@ class Pipeline:
             model_cfg = img_models["qwen21_ref"]
             model_key = "qwen21_ref"
             steps = int(model_cfg.get("steps", 20))          # 参考图分支不套质量倍率（会掉步数）
-            ref_name = self.comfy.upload_image(reference_image, stage="image")
+            ref_name = self._upload_image(reference_image, "image", model_cfg)
             self._log(f"🖼 参考图已上传 ComfyUI: {ref_name} → Qwen-Image-2.1 参考图工作流")
 
         # 质量 → 步数 / guidance
@@ -418,6 +423,7 @@ class Pipeline:
 
             params = {
                 "model_config": model_cfg,
+                "model_key": model_key,
                 "prompt": prompt,
                 "negative_prompt": negative,
                 "width": width,
@@ -532,6 +538,7 @@ class Pipeline:
             img_seed = seed if seed > 0 else -1
             params = {
                 "model_config": model_cfg,
+                "model_key": model_key,
                 "prompt": prompt,
                 "negative_prompt": negative,
                 "width": width,
@@ -551,6 +558,7 @@ class Pipeline:
             self._log(f"高清任务已提交: {prompt_id[:8]}...")
             result = self.comfy.wait_for_completion(prompt_id, timeout=600, progress_callback=progress_cb, thermal_guard=True)
             outputs = result.get("outputs", {})
+
             image_url = self.comfy.get_result_image(outputs)
             if image_url:
                 output_path = Path(self.config["paths"]["output"]) / "images" / f"hd_{int(time.time())}.png"
@@ -625,6 +633,7 @@ class Pipeline:
             img_seed = seed if seed > 0 else -1
             params = {
                 "model_config": model_cfg,
+                "model_key": model_key,
                 "prompt": prompt,
                 "negative_prompt": negative,
                 "width": width,
@@ -691,12 +700,13 @@ class Pipeline:
         
         # 上传图片到 ComfyUI（video 阶段 → 8189 实例/GPU1）
         try:
-            uploaded_name = self.comfy.upload_image(input_image, stage="video")
+            uploaded_name = self._upload_image(input_image, "video", model_cfg)
         except Exception as e:
             return StageResult(False, error=f"上传图片失败: {e}")
         
         params = {
             "model_config": model_cfg,
+            "model_key": model_key,
             "input_image": uploaded_name,
             "image_path": str(input_image),
             "prompt": prompt or getattr(self.state, "base_prompt", "") or getattr(self.state, "user_prompt", "") or "",
@@ -962,7 +972,7 @@ class Pipeline:
         #   "输入图片不存在"，直连建模从来没被真正调通过。
         uploaded_name = ""
         try:
-            uploaded_name = self.comfy.upload_image(input_image, stage="3d")
+            uploaded_name = self._upload_image(input_image, "3d", model_cfg)
         except Exception as e:
             if self.backend_mode != "direct":
                 return StageResult(False, error=f"上传图片失败: {e}")
@@ -1033,12 +1043,8 @@ class Pipeline:
                 if torch.cuda.is_available():
                     _vram = torch.cuda.get_device_properties(0).total_memory / 1024 ** 3
                     _oc = int(params["octree_resolution"])
-                    # 下限：小 octree 抬上来（原来的逻辑）
-                    _floor = 512 if _vram >= 24 else (384 if _vram >= 12 else 0)
-                    if _floor and _oc < _floor:
-                        self._log(f"🧊 octree {_oc} → {_floor}（显存 {_vram:.0f} GB 跑得动，"
-                                  f"256 的表面台阶太明显）")
-                        params["octree_resolution"] = _floor
+                    # Preserve the user's chosen quality; more VRAM should not
+                    # silently make the fast preset slower.
                     # ★ 2026-11-15：上限。实测（限显存到 6 GB 真跑）：
                     #   512 octree  峰值 5.34 GB  ✓
                     #   1024 octree 采样只占 3.73 GB，但 **decode 要一次性 6.02 GB** → OOM
@@ -1076,8 +1082,28 @@ class Pipeline:
             prompt_id = self.comfy.submit_workflow(workflow_data, stage="3d")
             self._log(f"3D 任务已提交: {prompt_id[:8]}...")
             
-            result = self.comfy.wait_for_completion(prompt_id, timeout=1200, thermal_guard=True)
+            # ★ 2026-11-16：3D 等待时长改成可配（默认仍是 1200s）。
+            #   实测 最高精度(1024 octree) 在 V100 上跑不完 1200s 就被判超时，
+            #   于是"最高精度"这条路对用户等于不可用 —— 得能调，否则只能降档。
+            _t3 = 1200
+            try:
+                _t3 = int(((self.config.get("stages") or {}).get("3d") or {})
+                          .get("timeout_s") or 1200)
+            except Exception:
+                pass
+            result = self.comfy.wait_for_completion(prompt_id, timeout=_t3, thermal_guard=True)
+            if result.get("status") == "error":
+                return StageResult(False, error=str(result.get("error") or "ComfyUI 建模失败"))
             outputs = result.get("outputs", {})
+            # The save node can write the requested path without UI outputs.
+            direct_output = Path(output_path)
+            if direct_output.is_file() and direct_output.stat().st_mtime >= t_start - 5:
+                self.state.current_glb_path = output_path
+                self.state.steps_done.append("3d")
+                self._log(f"✅ 3D 模型已保存: {output_path}")
+                return self._finalize_3d(output_path, model_key, quality_name,
+                                         input_image, _fallback_tried,
+                                         max_facenum=max_facenum, octree_override=octree_override)
             
             # 尝试从输出中提取 3D 模型
             model_path = self.comfy.get_result_3d(outputs)
@@ -1134,18 +1160,30 @@ class Pipeline:
         img_port = self.config.get("comfyui_ports", {}).get("image", 8188)
         media_port = self.config.get("comfyui_ports", {}).get("media", img_port)
         ports = sorted({img_port, media_port})
+        released = []
         for port in ports:
             try:
-                requests.post(
+                # Do not evict models belonging to another active or queued job.
+                queue = requests.get(f"http://127.0.0.1:{port}/queue", timeout=3)
+                queue.raise_for_status()
+                pending = queue.json()
+                if not isinstance(pending, dict) or not all(isinstance(pending.get(k), list) for k in ("queue_running", "queue_pending")):
+                    raise ValueError("队列响应不完整")
+                if pending.get("queue_running") or pending.get("queue_pending"):
+                    self._log(f"⚠️ ComfyUI {port} 有任务，跳过显存释放")
+                    continue
+                response = requests.post(
                     f"http://127.0.0.1:{port}/free",
                     json={"unload_models": True, "free_memory": True},
                     timeout=10
                 )
+                response.raise_for_status()
+                released.append(port)
             except Exception as e:
-                self._log(f"⚠️ VRAM 释放失败 ({port}): {e}")
+                self._log(f"⚠️ 未能确认 ComfyUI {port} 空闲，跳过显存释放: {e}")
         time.sleep(2)
-        label = "单实例" if len(ports) == 1 else f"{len(ports)} 实例"
-        self._log(f"🧹 VRAM 已释放（{label}: {','.join(str(p) for p in ports)}）")
+        if released:
+            self._log(f"🧹 已请求释放空闲 ComfyUI 显存（{','.join(str(p) for p in released)}）")
 
     def _wait_gpu_cool(self, target_temp: int = 90, max_wait: int = 60):
         """紧急冗余兜底：仅当 GPU 温度超过 90°C 才短暂等待降温（最多 60s）。

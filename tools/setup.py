@@ -258,6 +258,18 @@ def main() -> int:
         print(f"自动找到 ComfyUI: {comfy_dir}（可用 --comfy-dir 覆盖）")
     fws = D.probe_all(comfy_dir=comfy_dir or None)
     assets = summarize_assets(fws)
+    if assets.get("comfyui") and assets.get("comfyui_3d"):
+        from backend.backends.recommend import inspect_comfy_reuse
+        import json
+        cfg_file = ROOT / "config.json"
+        if not cfg_file.exists():
+            cfg_file = ROOT / "config.example.json"
+        try:
+            reuse_config = json.loads(cfg_file.read_text(encoding="utf-8-sig"))
+            assets["comfyui_reuse_ready"], assets["comfyui_reuse_reason"] = inspect_comfy_reuse(comfy_dir, reuse_config, fws)
+        except (OSError, ValueError) as exc:
+            assets["comfyui_reuse_ready"] = False
+            assets["comfyui_reuse_reason"] = f"无法检查模型配置: {exc}"
 
     _line("═")
     print("铸想 ForgeForm · 配置向导")
