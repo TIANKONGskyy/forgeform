@@ -17,21 +17,38 @@ def main():
     #   就多一个，端口在 Windows 上靠 SO_REUSEADDR 居然都能绑上，
     #   于是 5 个进程抢同一批文件、抢同一个 app 子进程，删模型/装模型互相打架。
     #   现在：端口已被占 → 认为已经有一个在跑，直接打开浏览器并退出。
-    import socket as _sock
-    with _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM) as _s:
-        _s.settimeout(0.4)
-        _busy = _s.connect_ex(("127.0.0.1", args.port)) == 0
-    if _busy:
-        print(f"ForgeForm Studio 已经在 {args.port} 跑着，直接打开页面。", flush=True)
+    # ★ 2026-11-16：从"端口通不通"改成"先认人再决定"。
+    #   原来的判据只看端口能不能连 —— 如果占着 7861 的是**别的程序**（nginx、
+    #   同事的 dev server），它会以为"Studio 已经在跑"，打开浏览器给人看别人的页面。
+    #   现在：是我们的 Studio → 复用；是别人的 → 换一个空闲端口；没占 → 用原端口。
+    from backend import ports as _ports
+    _r = _ports.resolve(args.port, script="studio.py")
+    if _r["action"] == "reuse":
+        print(f"ForgeForm Studio {_r['why']}。", flush=True)
         if not args.no_browser:
-            webbrowser.open(f"http://127.0.0.1:{args.port}")
+            webbrowser.open(f"http://127.0.0.1:{_r['port']}")
         return
+    if _r["action"] == "fail":
+        print(f"起不来：{_r['why']}", flush=True)
+        raise SystemExit(1)
+    _port = int(_r["port"])
+    if _port != args.port:
+        print(f"[port] {_r['why']}", flush=True)
+
+    # 起 Studio 之前先把**我们自己的旧 app** 清掉：否则旧 app 还占着 7860，
+    # 新的 app 会换到 7862 继续跑 —— 两份实例各自加载模型，显存被劈开。
+    try:
+        _killed = _ports.kill_stale("app.py")
+        if _killed:
+            print(f"[port] 清掉 {len(_killed)} 个残留的创作空间进程", flush=True)
+    except Exception:
+        pass
 
     studio = Studio(app_port=args.app_port)
-    server = make_server(studio, args.port)
+    server = make_server(studio, _port)
     if not args.no_browser:
-        webbrowser.open(f'http://127.0.0.1:{args.port}')
-    print(f'ForgeForm Studio: http://127.0.0.1:{args.port}', flush=True)
+        webbrowser.open(f'http://127.0.0.1:{_port}')
+    print(f'ForgeForm Studio: http://127.0.0.1:{_port}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -1543,10 +1543,31 @@ if __name__ == "__main__":
         return preferred
 
     _want = int(os.environ.get("FOUNDRY_PORT", "7860"))
-    _port = _pick_port(_want)
-    if _port != _want:
-        print(f"[port] {_want} 已被占用（可能是旧版铸想），改用 {_port}")
-        print(f"[port] 浏览器请打开 http://127.0.0.1:{_port}")
+    # ★ 2026-11-16：换成"先认人再决定"。原来的逻辑只要端口能连上就换端口继续跑，
+    #   于是双击两次会得到两份 app.py（7860 + 7862），各自加载一遍模型，
+    #   显存被劈开 —— 用户看到"越来越慢、偶尔 OOM"，界面却一切正常。
+    #   现在：占着的是**我们自己** → 不开第二份；是**别人** → 换端口。
+    try:
+        from backend import ports as _ports
+        _r = _ports.resolve(_want, script="app.py")
+        if _r["action"] == "reuse":
+            print(f"[port] {_r['why']}（不重复启动，避免两份实例抢显存）", flush=True)
+            print(f"[port] 请直接打开 http://127.0.0.1:{_r['port']}", flush=True)
+            raise SystemExit(0)
+        if _r["action"] == "fail":
+            print(f"[port] {_r['why']}", flush=True)
+            raise SystemExit(1)
+        _port = int(_r["port"])
+        if _port != _want:
+            print(f"[port] {_r['why']}", flush=True)
+            print(f"[port] 浏览器请打开 http://127.0.0.1:{_port}", flush=True)
+    except SystemExit:
+        raise
+    except Exception as _e:
+        print(f"[port] 端口判定失败（{type(_e).__name__}），退回旧逻辑", flush=True)
+        _port = _pick_port(_want)
+        if _port != _want:
+            print(f"[port] {_want} 已被占用，改用 {_port}", flush=True)
 
     app.launch(
         server_name=os.environ.get("FOUNDRY_HOST", "127.0.0.1"),

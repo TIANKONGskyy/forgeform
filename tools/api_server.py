@@ -583,10 +583,25 @@ def main() -> int:
     threading.Thread(target=lambda: [(_gc(), time.sleep(60)) for _ in iter(int, 1)],
                      daemon=True, name="ff-api-gc").start()
 
-    srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"ForgeForm Local API: http://{args.host}:{args.port}", flush=True)
-    print(f"  文档   http://{args.host}:{args.port}/docs", flush=True)
-    print(f"  OpenAPI http://{args.host}:{args.port}/openapi.json", flush=True)
+    # ★ 2026-11-16：端口被占时先认人。原来直接 bind，占着就抛 OSError 退出；
+    #   而如果是我们自己的旧 API 进程占着，应该提示复用而不是让人以为坏了。
+    from backend import ports as _ports
+    _r = _ports.resolve(args.port, script="api_server.py", host="127.0.0.1")
+    if _r["action"] == "reuse":
+        print(f"{_r['why']}。要重启就先关掉它。", flush=True)
+        return 0
+    if _r["action"] == "fail":
+        print(f"起不来：{_r['why']}", flush=True)
+        return 1
+    _port = int(_r["port"])
+    if _port != args.port:
+        print(f"[port] {_r['why']}", flush=True)
+        print(f"[port] 文档改用 http://127.0.0.1:{_port}/docs", flush=True)
+
+    srv = ThreadingHTTPServer((args.host, _port), Handler)
+    print(f"ForgeForm Local API: http://{args.host}:{_port}", flush=True)
+    print(f"  文档   http://{args.host}:{_port}/docs", flush=True)
+    print(f"  OpenAPI http://{args.host}:{_port}/openapi.json", flush=True)
     print(f"  限流   生成 {RATE_WRITE_PER_MIN} 次/分钟/key · "
           f"查询 {RATE_READ_PER_MIN} 次/分钟/key · 并发 {MAX_CONCURRENT}", flush=True)
     try:

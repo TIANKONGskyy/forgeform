@@ -347,12 +347,49 @@ def s10_maintenance(c: Check) -> None:
 
 
 def s11_port_conflict(c: Check) -> None:
-    """旧版占着端口 → 新实例会换端口而不是假装成功。"""
-    import importlib
+    """端口冲突：**先认人再决定**（自己人 → 复用；别人 → 换端口）。"""
+    from backend import ports as P
     src = (ROOT / "app.py").read_text(encoding="utf-8")
-    c("用 connect 判端口而不是 bind",
-      "connect_ex" in src, "" if "connect_ex" in src else "还是 SO_REUSEADDR 的坑")
-    c("有 _pick_port 逻辑", "_pick_port" in src, "")
+    c("app 用 ports.resolve 判端口", "ports.resolve" in src, "")
+
+    # ① 空闲端口 → 直接用
+    c("空闲端口判定", P.resolve(7890, "app.py")["action"] == "use", "")
+
+    # ② 我们自己占着 → 复用（不能再起第二份，否则显存被劈开）
+    import threading, time as _t
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Ours(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def do_GET(self):
+            body = "铸想 ForgeForm".encode()
+            self.send_response(200); self.send_header("Content-Length", str(len(body)))
+            self.end_headers(); self.wfile.write(body)
+
+    s1 = HTTPServer(("127.0.0.1", 7891), Ours)
+    threading.Thread(target=s1.serve_forever, daemon=True).start()
+    _t.sleep(0.4)
+    c("自己人占着 → 复用", P.resolve(7891, "app.py")["action"] == "reuse",
+      P.who_is(7891)["kind"])
+    s1.shutdown()
+
+    # ③ 别人占着 → 换端口
+    class Other(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def do_GET(self):
+            body = b"<html>Welcome to nginx</html>"
+            self.send_response(200); self.send_header("Content-Length", str(len(body)))
+            self.end_headers(); self.wfile.write(body)
+
+    s2 = HTTPServer(("127.0.0.1", 7892), Other)
+    threading.Thread(target=s2.serve_forever, daemon=True).start()
+    _t.sleep(0.4)
+    r = P.resolve(7892, "app.py")
+    c("别人占着 → 换端口", r["action"] == "use" and r["port"] != 7892, f'→ {r["port"]}')
+    s2.shutdown()
+
+    # ④ 进程识别不能把自己认进去（踩过：kill_stale 把调用方杀了）
+    c("不会误杀调用方", os.getpid() not in P._our_pids(("app.py", "studio.py")), os.getpid())
 
 
 def s12_env_doctor(c: Check) -> None:

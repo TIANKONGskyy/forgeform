@@ -405,10 +405,24 @@ class Studio:
             raise RuntimeError('请先在环境页面安装基础环境')
         if not (self.root / 'config.json').exists():
             raise RuntimeError('请先选择方案完成配置')
-        import socket
-        with socket.socket() as s:
-            if s.connect_ex(('127.0.0.1', self.app_port)) == 0:
-                raise RuntimeError(f'端口 {self.app_port} 被其他服务使用，请关闭旧铸想或修改端口')
+        # ★ 2026-11-16：起 app 之前先认人 + 清场。
+        #   原来的判据是"端口能连上就报错让你自己去关" —— 但占着它的往往就是
+        #   **上一次留下的我们自己的 app**（实测会攒出 7860 + 7862 两份，
+        #   各自加载一遍模型，显存被劈开）。现在：是我们的就杀掉再起，是别人的才报错。
+        from backend import ports as _ports
+        _killed = _ports.kill_stale('app.py')
+        if _killed:
+            self.log(f'已清理 {len(_killed)} 个残留的创作空间进程')
+        _who = _ports.who_is(self.app_port)
+        if _who['busy'] and not _who['ours']:
+            # 别人占着 7860 → 换一个端口继续，而不是把用户挡在"请自己改端口"前面。
+            # （原来这里是 raise，实测用户看到报错就以为装坏了。）
+            _alt = _ports.pick_free(self.app_port + 2, 20)
+            if _alt:
+                self.log(f'{self.app_port} 被占用（{_who["hint"]}），创作空间改用 {_alt}')
+                self.app_port = _alt
+            else:
+                raise RuntimeError(f'端口 {self.app_port} 起 20 个都被占用，无法启动')
         logs = self.root / 'logs'
         logs.mkdir(exist_ok=True)
         env = dict(os.environ, PYTHONPATH='', PYTHONUTF8='1', FOUNDRY_PORT=str(self.app_port), FOUNDRY_HOST='127.0.0.1')
@@ -739,6 +753,10 @@ def make_server(studio, port=7861):
                                         'github': netcheck.pick_github(),
                                         'hf': netcheck.pick_hf()}
                     return self.send(out)
+                if self.path == '/api/location':
+                    # 安装位置：当前在哪、推荐在哪、模型放哪
+                    from backend import location as _loc
+                    return self.send(_loc.report())
                 if self.path == '/api/keys':
                     from backend import secrets as _sec
                     return self.send({'keys': _sec.list_api_keys(),
@@ -803,6 +821,11 @@ def make_server(studio, port=7861):
                         studio.launch()
                     result['ok'] = bool(result.get('ok', True))
                     return self.send(result)
+                elif self.path == '/api/location':
+                    # 应用自动选择（只改"模型放哪"，不动程序本体）
+                    from backend import location as _loc
+                    result = _loc.apply()
+                    result['report'] = _loc.report()
                 elif self.path == '/api/keys':
                     # 动作：issue / revoke / delete / delete-all
                     from backend import secrets as _sec

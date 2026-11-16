@@ -280,6 +280,25 @@ def main() -> int:
             return 0
         cfg = write_config(patch, Path(args.config))
         print(f"\npip 源（实测可用）: {_pip_index()}")
+
+    # ★ 2026-11-16：安装位置自动选择。实测四类翻车：路径含中文（C++ 扩展打不开
+    #   文件）、装在 Program Files（无写权限）、盘不够（15–25 GB）、路径过深
+    #   （>260 字符解压失败）。装之前先打分挑一个，而不是"就装在你解压的地方"。
+    try:
+        from backend import location as _loc
+        _rep = _loc.report()
+        if _rep.get("problems"):
+            print("\n安装位置提示：")
+            for _p in _rep["problems"]:
+                print(f"  ⚠️ {_p}")
+            print(f"  → {_rep['advice']}")
+        _ap = _loc.apply()
+        if _ap.get("changed"):
+            print(f"  模型目录已自动改到: {_ap['models']}（{_ap['why']}）")
+        else:
+            print(f"  模型目录: {_ap['models']}")
+    except Exception as _e:
+        print(f"（安装位置判定跳过: {type(_e).__name__}: {_e}）")
         print(f"\n配置已写入 {cfg}")
         run_doctor()
         return 0
