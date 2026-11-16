@@ -83,9 +83,12 @@ def render_frames(mesh: trimesh.Trimesh) -> list[Path]:
         face = np.clip(np.array([0.73, 0.76, 0.81]) * shade[:, None], 0, 1)
         poly = Poly3DCollection(tris, facecolors=face, edgecolors="none", linewidths=0)
         ax.add_collection3d(poly)
-        ax.set_xlim(-0.56, 0.56)
-        ax.set_ylim(-0.56, 0.56)
-        ax.set_zlim(-0.56, 0.56)
+        # 2026-11-16：取景收窄。原来 ±0.56 让模型只占画面中间一小块。
+        # ±0.40 填满高度又不切耳朵/尾巴；换模型时用 FORGEFORM_PROMO_LIM 覆盖。
+        _lim = float(__import__("os").environ.get("FORGEFORM_PROMO_LIM", "0.40"))
+        ax.set_xlim(-_lim, _lim)
+        ax.set_ylim(-_lim, _lim)
+        ax.set_zlim(-_lim, _lim)
         ax.view_init(elev=elev, azim=azim)
         ax.set_box_aspect((1, 1, 1))
         # 底部文字
@@ -140,8 +143,28 @@ def main() -> int:
     # 试过 e2e_owl_trim：没有立板，但模型是**横躺**的（不是 Z-up），
     # 渲染出来像一块砖，反而更糟。trimmed_owl 至少是正着的，
     # 残留一块小背板 —— 这是 2mini 的真实产出，接受。
+    # 2026-11-16：支持指定模型。原来写死猫头鹰两个候选 —— 想换封面就得改代码。
+    # 现在 `--glb 路径` 优先，其次读环境变量 FORGEFORM_PROMO_GLB，最后才是旧候选。
+    import os as _os
+    _pick = ""
+    for i, a in enumerate(sys.argv):
+        if a == "--glb" and i + 1 < len(sys.argv):
+            _pick = sys.argv[i + 1]
+        elif a.startswith("--glb="):
+            _pick = a.split("=", 1)[1]
+    _pick = _pick or _os.environ.get("FORGEFORM_PROMO_GLB", "")
+    if _pick:
+        p = Path(_pick)
+        if not p.is_absolute():
+            p = ROOT / p
+        if not p.exists():
+            print(f"指定的模型不存在: {p}")
+            return 1
+        glb = p
     for cand in ("outputs/art/view/trimmed_owl.glb",
                  "outputs/art/e2e_owl_trim.glb"):
+        if glb:
+            break
         p = ROOT / cand
         if p.exists():
             glb = p
