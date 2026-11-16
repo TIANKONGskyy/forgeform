@@ -728,6 +728,12 @@ def make_server(studio, port=7861):
             try:
                 self.path = self.path.split('?', 1)[0]   # 路由只认路径，query 单存
                 self._query = self.path.split('?', 1)[1] if '?' in self.path else ''
+                if self.path == '/api/ping':
+                    # 免鉴权探活：前端据此区分"服务器没连上"和"点了没反应"
+                    return self.send({'ok': True, 'app': 'forgeform-studio',
+                                      'version': (studio.root / 'VERSION').read_text(
+                                          encoding='utf-8').strip(),
+                                      'ts': __import__('time').time()})
                 if self.path == '/api/status': return self.send(studio.status())
                 if self.path == '/api/hardware': return self.send(studio.hardware())
                 if self.path == '/api/netboost': return self.send(studio.netboost_advice())
@@ -781,8 +787,12 @@ def make_server(studio, port=7861):
                         pass
                     html = html.replace('__TOKEN__', studio.token).replace('__VERSION__', ver)
                     return self.send(html.encode(), mime='text/html')
-                if self.path in ('/studio.css', '/studio.js'):
-                    p = studio.root / 'ui' / self.path[1:]
+                if self.path.split('?')[0] in ('/studio.css', '/studio.js'):
+                    # 2026-11-16：支持 /studio.js?v=3.7.0 这种查询串。
+                    # 加版本号的目的是**升级后不吃旧缓存** —— 用户换个版本
+                    # 打开还是旧 JS，就会出现"点了没反应"（事件绑在旧代码上）。
+                    _name = self.path.split('?')[0].lstrip('/')
+                    p = studio.root / 'ui' / _name
                     return self.send(p.read_bytes(), mime='text/css' if p.suffix == '.css' else 'text/javascript')
                 return self.send({'error': '未找到'}, 404)
             except Exception as exc:

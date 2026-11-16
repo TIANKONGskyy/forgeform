@@ -147,3 +147,15 @@
 .qs-chip.on{border-color:rgba(156,228,218,.55);color:#9ce4da}
 .qs-chip em{font-style:normal;font-size:11px;opacity:.75}
 .qs-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+/* 创作空间加载遮罩：Gradio 首屏是浅灰骨架，看着像"没反应"。
+   这里用自家深色遮罩盖住，iframe load 后再撤。 */
+#ws-wrap{position:relative;min-height:70vh}
+#ws-loading{position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;z-index:2;
+  background:var(--panel);border-radius:14px;color:var(--text)}
+#ws-loading p{margin:0;font-size:13px;color:var(--muted)}
+#ws-loading button{font-size:12.5px;padding:6px 14px}
+.ws-spin{width:26px;height:26px;border-radius:50%;
+  border:2px solid rgba(255,255,255,.18);border-top-color:var(--accent);
+  animation:wsspin .8s linear infinite}
+@keyframes wsspin{to{transform:rotate(360deg)}}

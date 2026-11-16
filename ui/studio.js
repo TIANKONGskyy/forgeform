@@ -4,18 +4,51 @@ function toast(s){$('toast').textContent=s;$('toast').hidden=false;clearTimeout(
 async function api(path,data){const r=await fetch('/api/'+path,{method:data===undefined?'GET':'POST',headers:{'Content-Type':'application/json','X-Studio-Token':window.STUDIO_TOKEN},body:data===undefined?undefined:JSON.stringify(data)});const j=await r.json();if(!r.ok)throw Error(j.error||'请求失败');return j}
 function page(id){document.querySelectorAll('.page').forEach(e=>e.hidden=e.id!==id);document.querySelectorAll('nav button').forEach(e=>e.classList.toggle('active',e.dataset.page===id));$('breadcrumb').textContent=({overview:'工作台',setup:'安装与环境',models:'模型与配置',create:'创作空间'})[id];if(id==='models'){catalog();refreshDelModel();if(typeof refreshKeys==='function')refreshKeys();}if(id==='overview'){hwStart();}else{hwStop();}}
 document.querySelectorAll('[data-page]').forEach(b=>b.addEventListener('click',()=>page(b.dataset.page)));
-// 深链接：#models / #setup / #create 直接落到对应页
-(function(){const h=(location.hash||'').replace('#','');if(h&&document.getElementById(h))page(h);})();
+// 深链接挪到文件末尾再执行。
+// ★ 2026-11-16 事故：这段原来放在这里（第 8 行），而 `page()` 会调 hwStop()，
+//   `HW` 是后面才 `const` 声明的 —— 带 #create / #setup 打开时直接抛
+//   "Cannot access 'HW' before initialization"，**后面所有按钮的 onclick 都没绑上**，
+//   用户看到的就是"点检测环境、点打开创作空间都没反应"。
 $('theme').onclick=()=>{document.body.classList.toggle('light');localStorage.setItem('forgeform-theme',document.body.classList.contains('light')?'light':'dark')};if(localStorage.getItem('forgeform-theme')==='light')document.body.classList.add('light');
-async function action(name,data={}){try{if(name!=='cancel')lastAction={name,data};await api(name,data);await poll()}catch(e){toast(e.message)}}
-$('scan').onclick=()=>action('scan',{model_root:$('model-root').value});$('runtime').onclick=()=>action('runtime');$('install').onclick=()=>{if(selected)action('install',{key:selected,llm:$('install-llm').value})};$('cancel').onclick=()=>action('cancel');$('launch').onclick=()=>{launchPending=true;action('launch')};
+// 2026-11-16：用户反馈"点了没反应"。原来的 action() 只在 catch 里 toast，
+// 成功路径**什么反馈都没有** —— 而检测环境/启动创作空间都可能几秒到几十秒
+// （或者本来就已经就绪，瞬间完成），界面上看起来就像没点。现在：
+//   · 立刻把按钮置灰 + 顶栏写"正在…" + toast 一句，让点击必有回显
+//   · 出错时把错误同时写进顶栏和 toast（不再只有一个转瞬即逝的提示）
+const ACTION_LABEL={scan:'检测环境',runtime:'安装基础环境',install:'安装所选方案',
+  launch:'打开创作空间',cancel:'取消任务',keys:'密钥操作',calibrate:'校准本机耗时',
+  location:'安装位置',firstrun:'一键开始',cloud:'云端配置'};
+async function action(name,data={},btn=null){
+  const label=ACTION_LABEL[name]||name;
+  const old=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='处理中…'}
+  toast('已提交：'+label);
+  try{$('top-status').textContent=label+'中…'}catch(e){}
+  try{
+    if(name!=='cancel')lastAction={name,data};
+    const r=await api(name,data);
+    await poll();
+    toast(label+'：已提交成功');
+    return r;
+  }catch(e){
+    const msg=label+'失败：'+(e&&e.message||e);
+    toast(msg);
+    try{$('top-status').textContent='操作失败'}catch(_){}
+    throw e;
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=old||'确定'}
+  }
+}
+$('scan').onclick=(ev)=>action('scan',{model_root:$('model-root').value},ev.currentTarget);$('runtime').onclick=(ev)=>action('runtime',{},ev.currentTarget);$('install').onclick=(ev)=>{if(selected)action('install',{key:selected,llm:$('install-llm').value},ev.currentTarget)};$('cancel').onclick=()=>action('cancel');$('launch').onclick=(ev)=>{launchPending=true;action('launch',{},ev.currentTarget)};
 function renderScan(s){if(!s||s.scanned_at===lastScan)return;lastScan=s.scanned_at;scanData=s;selected=s.default;$('install-llm').innerHTML='<option value="">按方案自动选择 / 复用已有服务</option>'+(s.llm_choices||[]).map(c=>`<option value="${esc(c.model)}" ${c.fits?'':'disabled'}>${esc(c.label)} · ${c.size_gb} GB${c.fits?'':' · 资源不足'}</option>`).join('');$('model-root').value=s.model_root;const h=s.hardware;$('hardware').innerHTML=[['显卡',h.gpu_name||'未检测到 NVIDIA',`${h.vram_gb} GB 显存 · 空闲 ${h.vram_free_gb} GB`],['系统内存',`${h.ram_gb} GB`,'加载峰值需额外余量'],['可用磁盘',`${h.disk_free_gb} GB`,'按模型保存位置检测'],['已有环境',s.frameworks.filter(f=>f.alive).length+' 个','只读探测，不预热模型']].map(([a,b,c])=>`<article><small>${esc(a)}</small><strong>${esc(b)}</strong><p>${esc(c)}</p></article>`).join('');$('frameworks').innerHTML=s.frameworks.map(f=>`<span class="${f.alive?'found':''}" title="${esc(f.detail||f.note)}">${f.alive?'●':'○'} ${esc(f.label)}${f.alive?' · '+f.models.length+' 个模型':''}</span>`).join('');$('scan-time').textContent='刚刚检测';$('plans').innerHTML=s.profiles.map(p=>`<button class="plan ${p.key===selected?'selected':''}" data-plan="${esc(p.key)}" ${!p.fits?'disabled':''}><span class="tag">${p.key===s.default?'推荐方案':p.fits?'可选方案':'当前不适合'}</span><h3>${esc(p.name)}</h3><p>${esc(p.desc)}</p><div class="size">${p.download_gb} <small>GB 下载</small></div><p>${esc(p.reason)}</p>${(p.quant_hints||[]).map(h=>`<div class="hint">${esc(h.model)} · ${esc(h.quant)}${h.offload?' / 内存卸载':''}<br>预计显存 ${h.vram_need_gb} GB · 内存 ${h.ram_need_gb} GB${h.fits?'':' · 资源需复核'}</div>`).join('')}</button>`).join('')||'<div class="empty">没有找到可用方案。可在模型与配置中接入已有服务。</div>';$('plans').querySelectorAll('[data-plan]').forEach(b=>b.onclick=()=>{selected=b.dataset.plan;$('plans').querySelectorAll('.plan').forEach(p=>p.classList.toggle('selected',p===b));$('install').disabled=false;installationEstimate()});$('install').disabled=!selected;installationEstimate();}
 async function catalog(){try{const s=await api('catalog');models=s.models;for(const [id,kind] of [['image','image'],['mesh','3d']]){const e=$(id);const current=s.config.stages[kind]?.default_model||'';const options=models.filter(p=>p.kind===kind);e.innerHTML='<option value="">保持当前模型</option>'+options.map(p=>`<option value="${esc(p.id)}" ${p.unavailable_reason?'disabled':''}>${esc(p.label)}${p.unavailable_reason?' · 暂不可用':''}${p.installed?' · 本地已有':''}</option>`).join('');if(options.some(p=>p.id===current))e.value=current;e.onchange=()=>{$(id+'_path').value=options.find(p=>p.id===e.value)?.path||''};e.onchange();}$('mode').value=s.config.backend.mode||'auto';$('catalog').innerHTML=models.map(p=>`<div class="catalog-item"><b>${esc(p.label)}</b><p class="${p.installed?'installed':''}">${p.unavailable_reason?esc(p.unavailable_reason):p.installed?'本地已有':'待安装'} · ${esc(p.kind)}</p><p>${esc(p.path||p.repo)}</p></div>`).join('')}catch(e){toast(e.message)}}
 $('settings').onsubmit=async e=>{e.preventDefault();try{const r=await api('config',{mode:$('mode').value,quant:$('quant').value,image:$('image').value,'3d':$('mesh').value,image_path:$('image_path').value,'3d_path':$('mesh_path').value,llm:$('llm').value,endpoint:$('endpoint').value});$('save-result').textContent=r.message;toast('配置已保存')}catch(e){$('save-result').textContent=e.message;toast(e.message)}};
-async function poll(){try{const s=await api('status'),j=s.job;renderScan(s.snapshot);$('top-status').textContent=j.status==='running'?j.label:s.runtime_ready?'环境已安装':'待准备环境';$('job').hidden=j.status==='idle';$('job-title').textContent=j.label;$('job-kind').textContent=({running:'正在进行',done:'完成',failed:'未完成 · 可重试',cancelled:'已取消'})[j.status]||'';$('logs').textContent=j.logs.join('\n');$('cancel').hidden=j.status!=='running';if(j.total){$('progress').max=j.total;$('progress').value=j.step;$('job-step').textContent=`已完成 ${j.step} / ${j.total} 个步骤`}else{$('progress').removeAttribute('value');$('job-step').textContent=j.status==='running'?'正在处理，详细记录会持续更新。':''}
+async function poll(){try{const s=await api('status'),j=s.job;
+  try{if(launchPending&&!s.ready){const el=document.querySelector('#create-empty p');if(el)el.textContent='创作空间正在启动（约 10-20 秒，首次加载更久）…'}}catch(_){}
+  try{if(s.ready){const w=document.querySelector('#workspace');const ce=document.querySelector('#create-empty');if(w&&!w.getAttribute('src')){w.src=s.app_url+'/?__theme=dark';if(window.__wsWait)window.__wsWait(w.src)}if(w)w.hidden=false;if(ce)ce.hidden=true;const ww=document.querySelector('#ws-wrap');if(ww)ww.hidden=false}}catch(_){}renderScan(s.snapshot);$('top-status').textContent=j.status==='running'?j.label:s.runtime_ready?'环境已安装':'待准备环境';$('job').hidden=j.status==='idle';$('job-title').textContent=j.label;$('job-kind').textContent=({running:'正在进行',done:'完成',failed:'未完成 · 可重试',cancelled:'已取消'})[j.status]||'';$('logs').textContent=j.logs.join('\n');$('cancel').hidden=j.status!=='running';if(j.total){$('progress').max=j.total;$('progress').value=j.step;$('job-step').textContent=`已完成 ${j.step} / ${j.total} 个步骤`}else{$('progress').removeAttribute('value');$('job-step').textContent=j.status==='running'?'正在处理，详细记录会持续更新。':''}
 // 下载中的文件级进度：只显示"第几步"时，30 GB 的模型看着像卡死
 if(j.status==='running'&&j.file){$('download').hidden=false;$('download-name').textContent=j.file;$('download-pct').textContent=(j.percent||0).toFixed(1)+'%';{const eta=j.eta_sec||0;const etaTxt=eta>0?` · 剩余约 ${eta>=60?Math.floor(eta/60)+' 分 '+(eta%60)+' 秒':eta+' 秒'}`:'';
-$('download-detail').textContent=`${(j.downloaded_mb||0).toFixed(0)} / ${(j.size_mb||0).toFixed(0)} MB · ${(j.speed_mbps||0).toFixed(2)} MB/s${etaTxt}`};$('download-bar').style.width=Math.min(100,j.percent||0)+'%'}else{$('download')&&($('download').hidden=true)}for(const id of ['scan','runtime','launch'])$(id).disabled=j.status==='running';$('install').disabled=j.status==='running'||!selected;if(launchPending&&j.status==='done'&&s.ready){$('workspace').src=s.app_url+'/?__theme='+ (document.body.classList.contains('light')?'light':'dark');$('workspace').hidden=false;$('create-empty').hidden=true;launchPending=false}if(j.status==='failed'||j.status==='cancelled'){launchPending=false;if(!$('retry')){const b=document.createElement('button');b.id='retry';b.textContent='重试此任务';b.onclick=()=>{if(lastAction)action(lastAction.name,lastAction.data)};$('job').append(b)}}else $('retry')?.remove()}catch(e){$('top-status').textContent='连接中断';if(!window.connectionError){toast('本地服务连接中断，请重新打开启动程序');window.connectionError=true}}}
+$('download-detail').textContent=`${(j.downloaded_mb||0).toFixed(0)} / ${(j.size_mb||0).toFixed(0)} MB · ${(j.speed_mbps||0).toFixed(2)} MB/s${etaTxt}`};$('download-bar').style.width=Math.min(100,j.percent||0)+'%'}else{$('download')&&($('download').hidden=true)}for(const id of ['scan','runtime','launch'])$(id).disabled=j.status==='running';$('install').disabled=j.status==='running'||!selected;if(s.ready&&!$('workspace').getAttribute('src')){$('workspace').src=s.app_url+'/?__theme='+ (document.body.classList.contains('light')?'light':'dark');$('workspace').hidden=false;$('create-empty').hidden=true;launchPending=false}if(j.status==='failed'||j.status==='cancelled'){launchPending=false;if(!$('retry')){const b=document.createElement('button');b.id='retry';b.textContent='重试此任务';b.onclick=()=>{if(lastAction)action(lastAction.name,lastAction.data)};$('job').append(b)}}else $('retry')?.remove()}catch(e){$('top-status').textContent='连接中断';if(!window.connectionError){toast('本地服务连接中断，请重新打开启动程序');window.connectionError=true}}}
 poll();setInterval(poll,1500);
 
 // ── 删除：单模型 / 整个铸想 ──
@@ -391,3 +424,66 @@ function pollQuickDownload(){
 }
 
 refreshQuick();
+
+// ══ 连接自检 ══
+// 用户反馈"点了没反应"，一半情况其实是**页面和 Studio 失联了**（服务被关、
+// 或换了个端口）。这里周期性探活，一旦断了就在顶栏明说，而不是让按钮静默失效。
+let _pingFails = 0;
+async function ping(){
+  try{
+    const r = await fetch('/api/ping', {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    _pingFails = 0;
+    document.body.classList.remove('offline');
+    return true;
+  }catch(e){
+    if(++_pingFails >= 2){
+      document.body.classList.add('offline');
+      try{ $('top-status').textContent = '与 Studio 断开 · 请刷新或重启'; }catch(_){}
+    }
+    return false;
+  }
+}
+ping(); setInterval(ping, 5000);
+
+// ══ 创作空间加载遮罩 ══
+// iframe 里是 Gradio，首屏要 10–20 秒且默认是浅灰骨架 —— 用户看到一片灰就以为
+// "点了没反应"。这里盖一层自家深色遮罩，等 iframe 的 load 事件再撤；
+// 超过 40 秒还没好就把"在新窗口打开"露出来（有时嵌在 iframe 里被浏览器限制）。
+(function(){
+  const w = document.getElementById('ws-wrap');
+  const f = document.getElementById('workspace');
+  const box = document.getElementById('ws-loading');
+  const hint = document.getElementById('ws-hint');
+  const open = document.getElementById('ws-open');
+  if(!w || !f || !box) return;
+  let timer = null;
+  f.addEventListener('load', ()=>{
+    if(!f.getAttribute('src')) return;
+    box.hidden = true;
+    if(timer){ clearTimeout(timer); timer = null; }
+  });
+  window.__wsWait = function(url){
+    w.hidden = false;
+    box.hidden = false;
+    hint.textContent = '';
+    open.hidden = true;
+    open.onclick = ()=> window.open(url || f.getAttribute('src'), '_blank', 'noopener');
+    f.hidden = false;
+    if(timer) clearTimeout(timer);
+    timer = setTimeout(()=>{
+      if(!box.hidden){
+        hint.textContent = '加载比平时慢（这机器首次启动会读模型）。可以直接在新窗口打开。';
+        open.hidden = false;
+      }
+    }, 40000);
+  };
+})();
+
+// 深链接（放到最后执行）：#models / #setup / #create 直接落到对应页
+(function(){
+  try{
+    const h=(location.hash||'').replace('#','');
+    if(h && document.getElementById(h)) page(h);
+  }catch(e){ console.warn('deep-link skipped', e); }
+})();
