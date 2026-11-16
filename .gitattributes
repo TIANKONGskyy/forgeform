@@ -36,3 +36,10 @@
 # 别把生成的展示页算进"主要语言"
 docs/showcase/index.html linguist-documentation
 docs/**.md               linguist-documentation
+
+# ── 发布包（git archive）排除宣传素材与示例模型 ──
+# 实测 v3.7.0 的 zip 30.3 MB，其中 10 MB 是 docs/assets/promo/demo.gif、
+# 还有 4 个 docs/showcase 的 STL/GLB 各 3.4–3.8 MB。这些是站点与文档用的，
+# 用户装铸想不需要 —— 安装包应当只含代码与必要资源。
+docs/assets/promo/ export-ignore
+docs/showcase/ export-ignore
