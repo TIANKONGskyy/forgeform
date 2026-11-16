@@ -1888,13 +1888,23 @@ class TestTunedServiceWiring(unittest.TestCase):
         self.assertIn("分", T.human(148))
 
     def test_ring_html_shows_measured_estimate(self):
-        """环形进度条：必须带 SVG 环 + 动画，且文案里带上实测样本（不是空话）"""
+        """环形进度条：必须带 SVG 环 + 动画，且文案里带上实测样本（不是空话）。
+
+        ★ 2026-11-16：原来断言 `n=2`（写死的样本数）。这个数会随
+        `outputs/timings_local.jsonl` 累积真实样本而变（巡检跑了几次就变 n=5），
+        一涨就红 —— 那是测试写得脆，不是产品坏。改成断言**格式**：
+        必须出现 `n=正整数`，且中位/最长两段都在。
+        """
+        import re
         import app as A
         html_run = A.ring_html("3d_fast")
         self.assertIn("<svg", html_run)
         self.assertIn("keyframes ringrun", html_run, "要有动画（前端自己走，后端阻塞推不了）")
         self.assertIn("实测通常", html_run)
-        self.assertIn("n=2", html_run, "3d_fast 的实测样本数是 2")
+        m = re.search(r"n=(\d+)", html_run)
+        self.assertIsNotNone(m, f"要报样本数，实际文案：{html_run[-120:]}")
+        self.assertGreaterEqual(int(m.group(1)), 1, "样本数至少 1")
+        self.assertIn("最长见过", html_run, "要给出上限，光有中位不够")
         html_done = A.ring_html("stl", 2.3, done=True)
         self.assertIn("实际 2 秒", html_done)
         self.assertNotIn("keyframes ringrun { from", html_done.split("</style>")[0].replace(

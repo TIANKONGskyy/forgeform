@@ -556,6 +556,23 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=7863)
     args = ap.parse_args()
 
+    # ★ 2026-11-16：启动自检。踩过的坑：改了 key 存储格式（issued.json →
+    #   issued.dat 加密）之后，旧进程还在跑旧代码，读不到新文件 → 所有 key
+    #   一律 401，用户以为"key 坏了"。这里开机就自证一次：
+    #   签发 → 校验 → 删除，走不通就明确说，而不是等人踩。
+    try:
+        _probe = S.issue_api_key("__startup_selftest__", ttl_days=1)
+        _ok = S.verify_api_key(_probe["token"]) is not None
+        S.delete_api_key(_probe["id"])
+        if not _ok:
+            print("✗ key 自检失败：签发的 key 校验不过。多半是旧进程/旧格式，"
+                  "重启本服务或删掉 .secrets/ 重新签发。", flush=True)
+        else:
+            print(f"key 自检通过（加密后端 {S.backend_name()}，"
+                  f"现有 {len(S.list_api_keys())} 把）", flush=True)
+    except Exception as exc:
+        print(f"✗ key 自检异常: {type(exc).__name__}: {exc}", flush=True)
+
     keys = S.list_api_keys()
     if not keys:
         print("⚠️ 还没有签发任何 key。先跑一次：", flush=True)

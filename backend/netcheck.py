@@ -39,7 +39,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / "logs" / "net-cache.json"
-CACHE_TTL = 3600          # 1 小时
+# 6 小时。原来 1 小时 —— 实测巡检每轮都撞上过期，白花 15-20 秒重测；
+# 网络状况不会一小时一变，真要重测用 tools/doctor.py --refresh。
+CACHE_TTL = 6 * 3600
 
 PYPI = {
     "aliyun": "https://mirrors.aliyun.com/pypi/simple",

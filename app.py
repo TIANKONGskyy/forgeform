@@ -1431,6 +1431,42 @@ def register_model_library(sa) -> None:
         return {"ok": True, "id": model_id}
 
 
+def _start_prewarm() -> None:
+    """后台预热对话模型，修"第一次说话要等 100 秒"。
+
+    ★ 2026-11-16 实测（巡检 S03）：首轮 105.9 秒，之后 9–12 秒。
+    差的那 90 多秒全在冷启动（Strata 125B 拉进显存约 70 秒 + 首次 CUDA 上下文）。
+    用户点开界面、看两行说明、打出第一句话 —— 这段时间本来可以拿来预热。
+
+    做法：界面起来 15 秒后，在后台线程里 warm_up 一次。
+    为什么不立刻做：Gradio 首屏要抢 CPU，预热也抢，挤在一起首屏会慢；
+    也不在 build() 里做，因为那样会拖住 HTTP 响应。
+
+    安全：`agent.warm_up()` 自己会检查"ComfyUI 正在生成就跳过"，
+    不会把正在出图的显存抢走。
+    """
+    def _go() -> None:
+        try:
+            import time as _t
+            _t.sleep(15)
+            if agent.is_ready():
+                print("[prewarm] 对话模型已就绪，跳过", flush=True)
+                return
+            _t0 = _t.time()
+            ok = agent.warm_up()
+            print(f"[prewarm] {'预热完成' if ok else '预热跳过'} "
+                  f"{_t.time() - _t0:.0f}s", flush=True)
+        except Exception as exc:
+            print(f"[prewarm] 预热失败（不影响使用）: {type(exc).__name__}: {exc}",
+                  flush=True)
+
+    try:
+        import threading as _th
+        _th.Thread(target=_go, daemon=True, name="ff-prewarm").start()
+    except Exception:
+        pass
+
+
 def _start_maintenance() -> None:
     """启动运行信息留存 + 定时清理。
 
@@ -1477,6 +1513,7 @@ def _start_maintenance() -> None:
 if __name__ == "__main__":
     app = build()
     _start_maintenance()
+    _start_prewarm()
     # ★ 2026-11-15：端口被占时自动换一个，而不是硬绑 7860。
     #
     # 为什么必须这一步：实测这台机器上 7860 被**旧版铸想**（AI-Workshop 的

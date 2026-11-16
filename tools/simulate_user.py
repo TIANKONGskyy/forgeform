@@ -440,6 +440,59 @@ def s15_3d_heavy(c: Check) -> None:
           or Path(glb).name == "model.glb", Path(glb).name)
     stl = st.get("stl_path") or ""
     c("自动导出了 STL", bool(stl) and Path(stl).exists(), str(stl)[-46:])
+    # 分段耗时（对话流程里记的），用来定位"890 秒花在哪"
+    perf = st.get("perf") or {}
+    if perf:
+        c("分段耗时已记录", True,
+          " ".join(f"{k}={v}s" for k, v in perf.items()))
+
+
+def s17_cancel_interrupt(c: Check) -> None:
+    """用户点了生成又点取消 → 作业被标记取消、不会继续烧显卡。"""
+    if not _ensure_studio():
+        return c("Studio 未就绪", False, "跳过")
+    st0 = _studio("/api/status")
+    if st0["job"]["status"] in ("running", "queued"):
+        _studio("/api/cancel", {})
+        time.sleep(2)
+    # 起一个"假作业"占住 job 状态（dry-run 安装，不真下载）
+    r = _studio("/api/calibrate", {})       # 快作业，顺便验证接口
+    c("能启动作业", bool(r.get("job") or r.get("ok")), str(r)[:80])
+    # 立刻取消
+    rc = _studio("/api/cancel", {})
+    c("能取消", bool(rc.get("ok", True)), str(rc)[:60])
+    for _ in range(15):
+        time.sleep(1)
+        st = _studio("/api/status")
+        if st["job"]["status"] in ("cancelled", "failed", "done", "idle"):
+            break
+    c("取消后不再 running", st["job"]["status"] not in ("running", "queued"),
+      st["job"]["status"])
+    # 取消之后还能再起（不能一取消就卡死）
+    r2 = _studio("/api/calibrate", {})
+    c("取消后可再次启动", bool(r2.get("job") or r2.get("ok")), str(r2)[:60])
+
+
+def s18_offline_degrade(c: Check) -> None:
+    """网络全挂时：自检能明确说"不通"，下载逻辑不假装成功。"""
+    from backend import netcheck as N
+    # 用一个必然连不上的地址验探测函数本身会返回 ok=False 而不是抛异常
+    bad = N._probe("http://127.0.0.1:9/definitely-not-there", timeout=2.0)
+    c("探测失败返回 ok=False", bad.get("ok") is False, str(bad.get("error", ""))[:60])
+    c("探测失败带错误信息", bool(bad.get("error")), bad.get("error", "")[:50])
+    # 镜像全挂时的挑选函数应回退到默认值而不是抛
+    orig = N.probe_all
+    try:
+        N.probe_all = lambda *a, **k: {"pypi": [{"ok": False}], "github": [{"ok": False}],
+                                       "hf": [{"ok": False}]}
+        c("全挂时 pick_pypi 有兜底", bool(N.pick_pypi()), N.pick_pypi())
+        c("全挂时 pick_github 有兜底", bool(N.pick_github()), N.pick_github())
+    finally:
+        N.probe_all = orig
+    # 下载器对 404 的处理：应当明确失败
+    from tools import fetch_model as FM  # noqa
+    c("下载器有重试/换源逻辑",
+      hasattr(FM, "MIRRORS") and len(FM.MIRRORS) >= 2, list(FM.MIRRORS))
 
 
 def s16_source_health(c: Check) -> None:
@@ -479,6 +532,8 @@ SCENARIOS = [
     ("S14", "真出图", "heavy", s14_pipeline_light),
     ("S15", "真建模", "heavy", s15_3d_heavy),
     ("S16", "源码回归", "light", s16_source_health),
+    ("S17", "取消与再启动", "light", s17_cancel_interrupt),
+    ("S18", "断网降级", "light", s18_offline_degrade),
 ]
 
 
@@ -497,13 +552,21 @@ def _save_state(s: dict) -> None:
     STATE.write_text(json.dumps(s, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# heavy 场景（真出图/真建模）一次要 1-15 分钟，占总耗时 91%。
+# 每轮都跑会把 10 小时的窗口吃光，只够扫三轮。改成每 HEAVY_EVERY 次才放行，
+# 其余轮次走轻量场景 —— 覆盖面靠轮数，不靠单个场景硬跑。
+HEAVY_EVERY = 4
+
+
 def _next_scenario(heavy_ok: bool) -> tuple:
     s = _load_state()
     n = len(SCENARIOS)
+    run_no = int(s.get("run") or 0)
+    allow_heavy = heavy_ok and (run_no % HEAVY_EVERY == 0)
     for step in range(n):
         i = (s["idx"] + step) % n
         sid, name, level, fn = SCENARIOS[i]
-        if level == "heavy" and not heavy_ok:
+        if level == "heavy" and not allow_heavy:
             continue
         s["idx"] = (i + 1) % n
         s["run"] = int(s.get("run") or 0) + 1
@@ -520,6 +583,12 @@ def run_one(sid: str | None = None, heavy: bool = True) -> dict:
         if not hit:
             return {"ok": False, "error": f"没有场景 {sid}"}
         item = hit
+        # ★ 指定场景也要推进轮转指针 —— 否则定时任务用 `--run Sxx` 会一直
+        #   停在同一个场景（实测连跑两次 S08 才发现）。
+        st = _load_state()
+        st["idx"] = (SCENARIOS.index(hit) + 1) % len(SCENARIOS)
+        st["run"] = int(st.get("run") or 0) + 1
+        _save_state(st)
     else:
         item = _next_scenario(heavy)
     sid, name, level, fn = item

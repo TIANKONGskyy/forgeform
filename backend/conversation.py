@@ -23,6 +23,27 @@ def _free_tuned_for_gpu_work(what: str = "生成") -> None:
             print(f"[DSH] 已让出微调模型显存（{what}需要）", flush=True)
     except Exception as e:
         print(f"[DSH] 让出微调显存失败（不影响{what}）: {e!r}")
+
+    # ★ 2026-11-16 A/B 实测结论：**不要无条件停 Strata**。
+    #
+    #   假设：Strata 常驻 14–29 GB 把 hy3dgen 挤慢（3D 607s vs 单独跑 211s）。
+    #   验证：把"生成前停 Strata"打开，同一件作品再跑一次 —— mesh 607 → 717s，
+    #        反而更慢了。说明那 3 倍差距不是 Strata 造成的（是步数/octree/输入图
+    #        共同决定的），无条件停只会让生成后第一句对话白等 87 秒冷启动。
+    #
+    #   保留一条：只在**显存真的不够**时才停，那是为了避免 OOM，不是为了提速。
+    try:
+        if agent._provider() == "strata":
+            _free = _free_vram_gb()
+            if _free < 8:
+                if describer.strata_stop():
+                    print(f"[DSH] 空闲显存仅 {_free:.1f}GB，停 Strata 让位"
+                          f"（{what}需要，稍后后台拉回）", flush=True)
+            else:
+                print(f"[DSH] 空闲显存 {_free:.1f}GB 充足，Strata 保持常驻"
+                      f"（省一次 87s 冷启动）", flush=True)
+    except Exception as e:
+        print(f"[DSH] 显存让位判断失败（不影响{what}）: {e!r}")
     # 防御：Ollama 那份常驻模型（gpt-oss 12.9GB）同样会挤掉 ComfyUI 的显存，
     # 尤其 provider=ollama 时聊天会把 gpt-oss 常驻 —— 生成前一并卸掉。
     try:
@@ -1563,12 +1584,20 @@ class ConversationManager:
         state["phase"] = "3d"
         pm.save_project(state)
 
+        # ★ 2026-11-16：分段计时。此前只知道"建模 890 秒"，不知道钱花在哪
+        #   （实测纯 512oct 推理只要 211s，说明有 600 多秒在别处）。
+        #   不加探针就只能靠猜，改了也不知道有没有变快。
+        import time as _tp
+        _perf = {"t0": _tp.time()}
+
         from .pipeline import Pipeline
         pipe = Pipeline()
+        _perf["pipe"] = _tp.time() - _perf["t0"]
 
         # 两阶段第二阶段：3D 前先把预览图升到高清（旧版同款优化）
         was_preview = state.get("img_stage") != "hd"
         selected_img = self._enhance_selected(state, pipe)
+        _perf["hd"] = _tp.time() - _perf["t0"] - _perf.get("pipe", 0)
         pm.save_project(state)
         # 高清重绘是 img2img（denoise=0.5），成品与预览会略有差异 —— 明确告知用户
         hd_note = ("🔍 建模前已把预览图高清重绘到 1024（细节更足，与预览略有差异）\n"
@@ -1598,6 +1627,7 @@ class ConversationManager:
             if getattr(self, '_interactive', True):
                 _rewarm_tuned_async()
             _elapsed = _t.time() - _t0
+            _perf["mesh"] = _elapsed
             if result and result.success and result.output_path:
                 # 本机真实耗时进滚动窗口：下次 estimate() 就按这台机器说话，
                 # 不再拿别的机器的出厂值糊弄（换显卡差 4 倍）
@@ -1628,6 +1658,13 @@ class ConversationManager:
                 except Exception as e:
                     stl_note = f"⚠️ STL 自动导出失败：{e}"
 
+                _perf["stl"] = _tp.time() - _perf["t0"] - _perf.get("pipe", 0) \
+                    - _perf.get("hd", 0) - _elapsed
+                _perf["total"] = _tp.time() - _perf["t0"]
+                state["perf"] = {k: round(v, 1) for k, v in _perf.items()
+                                 if k != "t0"}
+                print("[3d-perf] " + " ".join(
+                    f"{k}={v:.1f}s" for k, v in state["perf"].items()), flush=True)
                 pm.save_project(state)
 
                 # 3D 模型描述：qwen3.8 是文本模型看不到 GLB，用确定性文案
