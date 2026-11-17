@@ -38,6 +38,19 @@ ROOT = Path(__file__).resolve().parent.parent
 # 我方页面的签名（app 的 Gradio 页 / studio 的 SPA / api 的 health 都能命中）
 _SIGNATURES = ("铸想", "ForgeForm", "forgeform", "ZYKT", "studio.js", "STUDIO_TOKEN")
 
+# ★ 2026-11-17：光看签名不够 —— 这台机器上曾经并存两个安装：
+#     D:\AI-Workshop（旧版，foundry_ondemand.py 起的）
+#     D:\ForgeForm-oss（现在这份）
+#   两个都注册成"铸想"，签名一模一样。结果新安装的判断成"自己人已在跑"就退出，
+#   用户看到的其实是旧版页面；Studio 那边又把旧版 app 当成"Studio 在跑"直接退出。
+#   所以每个服务都回一个身份头，带上自己的根目录；只有**同一个根目录**才算自己人。
+ROOT_HEADER = "X-ForgeForm-Root"
+ROOT_TAG = str(ROOT)
+
+
+def norm_root(s: str) -> str:
+    return str(s or "").replace("\\", "/").rstrip("/").lower()
+
 
 def is_free(host: str, port: int, timeout: float = 0.35) -> bool:
     """端口空不空。Windows 的 SO_REUSEADDR 会让 bind 假成功，所以用 connect 判。"""
@@ -52,16 +65,43 @@ def who_is(port: int, host: str = "127.0.0.1", timeout: float = 2.5) -> dict:
     返回 {"busy": bool, "ours": bool, "kind": 'app'|'studio'|'api'|'other', "hint": str}
     """
     if is_free(host, port):
-        return {"busy": False, "ours": False, "kind": "free", "hint": ""}
+        return {"busy": False, "ours": False, "same": False, "install": "",
+                "kind": "free", "hint": ""}
     base = f"http://{host}:{port}"
     body = ""
+    install = ""
+    # ① 先探身份路由（最可靠：哪一份安装、什么角色）
+    try:
+        with urllib.request.urlopen(base + "/__forgeform_id", timeout=timeout) as r:
+            d = json.loads(r.read().decode("utf-8", "ignore"))
+        if isinstance(d, dict) and d.get("root"):
+            return {"busy": True, "ours": True,
+                    "same": norm_root(d["root"]) == norm_root(ROOT),
+                    "install": d["root"], "kind": d.get("kind") or "app",
+                    "hint": (f"已有{('Studio' if d.get('kind')=='studio' else '创作空间')}在 {port} 运行"
+                             if norm_root(d["root"]) == norm_root(ROOT)
+                             else f"端口 {port} 上是另一份铸想（{d['root']}）")}
+    except Exception:
+        pass
+    # ② 再读身份头
+    try:
+        req = urllib.request.Request(base + "/", method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            install = r.headers.get(ROOT_HEADER) or ""
+    except urllib.error.HTTPError as e:
+        install = e.headers.get(ROOT_HEADER) or ""
+    except Exception:
+        pass
+    same = bool(install) and norm_root(install) == norm_root(ROOT)
     # 1) studio 有 JSON 状态接口，最可靠
     try:
         with urllib.request.urlopen(base + "/api/status", timeout=timeout) as r:
             d = json.loads(r.read().decode("utf-8", "ignore"))
         if isinstance(d, dict) and "job" in d:
-            return {"busy": True, "ours": True, "kind": "studio",
-                    "hint": f"已有 Studio 在 {port} 运行"}
+            return {"busy": True, "ours": True, "same": same, "install": install,
+                    "kind": "studio",
+                    "hint": (f"已有 Studio 在 {port} 运行" if same else
+                             f"端口 {port} 上的 Studio 是另一份安装（{install or '未知'}）")}
     except Exception:
         pass
     # 2) api_server 的免鉴权探活
@@ -69,8 +109,10 @@ def who_is(port: int, host: str = "127.0.0.1", timeout: float = 2.5) -> dict:
         with urllib.request.urlopen(base + "/v1/health", timeout=timeout) as r:
             d = json.loads(r.read().decode("utf-8", "ignore"))
         if isinstance(d, dict) and d.get("ok") and "queue" in d:
-            return {"busy": True, "ours": True, "kind": "api",
-                    "hint": f"已有 API 服务在 {port} 运行"}
+            return {"busy": True, "ours": True, "same": same, "install": install,
+                    "kind": "api",
+                    "hint": (f"已有 API 服务在 {port} 运行" if same else
+                             f"端口 {port} 上的 API 是另一份安装（{install or '未知'}）")}
     except Exception:
         pass
     # 3) 首页签名（app 的 Gradio 页、或者是别人的网站）
@@ -80,15 +122,25 @@ def who_is(port: int, host: str = "127.0.0.1", timeout: float = 2.5) -> dict:
     except Exception:
         body = ""
     if body and any(s in body for s in _SIGNATURES):
-        return {"busy": True, "ours": True, "kind": "app",
-                "hint": f"已有创作空间在 {port} 运行"}
-    return {"busy": True, "ours": False, "kind": "other",
-            "hint": f"端口 {port} 被别的程序占用"}
+        return {"busy": True, "ours": True, "same": same, "install": install,
+                "kind": "app",
+                "hint": (f"已有创作空间在 {port} 运行" if same else
+                         f"端口 {port} 上是另一份铸想（{install or '旧版，未带身份头'}）")}
+    return {"busy": True, "ours": False, "same": False, "install": install,
+            "kind": "other", "hint": f"端口 {port} 被别的程序占用"}
 
 
-def pick_free(preferred: int, span: int = 20, host: str = "127.0.0.1") -> int:
-    """从 preferred 开始找一个空闲端口；都占了就返回 0。"""
+def pick_free(preferred: int, span: int = 20, host: str = "127.0.0.1",
+              avoid: tuple[int, ...] = ()) -> int:
+    """从 preferred 开始找一个空闲端口；都占了就返回 0。
+
+    avoid：**别的服务预留的端口**（app 不许抢 Studio 的 7861、API 的 7863 ——
+    实测发生过：旧版 app 占了 7861，Studio 以为"创作空间在跑"直接退出，
+    用户点开看到的是创作空间，控制台根本起不来）。
+    """
     for p in range(preferred, preferred + max(1, span)):
+        if p in avoid:
+            continue
         if is_free(host, p):
             return p
     return 0
@@ -196,7 +248,7 @@ def kill_stale(script: str, keep_pid: int = 0, wait: float = 3.0) -> list[int]:
 
 
 def resolve(preferred: int, script: str = "", span: int = 20,
-            host: str = "127.0.0.1") -> dict:
+            host: str = "127.0.0.1", avoid: tuple[int, ...] = ()) -> dict:
     """入口统一调用：给出"该用哪个端口"，或"别开了"。
 
     返回 {"action": 'use'|'reuse'|'fail', "port": int, "why": str}
@@ -204,14 +256,14 @@ def resolve(preferred: int, script: str = "", span: int = 20,
     info = who_is(preferred, host)
     if not info["busy"]:
         return {"action": "use", "port": preferred, "why": "端口空闲"}
-    if info["ours"]:
-        # 自己人占着 → 别再开一份（这会劈开显存，实测过）
+    if info["ours"] and info.get("same", False):
+        # 同一份安装占着 → 别再开一份（这会劈开显存，实测过）
         return {"action": "reuse", "port": preferred,
                 "why": info["hint"] + "，直接用它"}
-    # 别人占着 → 换端口
-    port = pick_free(preferred + 1, span, host)
+    # 别的程序，或**另一份安装**（例如旧版 D:\AI-Workshop）→ 换端口
+    port = pick_free(preferred + 1, span, host, avoid=avoid)
     if not port:
         return {"action": "fail", "port": 0,
                 "why": f"{preferred}~{preferred + span} 全被占用"}
     return {"action": "use", "port": port,
-            "why": f"{preferred} 被别人占用（{info['hint']}），改用 {port}"}
+            "why": f"{preferred} 被占用（{info['hint']}），改用 {port}"}

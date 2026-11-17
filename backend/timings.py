@@ -164,10 +164,24 @@ def _trim() -> None:
         pass
 
 
+# 每个阶段"物理上不可能这么快"的下限（秒）。低于它说明是**缓存命中/提前返回**，
+# 不是一次真实生成。2026-11-17 实测污染：image_512 与 3d_std 各混进 40 条 0.07 秒
+# 的样本，于是界面上写"实测通常 0.1 秒"，用户当然觉得这数在骗人。
+_MIN_PLAUSIBLE = {
+    "image_512": 8.0, "image": 8.0, "image_hd": 15.0, "image_1024": 15.0,
+    "3d_fast": 60.0, "3d_std": 60.0, "3d_hd": 120.0, "3d_max": 120.0,
+    "3d_multiview": 60.0, "stl": 0.5, "stl_big": 2.0,
+}
+
+
 def record(stage: str, sec: float, note: str = "") -> None:
     """记录一次真实耗时。任何异常都不往外抛（不能因为统计把主流程搞挂）。"""
     try:
         if not stage or sec is None or float(sec) <= 0.05:
+            return
+        _floor = _MIN_PLAUSIBLE.get(stage, 0.5)
+        if float(sec) < _floor:
+            # 缓存命中/提前返回，不算一次真实生成
             return
         _LOCAL_FILE.parent.mkdir(parents=True, exist_ok=True)
         rec = {"stage": stage, "sec": round(float(sec), 2),

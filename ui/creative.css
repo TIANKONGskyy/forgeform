@@ -210,3 +210,116 @@ body{overflow-y:auto!important}
 #chatbox .message,#chatbox .bubble{line-height:1.75!important}#chatbox{padding:16px!important}.input-row-chat{padding:12px 14px!important}.action-bar{gap:8px!important}.action-bar button{border-radius:10px!important}
 .gradio-container button:focus-visible,.gradio-container input:focus-visible,.gradio-container textarea:focus-visible{outline:2px solid var(--ff-accent)!important;outline-offset:2px!important}
 @media(max-width:850px){.gradio-container{padding:14px!important}.side-col{display:block!important;max-width:none!important;min-width:0!important;border-left:0!important;padding-left:0!important}.main-wrap{gap:16px!important}.sidebar{padding:16px}.model-bar{flex-wrap:wrap!important}}
+
+/* ZYKT shared accents: calm surfaces keep the focus on the work. */
+:root{--ff-bg:#0a101b;--ff-panel:#121c2a;--ff-line:#293b50;--ff-text:#edf4fb;--ff-muted:#a4b4c8;--ff-accent:#81d9e7}
+#chatbox .message.user,#chatbox .user-row .message{background:rgba(88,192,215,.16)!important;border-color:rgba(129,217,231,.24)!important}
+.input-row-chat{box-shadow:none!important}
+.gradio-container button{transition:transform .18s ease,border-color .2s ease,box-shadow .2s ease,background-color .2s ease!important}
+.gradio-container button:active:not(:disabled){transform:scale(.97)}
+.gradio-container button:focus-visible,.gradio-container input:focus-visible,.gradio-container textarea:focus-visible{outline:2px solid #81d9e7!important;outline-offset:2px!important}
+@media(max-width:850px){.input-row-chat,.input-row-upload{min-width:0!important;flex-wrap:wrap!important}.input-row-chat>*{min-width:0!important}}
+@media(prefers-reduced-motion:reduce){.gradio-container button{transition:none!important}}
+
+/* Ambient light stays behind opaque working surfaces. */
+body { background: radial-gradient(ellipse at 12% 0%,rgba(63,183,209,.09),transparent 48%), radial-gradient(ellipse at 90% 15%,rgba(137,105,221,.08),transparent 44%), #0a101b !important; background-attachment:fixed!important; }
+.gradio-container { background:transparent!important; }
+
+/* Conversation workspace: one readable surface and an adjacent composer. */
+.gradio-container{max-width:1440px!important;padding:18px clamp(14px,2.4vw,30px) 32px!important}
+.main-wrap{gap:clamp(16px,2vw,26px)!important;align-items:flex-start!important}
+.chat-col{gap:10px!important;min-width:0!important}
+#chatbox{height:clamp(300px,46vh,560px)!important;min-height:300px!important;max-height:none!important;padding:16px!important;border-radius:20px!important;background:#111d2a!important;box-shadow:0 14px 36px rgba(0,0,0,.12)!important}
+#chatbox .wrapper,#chatbox .bubble-wrap{background:transparent!important}
+#chatbox .message-row.bubble{background:transparent!important;border:0!important;padding:0!important;box-shadow:none!important}
+#chatbox .message.bot,#chatbox .message.user{max-width:min(86%,720px)!important;padding:12px 15px!important;border-radius:16px!important;overflow-wrap:anywhere!important}
+#chatbox .message.bot>.message,#chatbox .message.user>.message{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important}
+#chatbox .message-content p{margin:.25em 0!important;line-height:1.75!important}
+#chatbox button[aria-label="清空对话"]{display:none!important}
+.input-row-chat{display:flex!important;align-items:flex-end!important;gap:8px!important;padding:9px!important;margin:0!important;background:#152131!important;border:1px solid #34485b!important;border-radius:17px!important;box-shadow:none!important}
+#chat_input{flex:1 1 180px!important;min-width:0!important;border:0!important;background:transparent!important;box-shadow:none!important}
+#chat_input label,#chat_input .input-container{border:0!important;background:transparent!important;box-shadow:none!important}
+#chat_input textarea{min-height:44px!important;max-height:180px!important;padding:10px 9px!important;border:0!important;background:transparent!important;resize:vertical!important;line-height:1.5!important}
+#ref_up,#send_btn{flex:0 0 auto!important;width:auto!important;min-width:76px!important;min-height:44px!important}
+#ref_up{color:#bfcedd!important;background:transparent!important}
+.edit-accordion{border:0!important;background:transparent!important;box-shadow:none!important}
+.edit-accordion>button,.edit-accordion .label-wrap{color:var(--ff-muted)!important}
+.input-row-upload{margin:0!important;padding:4px 0!important;gap:8px!important}
+#edit_prompt{min-width:0!important}
+.action-bar{display:flex!important;flex-wrap:wrap!important;gap:8px!important}
+.action-bar button{min-width:0!important;flex:1 1 120px!important}
+#glb_viewer{margin-top:4px!important}
+@media(max-width:850px){.gradio-container{padding:12px 14px 28px!important}.main-wrap{gap:14px!important}.side-col{display:block!important;max-width:none!important;min-width:0!important;border:0!important;padding:0!important}.navbar{flex-wrap:wrap!important}.navbar #history_dd{flex:1 1 160px!important;min-width:0!important;max-width:none!important}#chatbox{height:clamp(280px,42dvh,450px)!important;min-height:280px!important}.sidebar{padding:16px!important}.model-bar{flex-wrap:wrap!important}}
+@media(max-width:480px){.input-row-chat{gap:6px!important;flex-wrap:wrap!important}#chat_input{flex:1 1 100%!important}#ref_up,#send_btn{flex:1 1 0!important}#chatbox .message.bot,#chatbox .message.user{max-width:94%!important}.action-bar button{flex-basis:calc(50% - 8px)!important}.navbar>button[id*="new"]{margin-left:0!important}}
+/* The Studio can switch the child theme without reloading an unfinished draft. */
+body[data-ff-theme="light"]{--ff-bg:#edf3f6;--ff-panel:#fff;--ff-line:#d2dfe6;--ff-text:#203644;--ff-muted:#607786;--ff-accent:#287f8d;background:radial-gradient(ellipse at 10% 0%,rgba(85,190,208,.12),transparent 50%),#edf3f6!important}
+body[data-ff-theme="light"] .gradio-container{background:transparent!important;color:var(--ff-text)!important}
+body[data-ff-theme="light"] #chatbox{background:#f9fcfd!important;border-color:#d2dfe6!important;box-shadow:0 14px 36px rgba(53,91,105,.07)!important}
+body[data-ff-theme="light"] #chatbox .message.bot{background:#edf4f6!important;border-color:#dce8eb!important;color:#203644!important}
+body[data-ff-theme="light"] #chatbox .message.bot p,body[data-ff-theme="light"] #chatbox .message.bot li,body[data-ff-theme="light"] #chatbox .message.bot strong{color:#203644!important}
+body[data-ff-theme="light"] #chatbox .message.user{background:#d9f0f0!important;border-color:#bbdddd!important;color:#163d43!important}
+body[data-ff-theme="light"] #chatbox .message.user p{color:#163d43!important}
+body[data-ff-theme="light"] .input-row-chat{background:#fff!important;border-color:#cbdde4!important}
+body[data-ff-theme="light"] #chat_input textarea{color:#203644!important}
+body[data-ff-theme="light"] .gradio-container button:not(.primary){background:#fff!important;color:#294653!important;border-color:#d2dfe6!important}
+body[data-ff-theme="light"] .gradio-container button:not(.primary):hover{background:#eef8f8!important}
+body[data-ff-theme="light"] .gradio-container button.primary{background:#237f8d!important;border-color:#237f8d!important;color:white!important}
+body[data-ff-theme="light"] #ref_up{background:transparent!important;color:#466777!important}
+body[data-ff-theme="light"] #quality_radio label{background:#f5f9fa!important;color:#526b79!important;border-color:#d2dfe6!important}
+body[data-ff-theme="light"] #quality_radio label:has(input:checked){background:#d8eff0!important;color:#206a75!important;border-color:#78b9bf!important}
+body[data-ff-theme="light"] #chatbox .message pre{background:#e5eff2!important;border-color:#cedee4!important}
+body[data-ff-theme="light"] #chatbox .message code{background:#deeaee!important;color:#294653!important}
+@media(prefers-reduced-motion:reduce){.gradio-container button{transition:none!important}}
+
+/* Gradio scopes custom CSS under its container; match that specificity for light mode. */
+html:has(body[data-ff-theme="light"]){background:#edf3f6!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #chatbox{background:#f9fcfd!important;border-color:#d2dfe6!important;box-shadow:0 14px 36px rgba(53,91,105,.07)!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #chatbox .message.bot{background:#edf4f6!important;border-color:#dce8eb!important;color:#203644!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #chatbox .message.user{background:#d9f0f0!important;border-color:#bbdddd!important;color:#163d43!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain .input-row-chat{background:#fff!important;border-color:#cbdde4!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #chat_input textarea{background:transparent!important;color:#203644!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain .sidebar{background:#fff!important;border-color:#d2dfe6!important;color:#203644!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #ref_up{background:transparent!important;color:#466777!important}
+#chat_input textarea{overflow-y:auto!important;resize:none!important;scrollbar-width:thin!important}
+#img_model_dd label span,#model_3d_dd label span{background:transparent!important;color:var(--ff-muted)!important}
+.edit-accordion button{min-height:36px!important;padding:7px 12px!important;border-radius:10px!important;text-align:left!important}
+body[data-ff-theme="light"] gradio-app{background:transparent!important;color:#203644!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #chatbox .message.bot p,
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #chatbox .message.bot li,
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #chatbox .message.bot strong{color:#203644!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #chatbox .message.user p{color:#163d43!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #quality_radio label{background:#f9fcfd!important;color:#526b79!important;border-color:#d2dfe6!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #quality_radio label:has(input:checked){background:#d8eff0!important;color:#206a75!important;border-color:#78b9bf!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #img_model_dd,
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #model_3d_dd{background:#fff!important;border-color:#d2dfe6!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #send_btn{background:#237f8d!important;color:#fff!important;border-color:#237f8d!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain .nav-logo{color:#203644!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain .nav-logo .dot{background:#287f8d!important}
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #img_model_dd label,
+body[data-ff-theme="light"] .gradio-container.gradio-container .contain #model_3d_dd label{background:transparent!important;color:#607786!important}
+@media(max-width:850px){
+ .gradio-container.gradio-container .contain .main-wrap{display:flex!important;flex-direction:column!important;flex-wrap:nowrap!important;align-items:stretch!important}
+ .gradio-container.gradio-container .contain .main-wrap>.chat-col,
+ .gradio-container.gradio-container .contain .main-wrap>.side-col{width:100%!important;max-width:100%!important;min-width:0!important;flex:0 0 auto!important}
+ .gradio-container.gradio-container .contain .navbar{display:flex!important;flex-wrap:wrap!important}
+ .gradio-container.gradio-container .contain .navbar>*{min-width:0!important}
+}
+@media(max-width:480px){
+ .gradio-container.gradio-container .contain .navbar #history_dd{flex:1 1 150px!important;max-width:100%!important}
+ .gradio-container.gradio-container .contain .navbar>.block:last-child{flex:0 0 auto!important}
+}
+@media(max-width:850px){
+ .main-wrap{display:flex!important;flex-direction:column!important;flex-wrap:nowrap!important;align-items:stretch!important}
+ .main-wrap>.chat-col,.main-wrap>.side-col{width:100%!important;max-width:100%!important;min-width:0!important;flex:0 0 auto!important}
+ .navbar{display:flex!important;flex-wrap:wrap!important}
+ .navbar>*{min-width:0!important}
+}
+@media(max-width:480px){
+ .navbar #history_dd{flex:1 1 140px!important;max-width:100%!important}
+ .navbar>.block:last-child{flex:0 0 auto!important}
+}
+@media(max-width:480px){
+ .navbar>.block:first-child{flex:0 0 auto!important;width:auto!important}
+ .navbar .nav-logo{white-space:nowrap!important;font-size:17px!important;letter-spacing:1px!important}
+ .navbar>button[id*="new"]{white-space:nowrap!important;min-width:90px!important}
+}

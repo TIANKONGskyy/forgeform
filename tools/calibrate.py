@@ -224,7 +224,9 @@ def calib_stl(pipe, glb: str) -> None:
         return
     t0 = time.time()
     try:
-        ok, path = pipe.export_stl(glb, target_size_mm=120.0)
+        # export_stl 返回 StageResult（不是 (ok, path)），按属性读，别解包
+        _res = pipe.export_stl(glb, target_size_mm=120.0)
+        ok, path = bool(getattr(_res, "success", False)), getattr(_res, "output_path", "")
     except Exception as exc:
         _say(f"  ✗ 导出异常: {type(exc).__name__}: {exc}")
         return

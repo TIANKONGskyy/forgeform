@@ -504,6 +504,14 @@ def _reinforce_shape(prompt: str) -> str:
 
     word, phrase = hit
 
+    # ★ 2026-11-17：整句里已经出现该形状词根（cylindrical/hexagonal…）就**完全不动**。
+    #   原来只在"开头恰好是这个词"时才跳过，于是 "a simple cylindrical pen holder"
+    #   被插成 "a cylindrical simple cylindrical pen holder" —— 模型被冗余描述带偏，
+    #   这也是用户看到"生成的图跟描述不太像"的一个来源。
+    _stem0 = word.lower()[:6] if len(word) > 6 else word.lower()
+    if _stem0 and _stem0 in prompt.lower():
+        return prompt
+
     # ① 开头已有形状词就不动（避免 "hexagonal hexagonal ..."）
     starts_with = re.match(r"^\s*a\s+(?:single\s+)?", prompt, re.I)
     head = prompt
@@ -525,8 +533,14 @@ def _reinforce_shape(prompt: str) -> str:
             head = word + " " + prompt
 
     # ② 末尾复述（首尾呼应，强化形状约束）
-    tail = f"{phrase}, sharp geometric edges"
-    if phrase.lower() not in head.lower():
+    # ★ 2026-11-17 修：原来只要整句里**没出现** phrase 就追加，于是
+    #   "a simple cylindrical pen holder"（词根已经在句子里）也会被追加，
+    #   拼出 "a cylindrical simple cylindrical pen holder … cylindrical form" ——
+    #   同一个词在一句里出现三次，模型容易被冗余描述带偏。
+    #   现在：只要句子里已有该词根（cylindrical / hexagonal …）就不再追加。
+    _stem = word.lower().rstrip("al").rstrip("lar")   # cylindrical → cylindr
+    if (phrase.lower() not in head.lower()) and (_stem and _stem not in head.lower()):
+        tail = f"{phrase}, sharp geometric edges"
         head = head.rstrip(" ,.") + ", " + tail
 
     return head

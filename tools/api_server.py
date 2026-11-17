@@ -201,10 +201,12 @@ def _run_job(j: dict) -> None:
             if not glb_path:
                 raise RuntimeError("要导 STL 必须先建模")
             _stage_percent(j, "stl", 88)
-            ok, stl_path = pipe.export_stl(glb_path, float(opts.get("size_mm") or 120.0))
-            if not ok:
+            # export_stl 返回 StageResult，不是 (ok, path) 二元组 —— 早期版本是二元组，
+            # 这里若照旧解包会 TypeError，导致带 "stl" 的任务在模型已经建好之后才失败。
+            stl_res = pipe.export_stl(glb_path, float(opts.get("size_mm") or 120.0))
+            if not (stl_res and getattr(stl_res, "success", False) and stl_res.output_path):
                 raise RuntimeError("STL 导出失败")
-            j["files"]["stl"] = stl_path
+            j["files"]["stl"] = stl_res.output_path
 
         with JOBS_LOCK:
             j["status"] = "succeeded"
@@ -259,6 +261,12 @@ class Handler(BaseHTTPRequestHandler):
             obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", mime + "; charset=utf-8")
+        # 身份头：见 backend/ports.py 的说明（区分"同一台机器上的另一份铸想"）
+        try:
+            from backend.ports import ROOT_HEADER, ROOT_TAG
+            self.send_header(ROOT_HEADER, ROOT_TAG)
+        except Exception:
+            pass
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -287,6 +295,11 @@ class Handler(BaseHTTPRequestHandler):
         self._key_id = rec.get("id") or "-"
         if not _rate_ok(rec.get("label") or "default", bucket):
             self.send_response(429)
+            try:
+                from backend.ports import ROOT_HEADER, ROOT_TAG
+                self.send_header(ROOT_HEADER, ROOT_TAG)
+            except Exception:
+                pass
             self.send_header("Retry-After", "10")
             body = json.dumps({"type": "https://forgeform.local/err/rate-limited",
                                "title": "rate-limited", "status": 429,

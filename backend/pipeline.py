@@ -556,7 +556,15 @@ class Pipeline:
             # 6. 提交 + 等待 + 下载
             prompt_id = self.comfy.submit_workflow(workflow_data)
             self._log(f"高清任务已提交: {prompt_id[:8]}...")
-            result = self.comfy.wait_for_completion(prompt_id, timeout=600, progress_callback=progress_cb, thermal_guard=True)
+            # 出图等待时长可配（stages.image.timeout_s，默认 600）。
+            # 实测：ComfyUI 刚重启、Flux2+编码器冷加载时，一张 1024² 会超过 600s 被判超时。
+            _ti = 600
+            try:
+                _ti = int(((self.config.get("stages") or {}).get("image") or {})
+                          .get("timeout_s") or 600)
+            except Exception:
+                pass
+            result = self.comfy.wait_for_completion(prompt_id, timeout=_ti, progress_callback=progress_cb, thermal_guard=True)
             outputs = result.get("outputs", {})
 
             image_url = self.comfy.get_result_image(outputs)
@@ -651,7 +659,15 @@ class Pipeline:
 
             prompt_id = self.comfy.submit_workflow(workflow_data)
             self._log(f"局部重绘已提交: {prompt_id[:8]}...")
-            result = self.comfy.wait_for_completion(prompt_id, timeout=600, progress_callback=progress_cb, thermal_guard=True)
+            # 出图等待时长可配（stages.image.timeout_s，默认 600）。
+            # 实测：ComfyUI 刚重启、Flux2+编码器冷加载时，一张 1024² 会超过 600s 被判超时。
+            _ti = 600
+            try:
+                _ti = int(((self.config.get("stages") or {}).get("image") or {})
+                          .get("timeout_s") or 600)
+            except Exception:
+                pass
+            result = self.comfy.wait_for_completion(prompt_id, timeout=_ti, progress_callback=progress_cb, thermal_guard=True)
             outputs = result.get("outputs", {})
             image_url = self.comfy.get_result_image(outputs)
             if image_url:

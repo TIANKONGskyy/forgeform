@@ -718,6 +718,14 @@ def make_server(studio, port=7861):
             self.send_header('Content-Type', mime + '; charset=utf-8')
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
+            # ★ 2026-11-17 身份头：这台机器上可能并存两份铸想（旧版 D:\AI-Workshop
+            #   和现在这份）。带根目录才能区分"自己人"和"另一份安装"，
+            #   否则新装的会被判成"已经在跑"直接退出。
+            try:
+                from backend.ports import ROOT_HEADER, ROOT_TAG
+                self.send_header(ROOT_HEADER, ROOT_TAG)
+            except Exception:
+                pass
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)

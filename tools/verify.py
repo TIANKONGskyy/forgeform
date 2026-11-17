@@ -154,9 +154,11 @@ def check_pipeline_stages(tmp: Path) -> None:
 
     orig = (pl.Pipeline.generate_images, pl.Pipeline.enhance_image,
             pl.Pipeline.generate_3d, pl.Pipeline.export_stl)
-    warm_orig=C._rewarm_tuned_async,C._warm_image_model_async
+    warm_orig=C._rewarm_tuned_async,C._warm_image_model_async,C._free_tuned_for_gpu_work
     C._rewarm_tuned_async=lambda: None
     C._warm_image_model_async=lambda *a,**k: None
+    # This is a fake pipeline: never unload or stop the user's real model service.
+    C._free_tuned_for_gpu_work=lambda *a,**k: None
     save = pm.save_project
     calls = []
 
@@ -228,7 +230,7 @@ def check_pipeline_stages(tmp: Path) -> None:
     finally:
         (pl.Pipeline.generate_images, pl.Pipeline.enhance_image,
          pl.Pipeline.generate_3d, pl.Pipeline.export_stl) = orig
-        C._rewarm_tuned_async,C._warm_image_model_async=warm_orig
+        C._rewarm_tuned_async,C._warm_image_model_async,C._free_tuned_for_gpu_work=warm_orig
         pm.save_project = save
         pm.PROJECTS_DIR = keep_dir
 

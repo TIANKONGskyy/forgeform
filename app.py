@@ -357,6 +357,18 @@ def build_sidebar(state: dict) -> str:
 CSS = (ROOT / "ui" / "creative.css").read_text(encoding="utf-8")
 
 
+THEME_JS = r"""() => {
+  const setTheme = value => { document.body.dataset.ffTheme = value === 'light' ? 'light' : 'dark'; };
+  setTheme(new URLSearchParams(location.search).get('__theme'));
+  if (!window.__forgeThemeBound) {
+    window.__forgeThemeBound = true;
+    window.addEventListener('message', event => {
+      if (event.source === window.parent && event.data && event.data.type === 'forgeform-theme') setTheme(event.data.theme);
+    });
+  }
+}"""
+
+
 # Gradio 主题（字体/圆角/品牌色统一交给主题，CSS 只做细调）
 THEME = None
 try:
@@ -591,11 +603,14 @@ def ring_html(stage: str = "", elapsed: float = 0.0, done: bool = False) -> str:
 """
 
 
-def _update_ui_with_note(state: dict, note: str, glb_override: str = None, ring: str = None):
-    """在 _update_ui 的基础上，于对话框末尾追加一条临时提示（不写入 state，不落盘）"""
-    vals = _update_ui(state, glb_override, ring)
-    chat = list(vals[0]) + [[None, note]]
-    return (chat,) + tuple(vals[1:])
+def _update_ui_with_note(state: dict, note: str, glb_override: str = None, ring: str = None,
+                         pending_input: str = None):
+    """Show transient progress and the pending user turn without persisting it twice."""
+    vals = list(_update_ui(state, glb_override, ring))
+    vals[0] = list(vals[0]) + [[pending_input if pending_input else None, note]]
+    if pending_input:
+        vals[1] = gr.update(visible=False)
+    return tuple(vals)
 
 
 def on_submit(user_input: str, state: dict):
@@ -609,14 +624,21 @@ def on_submit(user_input: str, state: dict):
         yield "", state, *_update_ui(state)
         return
 
+    # Render the user's message before model warm-up or any other slow work.
+    yield "", state, *_update_ui_with_note(state, "正在处理…", pending_input=user_input)
+
     # ── agent 主导（流式：边推理边显示，首字不再干等）──
     if agent_enabled():
         # 预热的是 agent **实际要用**的模型：provider=tuned 时是微调服务，
         # 不能去预热 Ollama —— 那会白占 12.9GB 把微调模型挤出显存（踩过）
         if not agent.is_ready():
-            yield "", state, *_update_ui_with_note(state, "⏳ 首次加载对话模型（约 10 秒），请稍候…")
-            agent.warm_up()
-        yield "", state, *_update_ui_with_note(state, "🤔 正在分析你的意图…")
+            yield "", state, *_update_ui_with_note(state, "⏳ 正在加载对话模型，首次启动可能需要几分钟…", pending_input=user_input)
+            try:
+                agent.warm_up()
+            except Exception as exc:
+                yield user_input, state, *_update_ui_with_note(state, "对话模型加载失败，请检查服务后重试：" + str(exc)[:160])
+                return
+        yield "", state, *_update_ui_with_note(state, "🤔 正在分析你的意图…", pending_input=user_input)
         res, last_emit = None, 0.0
         try:
             for ev in conv.handle_agent_turn_stream(user_input):
@@ -630,12 +652,20 @@ def on_submit(user_input: str, state: dict):
                 last_emit = now
                 if partial:
                     # 正文边生成边显示（尾部 700 字，够看清在写什么）
-                    yield "", state, *_update_ui_with_note(state, "✍️ " + partial[-700:])
+                    yield "", state, *_update_ui_with_note(state, "✍️ " + partial[-700:], pending_input=user_input)
                 elif tchars:
-                    yield "", state, *_update_ui_with_note(state, f"🧠 正在推理…（{tchars} 字）")
+                    yield "", state, *_update_ui_with_note(state, f"🧠 正在推理…（{tchars} 字）", pending_input=user_input)
         except Exception as e:
-            print(f"[DSH] ⚠️ agent 流式异常，回退：{e!r}")
-            res = None
+            # The agent may already have started an action. Do not replay the
+            # same request through a second execution path after an exception.
+            print(f"[DSH] ⚠️ agent 流式异常，停止本轮：{e!r}")
+            current = conv.current_project or state
+            entries = current.get("conversation") or []
+            already_saved = bool(entries and entries[-1].get("role") == "user" and entries[-1].get("content") == user_input)
+            yield "", current, *_update_ui_with_note(
+                current, "本轮处理遇到问题，请检查项目状态和已有产物：" + str(e)[:160],
+                pending_input=None if already_saved else user_input)
+            return
         if res:
             # 把决策过程摊开给用户看：先亮模型的真实推理结论，再亮它判断出的意图与动作
             gist = (res.get("thinking") or "").strip()
@@ -662,7 +692,7 @@ def on_submit(user_input: str, state: dict):
         st, resolved, params = conv.prepare_describe(user_input)
         # 模型若不在内存里，先补预热（否则首字要等 10s 冷加载）
         if not describer.is_model_resident():
-            yield "", st, *_update_ui_with_note(st, "⏳ 首次加载对话模型（约 10 秒），请稍候…")
+            yield "", st, *_update_ui_with_note(st, "⏳ 首次加载对话模型，请稍候…", pending_input=user_input)
             describer.warm_up_ollama()
 
         # ── 理解过程：把 AI 怎么解析这条需求逐条摊开给用户看 ──
@@ -680,23 +710,23 @@ def on_submit(user_input: str, state: dict):
              f" ｜ 颜色 {p.get('color')} ｜ 模型 {p.get('model')}"),
         ]
         for s in steps:
-            yield "", st, *_update_ui_with_note(st, s)
+            yield "", st, *_update_ui_with_note(st, s, pending_input=user_input)
             time.sleep(0.35)          # 留出可读时间，否则几条会瞬间闪过
 
-        yield "", st, *_update_ui_with_note(st, "✍️ 正在组织总结…")
+        yield "", st, *_update_ui_with_note(st, "✍️ 正在组织总结…", pending_input=user_input)
         acc = ""
         for partial in describer.generate_confirm_response_stream(user_input, resolved, params):
             acc = partial
-            yield "", st, *_update_ui_with_note(st, acc)
+            yield "", st, *_update_ui_with_note(st, acc, pending_input=user_input)
         if not acc:
             acc = describer._fallback_confirm_response(user_input, resolved, params)
-            yield "", st, *_update_ui_with_note(st, acc)
+            yield "", st, *_update_ui_with_note(st, acc, pending_input=user_input)
         result = conv.finish_reply(st, user_input, acc)
         yield "", result["project"], *_update_ui(result["project"])
         return
 
     # ── 其它阶段：普通流程（细化/生图/选图等本身秒回）──
-    yield "", state, *_update_ui_with_note(state, "⏳ 正在处理…")
+    yield "", state, *_update_ui_with_note(state, "⏳ 正在处理…", pending_input=user_input)
     result = conv.handle_user_input(user_input)
     # 若这轮触发了 3D，result 带 glb（交给查看器；模型留在本组，轮转推迟到下一条消息）
     yield "", result["project"], *_update_ui(result["project"], result.get("glb"))
@@ -1086,7 +1116,7 @@ def _update_ui(state: dict, glb_override: str = None, ring: str = None):
     chat = _chat_value(conv_list)
     btns = _buttons_for_phase(phase, state)
     # 欢迎页只在「还没有任何对话」时显示
-    hero = gr.update(visible=not conv_list)
+    hero = gr.update(visible=False)
     # 3D 查看器：只在「这一组真的产出了模型」时展示。
     # 优先级：显式 override（刚建模完，模型已归到归档组）→ 本项目 glb_path。
     # 2026-09-22 修：不再回退到 last_glb —— 那会把上一组的模型带进新组，
@@ -1128,7 +1158,7 @@ def build():
     _init_stl_ok = bool(_init_stl) and Path(_init_stl).is_file()
 
     with gr.Blocks(title="铸想 ForgeForm", css=CSS,
-                   theme=THEME) as app:
+                   theme=THEME, js=THEME_JS) as app:
         state = gr.State(initial)
 
         # ── 顶部导航条 ──────────────────────────────────
@@ -1152,7 +1182,7 @@ def build():
             # 对话区（宽，占主视觉）
             with gr.Column(scale=7, min_width=300, elem_classes="chat-col"):
                 # 欢迎页（空对话时显示）
-                hero = gr.HTML(HERO_HTML, visible=not bool(initial.get("conversation")),
+                hero = gr.HTML(HERO_HTML, visible=False,
                                elem_classes="hero-block")
 
                 chatbot = gr.Chatbot(
@@ -1162,6 +1192,36 @@ def build():
                     elem_id="chatbox",
                     height=420,
                 )
+
+                # Keep message entry directly beside the conversation, even with a 3D preview.
+                with gr.Row(elem_classes="input-row input-row-chat"):
+                    msg = gr.Textbox(placeholder="描述你想创作的物品…", lines=1, max_lines=6,
+                                     scale=8, min_width=120, elem_id="chat_input",
+                                     show_label=False, container=False)
+                    ref_up = gr.UploadButton("上传图片", file_types=["image"],
+                                             size="sm", scale=0, min_width=90, elem_id="ref_up")
+                    send = gr.Button("发送", variant="primary", scale=0, min_width=76, elem_id="send_btn")
+                with gr.Accordion("图片修改", open=False, elem_classes="edit-accordion"):
+                    with gr.Row(elem_classes="input-row input-row-upload"):
+                        edit_prompt = gr.Textbox(
+                            placeholder="上传图片后，描述需要修改的内容…", lines=1,
+                            scale=8, min_width=120, show_label=False, container=False,
+                            elem_id="edit_prompt")
+                        btn_edit_submit = gr.Button("修改图片", variant="secondary",
+                                                    scale=0, min_width=96, elem_id="btn_edit_submit")
+
+                # 动作按钮行（对话里紧跟的交互按键，初始按阶段显示）
+                with gr.Row(elem_classes="action-bar"):
+                    btn_refine = gr.Button("✨ 继续细化", variant="secondary", visible=_init_btns["refine"]["visible"], elem_id="btn_refine")
+                    btn_gen = gr.Button("🎨 生成图片", variant="primary", visible=_init_btns["gen"]["visible"], elem_id="btn_gen")
+                    btn_edit = gr.Button("✏️ 修改图片", variant="secondary", visible=_init_btns["edit"]["visible"], elem_id="btn_edit")
+                    btn_model = gr.Button("🧊 生成 3D", variant="primary", visible=_init_btns["model"]["visible"], elem_id="btn_model")
+                    btn_new = gr.Button("➕ 新建作品", variant="secondary", visible=_init_btns["new"]["visible"], elem_id="btn_new")
+                    btn_stl = gr.Button("📦 导出 STL", variant="secondary", visible=_init_btns["stl"]["visible"], elem_id="btn_stl")
+                    # 「🎯 采用为参考图」：联网找图后必须确认 → 端到端 bug A 修
+                    btn_adopt = gr.Button("🎯 采用为参考图", variant="primary",
+                                         visible=_init_btns.get("adopt", {"visible": False})["visible"],
+                                         elem_id="btn_adopt")
 
                 # 3D 查看器（旧版同款 gr.Model3D，v3 改版漏移植）：
                 # 建模完成后在这里展示 GLB，可拖动旋转/缩放
@@ -1223,19 +1283,6 @@ def build():
                         label="建模模型", show_label=True, container=True,
                         elem_id="model_3d_dd", scale=1)
 
-                # 动作按钮行（对话里紧跟的交互按键，初始按阶段显示）
-                with gr.Row(elem_classes="action-bar"):
-                    btn_refine = gr.Button("✨ 继续细化", variant="secondary", visible=_init_btns["refine"]["visible"], elem_id="btn_refine")
-                    btn_gen = gr.Button("🎨 生成图片", variant="primary", visible=_init_btns["gen"]["visible"], elem_id="btn_gen")
-                    btn_edit = gr.Button("✏️ 修改图片", variant="secondary", visible=_init_btns["edit"]["visible"], elem_id="btn_edit")
-                    btn_model = gr.Button("🧊 生成 3D", variant="primary", visible=_init_btns["model"]["visible"], elem_id="btn_model")
-                    btn_new = gr.Button("➕ 新建作品", variant="secondary", visible=_init_btns["new"]["visible"], elem_id="btn_new")
-                    btn_stl = gr.Button("📦 导出 STL", variant="secondary", visible=_init_btns["stl"]["visible"], elem_id="btn_stl")
-                    # 「🎯 采用为参考图」：联网找图后必须确认 → 端到端 bug A 修
-                    btn_adopt = gr.Button("🎯 采用为参考图", variant="primary",
-                                         visible=_init_btns.get("adopt", {"visible": False})["visible"],
-                                         elem_id="btn_adopt")
-
                 # 环形进度条（长步骤的实测估算）。空闲时是一块留白，不占视觉。
                 progress = gr.HTML(ring_html(""), elem_id="progress_ring")
                 # 导出 STL 后在这里给一个可点下载/可拖进切片软件的文件卡片
@@ -1243,28 +1290,6 @@ def build():
                 # 只有当前组真有 STL 时才显示（值由 _update_ui 按 state["stl_path"] 决定）
                 stl_file = gr.File(label="📦 STL 文件（下载 / 拖进 Bambu）", value=_init_stl if _init_stl_ok else None,
                                    visible=_init_stl_ok, elem_id="stl_file")
-
-                # 输入框（2026-09-25 精简）：只留聊天框+发送+上传，三件小而清晰
-                with gr.Row(elem_classes="input-row input-row-chat"):
-                    msg = gr.Textbox(
-                        placeholder="描述你想打印什么…",
-                        lines=1,
-                        scale=11,
-                        elem_id="chat_input",
-                        show_label=False,
-                        container=False,
-                    )
-                    send = gr.Button("↗ 发送", variant="primary", scale=1, elem_id="send_btn")
-                with gr.Row(elem_classes="input-row input-row-upload"):
-                    ref_up = gr.UploadButton("🖼 上传图片", file_types=["image"],
-                                             size="sm", scale=0, min_width=100, elem_id="ref_up")
-                    edit_prompt = gr.Textbox(
-                        placeholder="上传图片后，描述要改什么（例：改成蓝色 / 加一对翅膀）…",
-                        lines=1, scale=8, show_label=False, container=False,
-                        elem_id="edit_prompt",
-                    )
-                    btn_edit_submit = gr.Button("✏️ 按提示词修改", variant="secondary",
-                                                scale=2, elem_id="btn_edit_submit")
 
                 # 「自动继续」心跳：**默认不跳**（active=False）。
                 # 2026-09-23 踩坑：一开始写成常驻 active=True + 1 秒一跳，结果 Gradio 每秒
@@ -1552,7 +1577,9 @@ if __name__ == "__main__":
     #   现在：占着的是**我们自己** → 不开第二份；是**别人** → 换端口。
     try:
         from backend import ports as _ports
-        _r = _ports.resolve(_want, script="app.py")
+        # 避开 Studio(7861)/API(7863) 的保留端口 —— 实测旧版 app 抢过 7861，
+        # 导致 Studio 误判"创作空间在跑"直接退出。
+        _r = _ports.resolve(_want, script="app.py", avoid=(7861, 7862, 7863))
         if _r["action"] == "reuse":
             print(f"[port] {_r['why']}（不重复启动，避免两份实例抢显存）", flush=True)
             print(f"[port] 请直接打开 http://127.0.0.1:{_r['port']}", flush=True)
@@ -1586,6 +1613,17 @@ if __name__ == "__main__":
         prevent_thread_lock=True,
     )
     _sa = app.server_app
+    # ★ 2026-11-17 身份：launch() 之后 add_middleware 不生效（FastAPI 已启动），
+    #   所以用一个**自定义路由**暴露"我是哪份安装"。ports.who_is 会先探这个。
+    try:
+        from backend.ports import ROOT_TAG
+        _ver = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+
+        @_sa.get("/__forgeform_id")
+        def _forgeform_id():
+            return {"root": ROOT_TAG, "kind": "app", "version": _ver}
+    except Exception as _e:
+        print(f"[port] 身份路由没加上（不影响使用）: {_e}", flush=True)
     from backend.viewer_compat import register_viewer_compat
     register_viewer_compat(_sa)
     register_model_library(_sa)

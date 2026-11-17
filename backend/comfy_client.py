@@ -47,6 +47,30 @@ class ComfyUIClient:
                 return False
         return True
 
+    def cancel_prompt(self, prompt_id: str) -> bool:
+        """把指定任务从 ComfyUI 队列里删掉（含正在跑的）。
+
+        /interrupt 只停"当前正在执行"的那一个；任务还在 pending、或者自定义
+        节点忽略了 interrupt（hy3dgen 实测会忽略），就得按 id 从队列删。
+        """
+        done = False
+        for url in (self.comfyui_url, self.media_url):
+            for kind in ("queue_running", "queue_pending"):
+                try:
+                    r = requests.get(f"{url}/queue", timeout=5)
+                    data = r.json() if r.ok else {}
+                except Exception:
+                    continue
+                for it in (data.get(kind) or []):
+                    if len(it) > 1 and str(it[1]) == str(prompt_id):
+                        try:
+                            requests.post(f"{url}/queue",
+                                          json={"delete": [str(prompt_id)]}, timeout=5)
+                            done = True
+                        except Exception:
+                            pass
+        return done
+
     def interrupt(self) -> bool:
         """中断两个实例的当前任务"""
         ok = True
@@ -1498,7 +1522,18 @@ class ComfyUIClient:
 
                 time.sleep(5)
         
-        raise TimeoutError(f"ComfyUI task timeout after {timeout}s")
+        # ★ 2026-11-17：超时必须**把任务从 ComfyUI 撤掉**。
+        #   实测过：判超时后任务还在显卡上跑（又跑了 45 分钟、占 100%），
+        #   后面所有任务排队 → 出图也超时 → 用户看到"点生成没反应"。
+        try:
+            self.interrupt()
+        except Exception:
+            pass
+        try:
+            self.cancel_prompt(prompt_id)
+        except Exception:
+            pass
+        raise TimeoutError(f"ComfyUI task timeout after {timeout}s（已尝试撤回该任务）")
     
     def get_result_image(self, outputs: Dict, stage: Optional[str] = None) -> Optional[str]:
         """从输出中提取图像路径（stage 决定用哪个实例的 /view）"""

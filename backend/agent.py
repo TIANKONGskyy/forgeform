@@ -811,9 +811,11 @@ def _cold_start_timeout(timeout: int) -> int:
     try:
         if not is_ready():
             print("[agent] 模型未就绪（冷启动）→ 先热身…首次可能要 1~2 分钟")
-            warm_up(timeout=300)
-            timeout = max(timeout, 240)
-            print(f"[agent] 热身完成，本轮超时放宽到 {timeout}s")
+            if warm_up(timeout=300):
+                timeout = max(timeout, 240)
+                print(f"[agent] 热身完成，本轮超时放宽到 {timeout}s")
+            else:
+                print("[agent] 模型热身未完成；保留原超时并尝试现有服务。")
         return timeout
     except Exception as e:
         print(f"[agent] 冷启动检查失败（按原超时继续）: {e!r}")

@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -65,6 +66,52 @@ class HunyuanWorkflowTest(unittest.TestCase):
         workflow = ComfyUIClient({}).build_workflow('3d', {
             'model_config': {'name': 'Hunyuan3D 2.1'}, 'input_image': 'opaque_prep.png'})
         self.assertIn('RemoveBackground', [n['class_type'] for n in workflow['prompt'].values()])
+
+
+class StlStageContractTest(unittest.TestCase):
+    """export_stl 返回 StageResult，不是 (ok, path) 二元组。
+
+    2026-11-16 实测：`POST /v1/generate` 带 "stl" 阶段时，模型已经建好、
+    STL 也已经写盘，却在最后一步 `ok, stl_path = pipe.export_stl(...)` 抛
+    TypeError → 任务被判 failed，调用方拿不到产物。calibrate.py 同样受影响，
+    只是它把异常吞成「导出异常」。
+    """
+
+    def test_api_generate_finishes_with_stl_stage(self):
+        import importlib.util
+        from backend.stages.base import StageResult
+
+        spec = importlib.util.spec_from_file_location(
+            'ff_api_server', Path(__file__).resolve().parents[1] / 'tools' / 'api_server.py')
+        api = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(api)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            glb = Path(tmp) / 'model.glb'
+            glb.write_bytes(b'glTF')
+            stl = Path(tmp) / 'model.stl'
+            stl.write_bytes(b'solid')
+
+            class FakePipe:
+                config = {'stages': {'image': {'default_model': 'qwen21_ref'},
+                                     '3d': {'default_model': 'hunyuan_mini'}}}
+
+                def generate_3d(self, **kwargs):
+                    return StageResult(True, str(glb))
+
+                def export_stl(self, path, size_mm):
+                    return StageResult(True, str(stl), metadata={'faces': 10})
+
+            job = {'id': 'job-test', 'created': time.time(), 'prompt': 'x',
+                   'opts': {'stages': ['mesh', 'stl'], 'image_path': str(glb)},
+                   'files': {}, 'status': 'queued', 'stage': '', 'percent': 0.0}
+            api.JOBS['job-test'] = job
+            self.addCleanup(api.JOBS.pop, 'job-test', None)
+            with patch.object(api, 'pipeline', return_value=FakePipe()):
+                api._run_job(job)
+
+        self.assertEqual(job['status'], 'succeeded', job.get('error'))
+        self.assertEqual(job['files']['stl'], str(stl))
 
 
 class InstallFallbackTest(unittest.TestCase):

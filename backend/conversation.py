@@ -2048,7 +2048,4 @@ class ConversationManager:
 
     def get_initial_message(self) -> str:
         """获取欢迎消息（2026-09-25 精简：去掉举例）"""
-        return (
-            "👋 你好！欢迎使用**铸想 ForgeForm**。\n\n"
-            "描述你想打印的物品 —— 我会把它从想法做到 3D 实体，再导出 STL 给切片软件打印。"
-        )
+        return "你好，告诉我你想创作什么吧。"

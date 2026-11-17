@@ -22,7 +22,17 @@ def main():
     #   同事的 dev server），它会以为"Studio 已经在跑"，打开浏览器给人看别人的页面。
     #   现在：是我们的 Studio → 复用；是别人的 → 换一个空闲端口；没占 → 用原端口。
     from backend import ports as _ports
-    _r = _ports.resolve(args.port, script="studio.py")
+    # 避开创作空间(7860)与 API(7863)：Studio 只该占自己的端口
+    _r = _ports.resolve(args.port, script="studio.py", avoid=(7860, 7862, 7863))
+    # 端口上如果蹲着的是**创作空间**（旧版抢过 7861），那不是"Studio 在跑"，
+    # 必须当冲突处理 —— 否则 Studio 直接退出，用户以为控制台坏了。
+    _who = _ports.who_is(args.port)
+    if _r["action"] == "reuse" and _who.get("kind") not in ("studio", None):
+        _alt = _ports.pick_free(args.port + 1, 20, avoid=(7860, 7862, 7863))
+        if _alt:
+            print(f"[port] {args.port} 上是 {_who['kind']}（不是 Studio），Studio 改用 {_alt}",
+                  flush=True)
+            _r = {"action": "use", "port": _alt, "why": ""}
     if _r["action"] == "reuse":
         print(f"ForgeForm Studio {_r['why']}。", flush=True)
         if not args.no_browser:
