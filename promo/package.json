@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "dependencies": {
     "@remotion/cli": "^4.0.544",
+    "@remotion/motion-blur": "^4.0.544",
+    "@remotion/sfx": "^4.0.544",
+    "@remotion/transitions": "^4.0.544",
     "@types/react": "^19.3.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

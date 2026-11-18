@@ -84,7 +84,8 @@ def render_frames(mesh: trimesh.Trimesh) -> list[Path]:
         #     背面常是一块平板（浮雕型），整圈转会露出那块平面，很难看。
         if __import__("os").environ.get("FORGEFORM_PROMO_SWING") == "1":
             _az0 = float(__import__("os").environ.get("FORGEFORM_PROMO_AZIM", "302"))
-            azim = _az0 + 58 * np.sin(2 * np.pi * t)
+            _amp = float(__import__("os").environ.get("FORGEFORM_PROMO_SWING_AMP", "58"))
+            azim = _az0 + _amp * np.sin(2 * np.pi * t)
         else:
             azim = 225 + 360 * t   # 225° 是正面；从 0° 起会先看到后背
         fig = plt.figure(figsize=(W / 100, H / 100), dpi=100, facecolor=BG)

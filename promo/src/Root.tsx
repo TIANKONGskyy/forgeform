@@ -1,18 +1,18 @@
-﻿import React from 'react';
-import {Composition, Audio, Sequence, staticFile} from 'remotion';
-import {Film} from './scenes/Film';
+import React from 'react';
+import {Audio, Composition, Sequence, staticFile} from 'remotion';
+import {Film, FILM_FRAMES} from './scenes/Film3';
+import {whip, whoosh, uiSwitch, ding} from '@remotion/sfx';
 
 /**
- * 时间轴（30fps，共 1830 帧 = 61 秒）：
- *   0    – 180   片头
- *   180  – 480   真实界面（录制）
- *   480  – 720   出图
- *   720  – 1200  建模转盘
- *   1200 – 1500  打印
- *   1500 – 1830  收尾
+ * 铸想宣传片 v3（26.7 秒，802 帧）
  *
- * 音频：音乐铺底 + 每个切点上一下音效（whoosh/pop/riser）。
- * 音乐和音效都是本地 numpy 合成的，没有版权问题。
+ * 和上一版的差别：
+ *   · 节奏加快：从 61 秒压到 27 秒，四个模型每个只给 1.7 秒
+ *   · 转场换成真转场（blurSlide / pushCut / zoomBlur / slide），不是淡入淡出
+ *   · **去掉旁白**：中文 TTS 听着像播报（用户反馈"配音太奇怪"）。
+ *     改成音乐 + 音效 + 屏幕文字 —— 设计类产品片的通行做法。
+ *   · 音效用 @remotion/sfx 的现成素材（whip / whoosh / switch / ding），
+ *     比我自己合成的更干净。
  */
 export const RemotionRoot: React.FC = () => {
   return (
@@ -20,48 +20,41 @@ export const RemotionRoot: React.FC = () => {
       id="ForgeForm"
       component={() => (
         <>
-          <Audio src={staticFile('music.wav')} volume={0.34} />
-          <Sequence from={176} durationInFrames={40}>
-            <Audio src={staticFile('whoosh.wav')} volume={0.5} />
+          <Audio src={staticFile('music.wav')} volume={0.5} />
+
+          {/* 转场音效：位置对齐 Film3 里各个 TransitionSeries.Transition */}
+          <Sequence from={118} durationInFrames={30}>
+            <Audio src={whip} volume={0.55} />
           </Sequence>
-          <Sequence from={476} durationInFrames={40}>
-            <Audio src={staticFile('whoosh.wav')} volume={0.5} />
+          <Sequence from={268} durationInFrames={30}>
+            <Audio src={whoosh} volume={0.5} />
           </Sequence>
-          <Sequence from={712} durationInFrames={48}>
-            <Audio src={staticFile('riser.wav')} volume={0.5} />
+          <Sequence from={360} durationInFrames={30}>
+            <Audio src={whoosh} volume={0.5} />
           </Sequence>
-          <Sequence from={1196} durationInFrames={40}>
-            <Audio src={staticFile('whoosh.wav')} volume={0.45} />
+          <Sequence from={560} durationInFrames={30}>
+            <Audio src={whip} volume={0.5} />
           </Sequence>
-          <Sequence from={1496} durationInFrames={40}>
-            <Audio src={staticFile('whoosh.wav')} volume={0.5} />
+          <Sequence from={672} durationInFrames={30}>
+            <Audio src={whoosh} volume={0.5} />
           </Sequence>
-          <Sequence from={1520} durationInFrames={20}>
-            <Audio src={staticFile('pop.wav')} volume={0.5} />
+
+          {/* 模型逐个切上来的"咔" */}
+          {[0, 52, 104, 156].map((d) => (
+            <Sequence key={d} from={374 + d} durationInFrames={16}>
+              <Audio src={uiSwitch} volume={0.4} />
+            </Sequence>
+          ))}
+
+          {/* 收尾定格 */}
+          <Sequence from={760} durationInFrames={40}>
+            <Audio src={ding} volume={0.4} />
           </Sequence>
-          {/* 旁白：按幕投放，音量比音乐高，保证听懂 */}
-          <Sequence from={16} durationInFrames={170}>
-            <Audio src={staticFile('vo1.mp3')} volume={0.95} />
-          </Sequence>
-          <Sequence from={196} durationInFrames={290}>
-            <Audio src={staticFile('vo2.mp3')} volume={0.95} />
-          </Sequence>
-          <Sequence from={492} durationInFrames={230}>
-            <Audio src={staticFile('vo3.mp3')} volume={0.95} />
-          </Sequence>
-          <Sequence from={736} durationInFrames={470}>
-            <Audio src={staticFile('vo4.mp3')} volume={0.95} />
-          </Sequence>
-          <Sequence from={1210} durationInFrames={290}>
-            <Audio src={staticFile('vo5.mp3')} volume={0.95} />
-          </Sequence>
-          <Sequence from={1512} durationInFrames={300}>
-            <Audio src={staticFile('vo6.mp3')} volume={0.95} />
-          </Sequence>
+
           <Film />
         </>
       )}
-      durationInFrames={1830}
+      durationInFrames={FILM_FRAMES}
       fps={30}
       width={1920}
       height={1080}
