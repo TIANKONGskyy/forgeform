@@ -1676,7 +1676,7 @@ class ConversationManager:
                 #     · 出来多少面 —— 决定文件多大、打印细不细
                 #   这不是免责声明，是让"精度"变成可沟通的数字 ✓
                 _fr_octree = {"快速": 256, "标准": 384, "高质量": 512,
-                              "极致": 768, "最高精度": 1024}.get(_quality, 512)
+                              "极致": 768}.get(_quality, 512)
                 _fr_faces = 0
                 try:
                     import trimesh as _tm

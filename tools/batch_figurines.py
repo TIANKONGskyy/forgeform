@@ -115,7 +115,7 @@ ITEMS = [
     },
 ]
 
-QUALITY_3D = "最高精度"      # octree 1024
+QUALITY_3D = "极致"          # octree 768（1024 已删：实测不可用）
 QUALITY_IMG = "高质量"       # flux_klein 1024²
 # 1024 在这台 V100 上实测会崩（解码阶段要一次性吃 20+ GB，ComfyUI 直接重启）。
 # 所以失败后自动降到 768 再试一次，并在 meta 里写清楚"这件是降档的"。
@@ -271,7 +271,7 @@ def main() -> int:
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--status", action="store_true")
     ap.add_argument("--force", action="store_true", help="已完成也重跑")
-    ap.add_argument("--quality", default="", help="覆盖建模精度档（最高精度/极致/高质量）")
+    ap.add_argument("--quality", default="", help="覆盖建模精度档（极致/高质量/标准/快速）")
     args = ap.parse_args()
 
     if args.list:

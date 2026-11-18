@@ -1041,8 +1041,6 @@ class Pipeline:
                 "标准": {"octree_resolution": 384, "guidance_scale": 5.0},   # 日常
                 "高质量": {"octree_resolution": 512, "guidance_scale": 6.0}, # 原来"标准"就是这档
                 "极致": {"octree_resolution": 768, "guidance_scale": 7.0},   # 细件加档
-                # 「最高精度」= 实验档：1024。显存与耗时都显著上升，只在明确要终稿时用。
-                "最高精度": {"octree_resolution": 1024, "guidance_scale": 8.0},
             }
             q = td_quality.get(quality_name, {"octree_resolution": 512, "guidance_scale": 5.0})
             params["octree_resolution"] = q["octree_resolution"]

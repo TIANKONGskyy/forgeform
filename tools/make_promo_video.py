@@ -91,6 +91,14 @@ def render_frames(mesh: trimesh.Trimesh) -> list[Path]:
         ax.set_zlim(-_lim, _lim)
         ax.view_init(elev=elev, azim=azim)
         ax.set_box_aspect((1, 1, 1))
+        # 底部文字（FORGEFORM_PROMO_NOCAP=1 时全部跳过 —— 宣传片里要自己排版，
+        # 烧死的字幕会和新版式打架）
+        import os as _os2
+        if _os2.environ.get("FORGEFORM_PROMO_NOCAP") == "1":
+            p = TMP / f"f{i:04d}.png"
+            fig.savefig(p, facecolor=BG, dpi=100)
+            plt.close(fig)
+            continue
         # 底部文字
         fig.text(0.06, 0.09, "铸想 ForgeForm", color="white", fontsize=17,
                  fontweight="bold", family="Microsoft YaHei")

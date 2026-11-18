@@ -349,7 +349,7 @@ def area_d() -> None:
         src = (ROOT / "backend" / "pipeline.py").read_text(encoding="utf-8")
         m = re.search(r"td_quality = \{(.*?)\n        \}", src, re.S)
         table = m.group(1) if m else ""
-        ocs = dict(re.findall(r'"(快速|标准|高质量|极致|最高精度)":\s*\{"octree_resolution":\s*(\d+)', table))
+        ocs = dict(re.findall(r'"(快速|标准|高质量|极致)":\s*\{"octree_resolution":\s*(\d+)', table))
         ok = len(ocs) >= 4 and len(set(ocs.values())) >= 4
         rec("D", "精度档位是真区分", ok, time.time() - t0, str(ocs))
     except Exception as e:
