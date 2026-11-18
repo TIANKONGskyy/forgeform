@@ -59,8 +59,12 @@ def render_frames(mesh: trimesh.Trimesh) -> list[Path]:
     #   （之前渲染出来像一块砖，就是这个原因，不是模型坏了）。
     #   绕 X 轴 +90°：Y → Z。
     mesh = mesh.copy()
-    rot = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
-    mesh.apply_transform(rot)
+    # 这个 +90° 是把 **Y-up 的 GLB** 扶正成 Z-up。喂进来的要是**已经 Z-up 的 STL**
+    # 再转一次就变成仰面朝天（渲染出来是"看天"的视角，第一版猫就是这样）。
+    # FORGEFORM_PROMO_NO_ROT=1 时跳过。
+    if __import__("os").environ.get("FORGEFORM_PROMO_NO_ROT") != "1":
+        rot = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
+        mesh.apply_transform(rot)
 
     tris = mesh.vertices[mesh.faces]
     center = mesh.bounds.mean(axis=0)
@@ -70,8 +74,19 @@ def render_frames(mesh: trimesh.Trimesh) -> list[Path]:
     paths = []
     for i in range(N):
         t = i / N
-        elev = 18 + 8 * np.sin(t * 2 * np.pi * 2)      # 轻微上下
-        azim = 225 + 360 * t   # 225° 是正面；从 0° 起会先看到后背
+        # 俯仰可调：趴卧类模型（例如蜷着的猫）从高角度会看成"一坨"，
+        # 用 FORGEFORM_PROMO_ELEV 压低到 10–14° 才能看清头部和尾巴。
+        _base_elev = float(__import__("os").environ.get("FORGEFORM_PROMO_ELEV", "18"))
+        elev = _base_elev + 6 * np.sin(t * 2 * np.pi * 2)
+        # 两种运动：
+        #   · 默认整圈转（四面都完整的模型，例如狐狸）
+        #   · FORGEFORM_PROMO_SWING=1 时绕正面来回摆。单图重建出来的模型
+        #     背面常是一块平板（浮雕型），整圈转会露出那块平面，很难看。
+        if __import__("os").environ.get("FORGEFORM_PROMO_SWING") == "1":
+            _az0 = float(__import__("os").environ.get("FORGEFORM_PROMO_AZIM", "302"))
+            azim = _az0 + 58 * np.sin(2 * np.pi * t)
+        else:
+            azim = 225 + 360 * t   # 225° 是正面；从 0° 起会先看到后背
         fig = plt.figure(figsize=(W / 100, H / 100), dpi=100, facecolor=BG)
         ax = fig.add_axes([0, 0, 1, 1], projection="3d", facecolor=BG)
         ax.set_axis_off()

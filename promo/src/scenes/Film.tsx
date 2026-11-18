@@ -296,9 +296,9 @@ export const ModelShot: React.FC = () => {
         }}
       >
         <div style={{fontSize: 24, color: C.ink, fontWeight: 600}}>
-          hunyuan3d 2mini · 512 octree
+          蜷着睡的猫 · hunyuan3d 2mini · 512 octree
         </div>
-        <div style={{fontSize: 19, color: C.dim, marginTop: 6}}>本地 V100 · 7 分 46 秒</div>
+        <div style={{fontSize: 19, color: C.dim, marginTop: 6}}>本地 V100 · 8 分 25 秒</div>
       </div>
 
       {/* 右下数据 */}
@@ -317,7 +317,7 @@ export const ModelShot: React.FC = () => {
           backdropFilter: 'blur(10px)',
         }}
       >
-        <Stat k="网格面数" delay={60} v={<><NumberRoll to={200000} delay={60} dur={46} /> </>} />
+        <Stat k="网格面数" delay={60} v={<><NumberRoll to={199582} delay={60} dur={46} /> </>} />
         <Stat k="是否水密" delay={78} v={<span style={{color: C.accent}}>√ 水密</span>} />
         <Stat k="目标高度" delay={96} v="80 mm" />
       </div>
@@ -365,7 +365,7 @@ export const PrintShot: React.FC = () => {
       <Backdrop hue={C.hot} />
       <AbsoluteFill style={{flexDirection: 'row', alignItems: 'center'}}>
         <div style={{marginLeft: 110, display: 'flex', gap: 26, alignItems: 'flex-end'}}>
-          {card('fox_c.png', 500, 700)}
+          {card('cat.png', 520, 640)}
           {card('coupon_c.png', 330, 380)}
         </div>
 
@@ -384,6 +384,7 @@ export const PrintShot: React.FC = () => {
           </div>
           <div style={{...useEnter(22, 24), fontSize: 25, color: C.dim, lineHeight: 1.7}}>
             自动转 Z-up、按毫米缩放、补洞修成水密实体，导出 STL。
+一只蜷着睡的猫，80 mm 高，单一连通体。
           </div>
 
           <div style={{display: 'flex', alignItems: 'baseline', gap: 16, marginTop: 6}}>
