@@ -1,0 +1,18 @@
+{
+  "name": "forgeform-promo",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@remotion/cli": "^4.0.544",
+    "@types/react": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "remotion": "^4.0.544",
+    "typescript": "^7.0.2"
+  },
+  "scripts": {
+    "dev": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts ForgeForm out/film.mp4 --browser-executable=\"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\"",
+    "still": "remotion still src/index.ts ForgeForm out/still.png --browser-executable=\"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\""
+  }
+}
