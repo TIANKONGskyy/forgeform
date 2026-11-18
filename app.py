@@ -621,7 +621,20 @@ def on_submit(user_input: str, state: dict):
     agent 不可用/解析失败时才回退下面的关键词+流式路径。
     """
     if not user_input or not user_input.strip():
-        yield "", state, *_update_ui(state)
+        # ★ 2026-11-18 实测：空输入原来直接 `return`，聊天框看起来"点了发送没反应"，
+        #   用户会以为卡了（实测还出现过把上一轮的回复原样留着）。
+        #   现在明确回一句提示，并把输入框清掉。
+        _hint = ("想做一个什么？一句话就行 —— 比如「一个直径 90mm 的六边形笔筒，"
+                 "壁厚 3mm」。也可以先上传一张图片，我按图改。")
+        try:
+            st = state or {}
+            # 聊天记录读的是 state["conversation"]（不是 messages）
+            # _chat_value 只认 ai_reply 字段（content 是用户侧）
+            st.setdefault("conversation", []).append({"role": "assistant",
+                                                      "ai_reply": _hint})
+        except Exception:
+            st = state
+        yield "", st, *_update_ui(st)
         return
 
     # Render the user's message before model warm-up or any other slow work.
@@ -1538,7 +1551,60 @@ def _start_maintenance() -> None:
         print(f"[maint] 启动失败（不影响主线）: {type(exc).__name__}: {exc}", flush=True)
 
 
+def _tee_logs() -> None:
+    """把自己的输出同时写到 logs/app-YYYY-MM-DD.log。
+
+    ★ 2026-11-18 实测：`logs/studio-app.log` 只有 **Studio 启动的子进程**才写，
+    用户手工双击 `启动.bat`、或我直接在命令行跑 `python app.py` 时，日志只进控制台
+    —— 关掉窗口就没了，出问题没法查（这次排查就卡在这：日志停在 10 小时前）。
+
+    做法：把 stdout/stderr 换成 Tee，控制台照常输出，同时落一份当天文件。
+    任何异常都不影响主流程。
+    """
+    try:
+        import datetime as _dt
+        import sys as _sys
+        logs = ROOT / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        path = logs / f"app-{_dt.date.today():%Y-%m-%d}.log"
+
+        class _Tee:
+            def __init__(self, stream, fh):
+                self.stream = stream
+                self.fh = fh
+
+            def write(self, data):
+                try:
+                    self.stream.write(data)
+                except Exception:
+                    pass
+                try:
+                    self.fh.write(data)
+                    self.fh.flush()
+                except Exception:
+                    pass
+                return len(data) if isinstance(data, str) else 0
+
+            def flush(self):
+                for s in (self.stream, self.fh):
+                    try:
+                        s.flush()
+                    except Exception:
+                        pass
+
+            def isatty(self):
+                return False
+
+        fh = open(path, "a", encoding="utf-8", buffering=1)
+        _sys.stdout = _Tee(_sys.stdout, fh)
+        _sys.stderr = _Tee(_sys.stderr, fh)
+        print(f"[log] 本次输出同时写到 {path}", flush=True)
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
+    _tee_logs()
     app = build()
     _start_maintenance()
     _start_prewarm()
