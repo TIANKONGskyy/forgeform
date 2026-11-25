@@ -275,6 +275,13 @@ def main() -> int:
     print("铸想 ForgeForm · 配置向导")
     _line("═")
     print(explain(hw, assets, []))
+    cfg_file = ROOT / "config.json"
+    if cfg_file.is_file():
+        try:
+            for check in D.inspect_configured(json.loads(cfg_file.read_text(encoding="utf-8-sig"))):
+                print(f"  {check['stage']} · {check['model']} · {check['detail']}")
+        except (OSError, ValueError) as exc:
+            print(f"无法读取当前配置：{exc}")
     _line("═")
     print("\n选一套：\n")
 

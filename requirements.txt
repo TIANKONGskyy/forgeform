@@ -17,10 +17,13 @@ scipy>=1.11
 # 11.x 有若干图像解码类 CVE（见 SECURITY.md），升级要连 gradio 6 一起升。
 Pillow>=10.0
 opencv-python>=4.9
+rembg[cpu]>=2.0.69
 matplotlib>=3.8
 
 # ── 3D / 网格 ─────────────────────────────────────────────
 trimesh>=4.5
+shapely>=2.0
+mapbox-earcut>=1.0
 pymeshlab>=2025.1
 pymeshfix>=0.17
 rtree>=1.2

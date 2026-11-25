@@ -283,6 +283,16 @@ body[data-ff-theme="light"] .gradio-container.gradio-container .contain #ref_up{
 #chat_input textarea{overflow-y:auto!important;resize:none!important;scrollbar-width:thin!important}
 #img_model_dd label span,#model_3d_dd label span{background:transparent!important;color:var(--ff-muted)!important}
 .edit-accordion button{min-height:36px!important;padding:7px 12px!important;border-radius:10px!important;text-align:left!important}
+.reference-panel{padding:14px 16px!important;gap:10px!important;border:1px solid var(--ff-line)!important;border-radius:17px!important;background:var(--ff-panel)!important}
+.reference-header{align-items:center!important;gap:8px!important;margin:0!important}
+.reference-title{display:grid;gap:3px;padding:2px 0;color:var(--ff-text)}
+.reference-title strong{font-size:15px;line-height:1.35}
+.reference-title span{color:var(--ff-muted);font-size:12px;line-height:1.45}
+.reference-panel #ref_up{min-height:40px!important;border:1px solid var(--ff-line)!important;color:var(--ff-accent)!important}
+.reference-panel #btn_model,.reference-panel #btn_edit_submit{min-height:40px!important}
+.reference-panel .input-row-upload{padding:0!important;align-items:center!important}
+.reference-panel #edit_prompt textarea{min-height:40px!important;line-height:1.5!important}
+@media(max-width:520px){.reference-header>.block:first-child{flex-basis:100%!important}.reference-panel #ref_up,.reference-panel #btn_model{flex:1 1 100px!important}}
 body[data-ff-theme="light"] gradio-app{background:transparent!important;color:#203644!important}
 body[data-ff-theme="light"] .gradio-container.gradio-container .contain #chatbox .message.bot p,
 body[data-ff-theme="light"] .gradio-container.gradio-container .contain #chatbox .message.bot li,

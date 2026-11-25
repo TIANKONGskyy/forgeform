@@ -279,20 +279,27 @@ class Pipeline:
         """生成图片，返回 StageResult 列表。
 
         steps_override：>0 时覆盖质量档位计算的步数，让 UI 步数滑块生效。
-        reference_image：给了就**必须**走 Qwen-Image-2.1 参考图工作流（"照图生成指定角色"的唯一
-            可靠路径 —— IP 角色纯文字生图只能猜 ✗）。会先上传到 ComfyUI 的 input 目录。
+        reference_image：ComfyUI 使用 Qwen-Image-2.1，直连使用已选模型的 img2img。
         """
         from .stages.base import StageResult
 
         # ★ 2026-11-15：模型配置里写了 cloud 就走云端（本地没装权重也能出图）。
         #   形状与本地 StageResult 保持一致，上层代码不用改。
-        _mc = ((self.config.get("models") or {}).get("image") or {}).get(model_key) or {}
+        img_models = (self.config.get("models") or {}).get("image") or {}
+        _mc = img_models.get(model_key) or {}
+        model_cfg = img_models.get(model_key, next(iter(img_models.values()), {}))
         if _mc.get("cloud"):
+            if reference_image:
+                return [StageResult(False, error="当前云端模型未接入参考图修改")]
             return self._generate_images_cloud(prompt, model_key, _mc, count, StageResult)
 
+        direct_edit = bool(reference_image and self.backend_mode == "direct")
+        if reference_image and self.backend_mode == "hybrid":
+            direct_edit = self.comfy.pick("image", model_cfg).name == "direct"
         _release_chat_gpu()
-        # FLUX 中文漂移修复
-        prompt = self._ensure_english(prompt)
+        # Qwen 图像编辑可以直接处理中文；其余模型保留原来的翻译流程。
+        if not reference_image or direct_edit:
+            prompt = self._ensure_english(prompt)
         if "【IMAGE】" in prompt:
             sections = split_sections(prompt)
             if sections.get("image"):
@@ -329,7 +336,8 @@ class Pipeline:
         try:
             from .describer import _ensure_clean_background, _strip_negations
             _before = prompt
-            prompt = _strip_negations(prompt)
+            if not reference_image:
+                prompt = _strip_negations(prompt)
             if prompt != _before:
                 print(f"[prompt] 🧹 否定词/单物体兜底: {_before[:80]} → {prompt[:80]}")
             # 补干净背景（必须在 _strip_negations 之后：它会把 "no shadow" 删掉）。
@@ -354,16 +362,14 @@ class Pipeline:
         else:
             width, height = 1024, 1024
 
-        # 模型配置
-        img_models = self.config.get("models", {}).get("image", {})
-        model_cfg = img_models.get(model_key, list(img_models.values())[0] if img_models else {})
-
         # ── 参考图分支（2026-09-23 新增）──────────────────────────────
         # 有参考图时**必须**用 Qwen-Image-2.1 的参考图工作流：纯文字生图对 IP 角色只能猜 ✗
         # （实测 Z-Image 6B / FLUX.2 Klein 9B 都出"标准卡通棕熊"而不是熊大）。
         # 这一步要把图上传到 ComfyUI 的 input 目录，LoadImage 才找得到。
         ref_name = ""
-        if reference_image:
+        if direct_edit:
+            ref_name = str(Path(reference_image).resolve())
+        elif reference_image:
             if not img_models.get("qwen21_ref"):
                 raise RuntimeError("config.json 里缺 models.image.qwen21_ref（参考图生图配置）")
             model_cfg = img_models["qwen21_ref"]
@@ -378,7 +384,7 @@ class Pipeline:
         steps = int(base_steps * step_mult.get(quality_name, 1.0))
         if steps_override and steps_override > 0:
             steps = int(steps_override)
-        if reference_image:
+        if reference_image and not direct_edit:
             steps = int(model_cfg.get("steps", 20))       # 参考图分支固定用模型自带步数
 
         quality_guidance = {"快速": 3.0, "标准": 3.5, "高质量": 3.5, "极致": 4.0}
@@ -398,7 +404,7 @@ class Pipeline:
 
             # 缓存命中
             cache_key = None
-            if img_seed > 0 and not skip_cache:
+            if img_seed > 0 and not skip_cache and not reference_image:
                 cache_key = hashlib.md5(json.dumps({
                     "prompt": prompt, "negative": negative,
                     "model": model_key, "resolution": f"{width}x{height}",
@@ -839,10 +845,14 @@ class Pipeline:
             import tempfile as _tf
             _tmp = _tf.NamedTemporaryFile(suffix=".glb", delete=False).name
             _info = _trim_base(output_path, _tmp, dry=False)
-            if _info.get("cut_z") is not None and _info.get("faces_out", 0) > 100:
+            trimmed = _info.get("cut_z") is not None
+            small_fragments = (1 < _info.get("components_in", 0) <= 200
+                               and _info.get("faces_out", 0) < _info.get("faces_in", 0)
+                               and _info.get("removed_pct", 0) <= 5)
+            if (trimmed or small_fragments) and _info.get("faces_out", 0) > 100:
                 import shutil as _sh
                 _sh.move(_tmp, output_path)
-                self._log(f"🧹 已切掉底部背景板: 面数 {_info['faces_in']:,} → "
+                self._log(f"🧹 已清理底部背景板或孤立碎片: 面数 {_info['faces_in']:,} → "
                           f"{_info['faces_out']:,}（小 -{_info['removed_pct']}%）")
             else:
                 Path(_tmp).unlink(missing_ok=True)
@@ -914,7 +924,8 @@ class Pipeline:
 
     def generate_3d(self, model_key: str = "hunyuan3d", quality_name: str = "标准",
                     image_path: str = None, _fallback_tried: bool = False,
-                    max_facenum: int = 0, octree_override: int = 0) -> object:
+                    max_facenum: int = 0, octree_override: int = 0,
+                    seed: int = -1) -> object:
         """从选中图片生成 3D 模型
 
         _fallback_tried 由质量闸内部使用：碎片产物自动改用 Hunyuan3D 2.1 重来时防无限递归。
@@ -943,13 +954,14 @@ class Pipeline:
             if _pin.stem.endswith("_prep"):
                 self._log("🖼 参考图已预处理过，跳过")
                 _pout = _pin
-                _r = {"ok": False}
+                _r = {"ok": True, "path": str(_pin), "steps": []}
             else:
                 _pout = _pin.with_name(_pin.stem + "_prep.png")
                 _r = _prep(str(_pin), out_path=str(_pout))
             if _r.get("ok"):
                 input_image = _r["path"]
-                self._log(f"🖼 参考图预处理: {' · '.join(_r['steps'])}")
+                if _r["steps"]:
+                    self._log(f"🖼 参考图预处理: {' · '.join(_r['steps'])}")
             else:
                 self._log(f"🖼 参考图预处理跳过: {_r.get('error', '未知')}")
         except Exception as _e:
@@ -1002,7 +1014,7 @@ class Pipeline:
             "input_image": uploaded_name,
             "image_path": str(input_image),   # 直连后端读这个（ComfyUI 后端读 input_image）
             "output_path": output_path,
-            "seed": -1,
+            "seed": int(seed) if seed is not None else -1,
             # TexGen 需要 custom_rasterizer CUDA 扩展编译（缺 nvcc+MSVC），默认 ShapeGen-only
             "texgen": False,
         }
@@ -1171,6 +1183,8 @@ class Pipeline:
     
     def _free_vram(self):
         """释放 ComfyUI 实例占用的 VRAM（单卡时 image/media 同端口，去重只调一次）"""
+        if getattr(self, "backend_mode", "comfyui") == "direct":
+            return
         img_port = self.config.get("comfyui_ports", {}).get("image", 8188)
         media_port = self.config.get("comfyui_ports", {}).get("media", img_port)
         ports = sorted({img_port, media_port})

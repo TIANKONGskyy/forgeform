@@ -34,7 +34,7 @@ function Invoke-Update {
 
 function Start-Launcher {
     Invoke-Update
-    $script:proc = Start-Process powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+(Join-Path $root 'start.ps1')+'"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $script:proc = Start-Process powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+(Join-Path $root 'start.ps1')+'"'),'-Desktop') -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     $retry.Visibility = 'Collapsed'
     $progress.IsIndeterminate = $true
     $status.Text = 'Preparing your creative workspace...'
@@ -44,7 +44,7 @@ $timer = New-Object Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(700)
 $timer.Add_Tick({
     if (Test-Path $stdout) { $log.Text = (Get-Content $stdout -Tail 12 -ErrorAction SilentlyContinue) -join "`r`n"; $log.ScrollToEnd() }
-    if ($log.Text -match 'ForgeForm Studio:') { $timer.Stop(); $window.Close(); return }
+    if ($log.Text -match 'ForgeForm Desktop:') { $timer.Stop(); $window.Close(); return }
     if ($script:proc.HasExited) {
         $progress.IsIndeterminate = $false
         $status.Text = 'Setup could not finish. Review the log and retry.'

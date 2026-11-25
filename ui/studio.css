@@ -182,3 +182,11 @@ button{transition:background .16s,border-color .16s,transform .16s,box-shadow .1
 @media (min-width:701px) and (max-width:900px){.intro{grid-template-columns:1fr;min-height:0}.intro h1{font-size:42px}.sculpture{display:none}}
 
 .framework-warning{flex-basis:100%;margin:4px 0;color:var(--muted);font-size:12px}
+.desktop-mode .byline,.desktop-mode #ws-open,
+.desktop-mode #overview>.eyebrow,.desktop-mode #overview>.intro,
+.desktop-mode #overview>.flow,.desktop-mode #overview>.section-title:has(+.flow){display:none!important}
+.desktop-mode main>header{height:60px}
+.desktop-mode #overview{padding-top:28px}
+.desktop-mode #overview>.section-title{margin-top:26px}
+.desktop-mode .create-page{padding:12px}
+.desktop-mode #workspace{height:calc(100dvh - 86px)}

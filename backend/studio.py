@@ -189,7 +189,7 @@ class Studio:
         return {'ok': True}
 
     def scan(self, model_root=''):
-        from backend.backends.detect import probe_all, probe_local_diffusers, guess_comfy_dir, _SCAN_CACHE
+        from backend.backends.detect import probe_all, probe_local_diffusers, guess_comfy_dir, _SCAN_CACHE, inspect_configured
         from backend.backends.recommend import probe_hardware, summarize_assets, build_profiles, pick_default, list_llm_choices, inspect_comfy_reuse
         if model_root:
             self.model_root = str(Path(model_root).expanduser().resolve())
@@ -215,6 +215,7 @@ class Studio:
         default = pick_default(profiles)
         self.snapshot = {'hardware': hardware.to_dict(), 'frameworks': [f.to_dict() for f in fws],
             'profiles': [p.to_dict() for p in profiles], 'default': default.key if default and default.fits else '',
+            'configured': inspect_configured(config),
             'model_root': self.model_root, 'llm_choices': list_llm_choices(hardware.vram_gb, hardware.ram_gb), 'scanned_at': time.time()}
         self.log('环境扫描完成，不加载模型')
 
@@ -231,6 +232,15 @@ class Studio:
                       str(self.root / 'requirements.txt'), *PIP_ARGS])
         self.command([self.python, '-c', 'import gradio,fastapi,trimesh; print("基础环境验证通过")'])
         (venv / '.deps-ok').touch()
+
+    def quick_install(self, key, launch=False):
+        if key not in self.plans:
+            self.scan()
+        if key == 'starter' and key not in self.plans and 'minimal' in self.plans:
+            key = 'minimal'
+        self.install(key)
+        if launch and not self.cancelled.is_set():
+            self.launch()
 
     def install(self, key, llm=""):
         # 调试/自检用：把"下载"跳过去，只走流程。默认关闭。
@@ -836,7 +846,7 @@ def make_server(studio, port=7861):
                             and studio.job.get('status') not in ('running', 'queued')):
                         prof = result.get('profile') or 'starter'
                         job = studio.start_job(f'下载 {result.get("name") or prof}',
-                                               lambda: studio.install(prof))
+                                               lambda: studio.quick_install(prof, data.get("launch", False)))
                         result['download_started'] = bool(job)
                         result['download_profile'] = prof
                     result['status'] = firstrun.status()

@@ -440,6 +440,20 @@ class DirectBackend:
             gen = torch.Generator(device="cuda").manual_seed(seed)
 
         kwargs = dict(prompt=prompt, num_inference_steps=steps, width=w, height=h)
+        if reference := params.get("reference_image"):
+            from diffusers import AutoPipelineForImage2Image
+            from PIL import Image, ImageOps
+
+            try:
+                pipe = AutoPipelineForImage2Image.from_pipe(pipe)
+            except ValueError as exc:
+                raise ValueError(f"当前直连出图模型不支持按图改图：{key}") from exc
+            with Image.open(reference) as source:
+                kwargs["image"] = ImageOps.contain(source.convert("RGB"), (w, h))
+            kwargs.pop("width")
+            kwargs.pop("height")
+            kwargs["strength"] = 0.65
+            kwargs["num_inference_steps"] = max(4, steps)
         if gen is not None:
             kwargs["generator"] = gen
         if params.get("guidance_scale") is not None:

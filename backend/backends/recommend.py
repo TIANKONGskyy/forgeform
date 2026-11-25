@@ -344,12 +344,10 @@ def build_profiles(hw: Hardware, assets: dict, model_root: str = "") -> list[Pro
 
     # ── 方案 0：零下载（机器上已经有能用的 ComfyUI）──
     if assets.get("comfyui") and assets.get("comfyui_3d"):
-        n_img = len(assets.get("comfyui_models") or [])
         out.append(Profile(
             key="reuse",
             name="复用现有 ComfyUI（零下载）",
-            desc=f"这台机器上 ComfyUI 已经在跑，有 {n_img} 个出图权重，3D-Pack 也装了。"
-                 f"出图/建模都走它，不下载任何东西。",
+            desc="复用现有 ComfyUI 的 Qwen-Image-2.1 和 Hunyuan3D 2.1。",
             backend_mode="auto",
             image_model="comfyui",
             mesh_model="comfyui",

@@ -25,7 +25,7 @@ import io
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import ImageOps, Image, ImageFilter
 
 
 _SESSION = None
@@ -122,7 +122,8 @@ def _enhance_detail(img: Image.Image, clip_limit: float = 2.2,
 
 def prepare(img_path: str, out_path: str | None = None, size: int = 1024,
             do_remove_bg: bool = True, do_sharpen: bool = True,
-            do_enhance: bool = True) -> dict:
+            do_enhance: bool = True, clean_fragments: bool = False,
+            require_foreground: bool = False) -> dict:
     """跑完整预处理，返回 {ok, path, steps, before, after}。
 
     任何一步失败都降级继续 —— 建模不能因为预处理失败就中断。
@@ -132,10 +133,11 @@ def prepare(img_path: str, out_path: str | None = None, size: int = 1024,
         return {"ok": False, "error": f"图片不存在: {img_path}"}
 
     steps = []
-    img = Image.open(src).convert("RGBA")
+    with Image.open(src) as original:
+        img = ImageOps.exif_transpose(original).convert("RGBA")
     before = img.size
 
-    if do_remove_bg:
+    if do_remove_bg and img.getextrema()[-1][0] >= 250:
         got = _remove_bg(img)
         if np.array(got.split()[-1]).min() < 250:
             img = got
@@ -143,12 +145,28 @@ def prepare(img_path: str, out_path: str | None = None, size: int = 1024,
         else:
             steps.append("去背景（无变化）")
 
+    if require_foreground and img.getextrema()[-1][0] >= 250:
+        return {"ok": False, "error": "无法分离背景，请检查去背景模型或上传透明 PNG"}
+    if clean_fragments:
+        from scipy.ndimage import label
+        alpha = np.asarray(img.getchannel("A"))
+        labels, count = label(alpha > 16, structure=np.ones((3, 3), dtype=int))
+        if not count:
+            return {"ok": False, "error": "图片中没有可识别的主体"}
+        if count > 1:
+            areas = np.bincount(labels.ravel())
+            main = np.argmax(areas[1:]) + 1
+            remove = (labels != 0) & (labels != main) & (areas[labels] < max(16, areas[main] * 0.01))
+            if remove.any():
+                img.putalpha(Image.fromarray(np.where(remove, 0, alpha).astype(np.uint8)))
+                steps.append("清除孤立小碎片")
+
     cropped = _tight_crop(img)
     if cropped.size != img.size:
         img = cropped
         steps.append(f"紧裁 {before[0]}×{before[1]} → {img.width}×{img.height}")
 
-    if max(img.size) != size:
+    if img.size != (size, size):
         img = _square(img, size)
         steps.append(f"补方+缩放到 {size}²")
 

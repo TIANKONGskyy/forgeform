@@ -1967,14 +1967,13 @@ class TestTunedServiceWiring(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp(prefix="dsh-ref-")); orig = pm.PROJECTS_DIR
         pm.PROJECTS_DIR = tmp
         try:
-            st = pm.create_project()
-            # handler 只校验文件存在（不解析图像内容）→ 写几个字节即可，也别用转义字面量
-            # （heredoc 会把转义序列变成真 NUL 字节，直接让整份测试文件语法错误 ✗）
+            from PIL import Image, ImageDraw
             ref = Path(tmp) / "reference.png"
-            ref.write_bytes(b"fake-image-bytes" * 4)
-            self.assertTrue(ref.exists() and ref.stat().st_size > 40, "测试图要真存在")
+            source = Image.new("RGBA", (80, 80))
+            ImageDraw.Draw(source).ellipse((16, 14, 65, 64), fill="red")
+            source.save(ref)
 
-            chunks = list(A.on_reference_uploaded(str(ref), st))
+            chunks = list(A.on_reference_uploaded(str(ref), {}))
             out = chunks[-1]
             self.assertEqual(len(out), 15, "state + 14 个 UI 输出（state 在最前）")
             new = out[0]
@@ -1983,6 +1982,10 @@ class TestTunedServiceWiring(unittest.TestCase):
             self.assertTrue(Path(new["selected"]).exists(), "selected 必须是真实文件")
             self.assertIn("candidates", new["selected"].replace("\\", "/"), "参考图要放进 candidates/")
             self.assertTrue((Path(new["path"]) / "selected.jpg").exists(), "selected.jpg 要落盘（刷新不丢）")
+            with Image.open(new["ref_upload"]) as preview:
+                self.assertEqual(preview.getpixel((0, 0)), (255, 255, 255))
+            restored = pm.load_project(new["folder"])
+            self.assertEqual(restored["img_stage"], "hd")
             self.assertTrue(any(c == new["selected"] for c in (new.get("candidates") or [])),
                             "candidates 里要有这张参考图")
         finally:

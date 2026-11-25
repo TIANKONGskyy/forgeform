@@ -1062,6 +1062,67 @@ class ComfyUIClient:
         
         return {"prompt": workflow, "negative_prompt": ""}
     
+    def _build_multiview_real_workflow(self, params: Dict) -> Dict:
+        """真实照片直连 2mv：跳过 Zero123Plus，四张真实视图直接进重建。
+
+        ## 为什么
+
+        默认多视图链路是 `单图 → Zero123Plus 猜 6 视图 → 取 4 张 → 2mv`。
+        猜出来的视图会把几何"抹平"：实测同一架飞机，猜视图那条路剪影 IoU 只有 0.57，
+        比单图（0.64）还差 —— 因为那 4 张里 3 张是编的。
+
+        有真实照片时没必要让扩散模型猜。这里直接把用户的 4 张照片
+        （front / back / left / right，3000×2000 以内的常见照片即可）
+        接到 `[Comfy3D] Multi Background Remover` → `ShapeGen MV`。
+
+        params 里给：
+            real_views = {"front": "f.png", "back": "b.png",
+                          "left": "l.png", "right": "r.png"}   # ComfyUI input 目录里的文件名
+        """
+        model = params.get("model_config", {})
+        views = params.get("real_views") or {}
+        need = ("front", "back", "left", "right")
+        miss = [k for k in need if not views.get(k)]
+        if miss:
+            raise ValueError(f"real_views 缺少 {miss}")
+
+        seed = params.get("seed", 1234)
+        if seed == -1:
+            import random
+            seed = random.randint(0, 2**32 - 1)
+        octree_res = params.get("octree_resolution", 384)
+        guidance = params.get("guidance_scale", 6.0)
+        steps = params.get("steps", 20)
+        output_path = params.get("output_path", "")
+
+        wf: Dict[str, Dict] = {}
+        # 1. 背景去除模型
+        wf["1"] = {"class_type": "LoadBackgroundRemovalModel",
+                   "inputs": {"bg_removal_name": "birefnet.safetensors"}}
+        # 2-5. 四张真实照片
+        for i, k in enumerate(need):
+            wf[str(2 + i)] = {"class_type": "LoadImage", "inputs": {"image": views[k]}}
+        # 6. 一次做四张去背景（节点要求 front/back/left/right 四个输入）
+        wf["6"] = {"class_type": "[Comfy3D] Multi Background Remover",
+                   "inputs": {"image_front": ["2", 0], "image_back": ["3", 0],
+                              "image_left": ["4", 0], "image_right": ["5", 0]}}
+        # 7. 2mv 管线
+        wf["7"] = {"class_type": "[Comfy3D] Load Hunyuan3D V2 ShapeGen Pipeline",
+                   "inputs": {"generation_mode": model.get("generation_mode", "Hunyuan3D-2mv-Fast"),
+                              "weights_format": "safetensors", "flash_vdm": True}}
+        # 8. 多视图重建
+        wf["8"] = {"class_type": "[Comfy3D] Hunyuan3D V2 ShapeGen MV",
+                   "inputs": {"shapegen_pipe": ["7", 0], "images": ["6", 0],
+                              "seed": seed, "guidance_scale": guidance,
+                              "num_inference_steps": steps,
+                              "octree_resolution": octree_res}}
+        # 9. 存盘
+        wf["9"] = {"class_type": "[Comfy3D] Save 3D Mesh",
+                   "inputs": {"mesh": ["8", 0],
+                              "save_path": Path(output_path).name if output_path
+                              else f"mesh_real_{int(time.time())}.glb"}}
+        return {"prompt": wf, "negative_prompt": ""}
+
     def _build_triposplat_workflow(self, params: Dict) -> Dict:
         """构建 TripoSplat 工作流
         

@@ -84,6 +84,7 @@ docs/showcase/_bench*/
 .DS_Store
 Thumbs.db
 desktop.ini
+.desktop-venv/
 
 # 本地草稿与日志
 .tmp_mm/

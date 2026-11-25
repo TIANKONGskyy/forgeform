@@ -2,8 +2,8 @@
 <#
   ForgeForm launcher - double-click 启动.bat, or run this file directly.
 
-  First run : create .venv, install deps, start the app, open the browser
-  Next runs : just start the app and open the browser (takes ~10s)
+  First run : prepare the desktop runtime and open the Studio window
+  Next runs : open the Studio window
 
   Notes:
     - All logging is ASCII-only on purpose: PS 5.1 reads UTF-8 without BOM as GBK
@@ -12,7 +12,8 @@
 #>
 param(
     [int]$Port = 7860,
-    [switch]$Reinstall
+    [switch]$Reinstall,
+    [switch]$Desktop = $true
 )
 
 $ErrorActionPreference = 'Stop'
@@ -162,5 +163,26 @@ Say "python $pyVer  ok  ($pyExe, via $($found.how))" 'Green'
 $env:PYTHONPATH = ''
 $env:PYTHONIOENCODING = 'utf-8'
 $env:PYTHONUTF8 = '1'
-& $pyExe (Join-Path $root 'tools\studio.py') --port ($Port + 1) --app-port $Port
+$studioArgs = @('--port', ($Port + 1), '--app-port', $Port)
+if ($Desktop) {
+    $desktopRoot = Join-Path $root '.desktop-venv'
+    $desktopPy = Join-Path $desktopRoot 'Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $desktopPy)) {
+        & $pyExe -m venv $desktopRoot
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+    & $desktopPy -c "import importlib.util,sys; sys.exit(any(importlib.util.find_spec(name) is None for name in ('webview','psutil','requests')))"
+    if ($LASTEXITCODE -ne 0) {
+        Say 'Installing the desktop window runtime...'
+        $desktopDeps = Join-Path $root 'requirements-desktop.txt'
+        & $desktopPy -m pip install --disable-pip-version-check --timeout 12 --retries 1 -i https://pypi.tuna.tsinghua.edu.cn/simple -r $desktopDeps
+        if ($LASTEXITCODE -ne 0) {
+            & $desktopPy -m pip install --disable-pip-version-check --timeout 12 --retries 1 -r $desktopDeps
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
+    }
+    $pyExe = $desktopPy
+    $studioArgs += '--desktop'
+}
+& $pyExe (Join-Path $root 'tools\studio.py') @studioArgs
 exit $LASTEXITCODE

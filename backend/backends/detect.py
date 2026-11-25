@@ -39,7 +39,7 @@ class Framework:
 
     def to_dict(self) -> dict:
         return {"key": self.key, "label": self.label, "alive": self.alive, "url": self.url,
-                "models": self.models[:12], "caps": sorted(self.caps),
+                "models": self.models[:12], "model_count": len(self.models), "caps": sorted(self.caps),
                 "detail": self.detail, "note": self.note}
 
 
@@ -203,10 +203,10 @@ def probe_comfyui(host: str = "127.0.0.1", port: int = 8188,
             fw.caps.add("mesh")
         node_dir = comfy / "custom_nodes"
         has_pack = node_dir.is_dir() and any(p.is_dir() and p.name.lower().startswith('comfyui-3d-pack') for p in node_dir.iterdir())
-        bits = [f"出图权重 {len(found['image'])}", f"VAE {len(found['vae'])}"]
+        bits = [f"候选权重文件 {len(found['image'])}", f"VAE {len(found['vae'])}"]
         if has_pack:
             bits.append("3D-Pack 已装")
-        fw.models = found["image"][:12]
+        fw.models = found["image"]
         fw.detail = (fw.detail + " · " if fw.detail else "") + "，".join(bits)
     else:
         # A listening service is not evidence that weights or 3D nodes exist.
@@ -453,3 +453,107 @@ def describe(frameworks: list[Framework]) -> str:
         if not f.alive and f.key in ("hy3dgen", "diffusers"):
             lines.append(f"  · {f.label:<22} 未安装/未发现")
     return "\n".join(lines) if lines else "  （没探测到任何推理框架）"
+
+
+def inspect_configured(config: dict) -> list[dict]:
+    """Check the active defaults against the actual service registry, without loading models."""
+    ports = config.get("comfyui_ports") or {}
+    mode = (config.get("backend") or {}).get("mode", "comfyui")
+    checks = []
+    registries = {}
+
+    for stage, label in (("image", "出图"), ("3d", "建模"), ("video", "视频")):
+        key = ((config.get("stages") or {}).get(stage) or {}).get("default_model")
+        key = key or (config.get("generation") or {}).get(f"default_{stage}_model")
+        if not key:
+            continue
+        model = ((config.get("models") or {}).get(stage) or {}).get(key, {})
+        detail = "权重和节点在服务中可见，尚未加载"
+        if mode == "direct":
+            path = model.get("path")
+            if stage == "video":
+                detail = "直连后端不支持视频"
+            elif path and Path(path).is_dir():
+                location = Path(path)
+                if stage == "image":
+                    try:
+                        index = json.loads((location / "model_index.json").read_text(encoding="utf-8"))
+                        complete, missing = _diffusers_complete(location, index)
+                        detail = ("Diffusers 组件齐备；尚未验证加载" if complete
+                                  else "缺组件或分片：" + "、".join(missing))
+                    except (OSError, ValueError, AttributeError):
+                        detail = "无法读取 Diffusers model_index.json"
+                else:
+                    detail = f"本地目录存在：{path}；尚未验证权重和加载"
+            else:
+                detail = "未找到配置的本地模型目录"
+        else:
+            port = ports.get("image", 8188) if stage == "image" else ports.get("media", 8189)
+            url = f"http://127.0.0.1:{port}"
+            if url not in registries:
+                try:
+                    registries[url] = _get_json(url + "/object_info", timeout=8)
+                except Exception:
+                    registries[url] = None
+            nodes = registries[url]
+            if nodes is None:
+                detail = f"无法读取服务节点：{url}"
+            else:
+                try:
+                    from backend.comfy_client import ComfyUIClient
+                    workflow = ComfyUIClient(config).build_workflow(stage, {"model_config": model, "seed": 0})["prompt"]
+                    missing_nodes = set()
+                    missing_weights = set()
+                    for node in workflow.values():
+                        kind = node["class_type"]
+                        if kind not in nodes:
+                            missing_nodes.add(kind)
+                            continue
+                        schema = nodes[kind].get("input", {})
+                        fields = {**schema.get("required", {}), **schema.get("optional", {})}
+                        for name, value in node.get("inputs", {}).items():
+                            if not isinstance(value, str) or not value.lower().endswith(
+                                (".safetensors", ".ckpt", ".gguf", ".bin", ".pth", ".pt")
+                            ):
+                                continue
+                            spec = fields.get(name, [])
+                            if spec and isinstance(spec[0], list) and value not in spec[0]:
+                                missing_weights.add(value)
+                    issues = []
+                    if missing_nodes:
+                        issues.append("缺节点：" + "、".join(sorted(missing_nodes)))
+                    if missing_weights:
+                        issues.append("服务未列出权重：" + "、".join(sorted(missing_weights)))
+                    if issues:
+                        detail = "；".join(issues)
+                    elif key == "hunyuan21":
+                        detail = "工作流节点在服务中可见；ShapeGen 组件需另外核对"
+                    else:
+                        detail = "工作流节点和服务可枚举权重已核对；尚未加载"
+                except (ImportError, ValueError, TypeError, KeyError) as exc:
+                    detail = f"无法构建默认工作流：{exc}"
+            if mode == "auto":
+                detail = "ComfyUI 路线检查：" + detail
+        checks.append({"stage": label, "model": key, "detail": detail})
+
+    agent = config.get("agent") or {}
+    provider = agent.get("provider", "ollama")
+    if not agent.get("enabled", True) or provider == "off":
+        detail = "本地模型对话已关闭"
+    elif provider in {"strata", "ollama"}:
+        url = (agent.get("strata_url") or "http://127.0.0.1:8091/v1") if provider == "strata" else "http://127.0.0.1:11434"
+        model = agent.get("strata_model") if provider == "strata" else (
+            ((config.get("models") or {}).get("llm") or {}).get("default_model")
+        )
+        endpoint = "/models" if provider == "strata" else "/api/tags"
+        try:
+            data = _get_json(url.rstrip("/") + endpoint)
+            names = {item.get("id") if provider == "strata" else item.get("name")
+                     for item in data.get("data" if provider == "strata" else "models", [])}
+            detail = "已找到配置模型" if model in names else f"服务未列出配置模型：{model or '未配置'}"
+        except Exception:
+            detail = f"无法读取配置服务的模型列表：{url}"
+    else:
+        detail = "此对话后端没有模型列表检查"
+    checks.append({"stage": "对话", "model": provider, "detail": detail})
+    return checks

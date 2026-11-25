@@ -108,6 +108,7 @@ def load_project(folder_name: str) -> dict:
         "conversation": conversation,
         "candidates": _list_candidates(folder),
         "selected": _get_selected(folder),
+        "img_stage": meta.get("img_stage", ""),
         "auto_params": meta.get("auto_params") or {},   # 2026-09-22：原先不返回此键
         "quality": meta.get("quality", "高质量"),
         "image_model": meta.get("image_model", ""),
@@ -141,7 +142,7 @@ def save_project(state: dict):
     meta["user_prompt"] = state.get("user_prompt", "")
     meta["understood"] = state.get("understood", "")
     meta["stl_size"] = state.get("stl_size", 120)
-    for key in ("quality", "image_model", "model_3d"):
+    for key in ("quality", "image_model", "model_3d", "img_stage"):
         if key in state:
             meta[key] = state[key]
     # 2026-09-22：auto_params（颜色/尺寸/风格/模型）原先不落盘，

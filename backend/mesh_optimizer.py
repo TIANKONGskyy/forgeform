@@ -154,7 +154,7 @@ class MeshOptimizer:
             # 这里重新落地，让底面回到 Z=0。
             if abs(mesh.bounds[0][2]) > 1e-6:
                 mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
-            result.log.append(f"[Slice+Reground] → 底部2mm已切除，底面已落回 Z=0")
+            result.log.append(f"[Slice+Reground] → 底面已对齐 Z=0")
             
             # 2026-10-20：漂浮碎片先删，再进 repair/flatten（宇凯要求"建模不要有浮空"）
             if config.remove_floating:
@@ -329,23 +329,17 @@ class MeshOptimizer:
             bounds = mesh.bounds
             z_min = bounds[0][2]
             z_cut = z_min + mm
-            # 取所有顶点的Z坐标，筛选 >= z_cut 的顶点
-            keep_indices = np.where(mesh.vertices[:, 2] >= z_cut)[0]
-            if len(keep_indices) < 3:
-                log.append(f"  [slice_bottom] 切片后顶点数不足，跳过")
+            if bounds[1][2] <= z_cut:
+                log.append("  [slice_bottom] 模型高度不足，保留原网格")
                 return mesh
-            # 构建顶点映射：旧索引 -> 新索引
-            old_to_new = np.full(len(mesh.vertices), -1, dtype=np.int32)
-            old_to_new[keep_indices] = np.arange(len(keep_indices), dtype=np.int32)
-            # 取新顶点
-            new_vertices = mesh.vertices[keep_indices]
-            # 筛选面：三个顶点都在 keep_indices 里
-            face_mask = (old_to_new[mesh.faces[:, 0]] >= 0) & \
-                        (old_to_new[mesh.faces[:, 1]] >= 0) & \
-                        (old_to_new[mesh.faces[:, 2]] >= 0)
-            new_faces = old_to_new[mesh.faces[face_mask]]
-            result = trimesh.Trimesh(vertices=new_vertices, faces=new_faces, process=False)
-            result.remove_unreferenced_vertices()
+            result = mesh.slice_plane(
+                [0, 0, z_cut], [0, 0, 1], cap=True, engine="earcut"
+            )
+            if result is None or not len(result.faces) or (
+                mesh.is_watertight and not result.is_watertight
+            ):
+                log.append("  [slice_bottom] 切割结果无效，保留原网格")
+                return mesh
             log.append(f"  [slice_bottom] 已切除底部{mm}mm，剩余{len(result.vertices)}顶点/{len(result.faces)}面")
             return result
         except Exception as e:
@@ -370,7 +364,7 @@ class MeshOptimizer:
     def _flatten_base(self, mesh: trimesh.Trimesh, log: list) -> trimesh.Trimesh:
         """底面平整（2026-08-14）：加一个平的圆柱底座，保证 3D 打印稳定（宇凯要求底面平整）
         
-        用 pymeshlab 布尔 union 合并底座与主体（水密一体）；布尔失败则退回 concatenate。
+        用 pymeshlab 布尔 union 合并底座与主体。合并失败时保留主体。
         """
         try:
             import pymeshlab
@@ -386,17 +380,16 @@ class MeshOptimizer:
             ms = pymeshlab.MeshSet()
             ms.add_mesh(pymeshlab.Mesh(mesh.vertices, mesh.faces))
             ms.add_mesh(pymeshlab.Mesh(base.vertices, base.faces))
-            try:
-                ms.meshing_csg_union()
-                cm = ms.current_mesh()
-                mesh = trimesh.Trimesh(vertices=cm.vertex_matrix(), faces=cm.face_matrix(), process=False)
-                log.append(f"  底面平整：已加底座（半径{radius:.0f}mm）并布尔合并")
-            except Exception as e:
-                # 布尔失败，退回 concatenate（后续 pymeshlab 修复会尽量合并）
-                mesh = trimesh.util.concatenate([mesh, base])
-                log.append(f"  底面平整：加底座（半径{radius:.0f}mm，concatenate 兜底）")
+            ms.generate_boolean_union(first_mesh=0, second_mesh=1)
+            cm = ms.current_mesh()
+            combined = trimesh.Trimesh(vertices=cm.vertex_matrix(), faces=cm.face_matrix())
+            if not len(combined.faces) or not combined.is_watertight or combined.body_count != 1:
+                log.append("  [flatten_base] 合并未得到单一水密网格，保留原网格")
+                return mesh
+            log.append(f"  底面平整：已加底座（半径{radius:.0f}mm）并布尔合并")
+            return combined
         except Exception as e:
-            log.append(f"  [flatten_base] 失败：{e}")
+            log.append(f"  [flatten_base] 合并失败，保留原网格：{e}")
         return mesh
     
     def _repair(self, mesh: trimesh.Trimesh, config: OptConfig, log: list) -> trimesh.Trimesh:

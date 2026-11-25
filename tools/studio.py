@@ -2,16 +2,39 @@
 import argparse
 from pathlib import Path
 import sys
+import threading
 import webbrowser
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.studio import Studio, make_server
+
+def open_desktop(webview, url, server=None, studio=None):
+    webview.settings["ALLOW_DOWNLOADS"] = True
+    window = webview.create_window(
+        "铸想 ForgeForm", url + "/?desktop=1", width=1360, height=900, min_size=(760, 560),
+        background_color="#0a1019",
+    )
+    window.events.shown += lambda: print(f"ForgeForm Desktop: {url}", flush=True)
+    if server is not None:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        webview.start(gui="edgechromium")
+    finally:
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+            studio.cancel()
+            if studio.app and studio.app.poll() is None:
+                studio.app.terminate()
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=7861)
     parser.add_argument('--app-port', type=int, default=7860)
     parser.add_argument('--no-browser', action='store_true')
+    parser.add_argument('--desktop', action='store_true')
     args = parser.parse_args()
+    if args.desktop:
+        import webview
     # ★ 2026-11-15：单例保护。
     #   实测这台机器上同时跑了 5 个 `tools/studio.py --port 7861` —— 每双击一次
     #   就多一个，端口在 Windows 上靠 SO_REUSEADDR 居然都能绑上，
@@ -35,8 +58,11 @@ def main():
             _r = {"action": "use", "port": _alt, "why": ""}
     if _r["action"] == "reuse":
         print(f"ForgeForm Studio {_r['why']}。", flush=True)
-        if not args.no_browser:
-            webbrowser.open(f"http://127.0.0.1:{_r['port']}")
+        url = f"http://127.0.0.1:{_r['port']}"
+        if args.desktop:
+            open_desktop(webview, url)
+        elif not args.no_browser:
+            webbrowser.open(url)
         return
     if _r["action"] == "fail":
         print(f"起不来：{_r['why']}", flush=True)
@@ -47,15 +73,19 @@ def main():
 
     # 起 Studio 之前先把**我们自己的旧 app** 清掉：否则旧 app 还占着 7860，
     # 新的 app 会换到 7862 继续跑 —— 两份实例各自加载模型，显存被劈开。
-    try:
-        _killed = _ports.kill_stale("app.py")
-        if _killed:
-            print(f"[port] 清掉 {len(_killed)} 个残留的创作空间进程", flush=True)
-    except Exception:
-        pass
+    if not args.desktop:
+        try:
+            _killed = _ports.kill_stale("app.py")
+            if _killed:
+                print(f"[port] 清掉 {len(_killed)} 个残留的创作空间进程", flush=True)
+        except Exception:
+            pass
 
     studio = Studio(app_port=args.app_port)
     server = make_server(studio, _port)
+    if args.desktop:
+        open_desktop(webview, f'http://127.0.0.1:{_port}', server, studio)
+        return
     if not args.no_browser:
         webbrowser.open(f'http://127.0.0.1:{_port}')
     print(f'ForgeForm Studio: http://127.0.0.1:{_port}', flush=True)

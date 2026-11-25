@@ -764,6 +764,37 @@ def _default_3d_model() -> str:
         return "hunyuan21"
 
 
+def _select_prepared_reference(state: dict, source: str) -> str:
+    from uuid import uuid4
+    from PIL import Image
+    from backend.preprocess import prepare
+
+    project = Path(state["path"])
+    candidates = project / "candidates"
+    candidates.mkdir(parents=True, exist_ok=True)
+    stem = f"ref_{uuid4().hex}"
+    prepared = candidates / f"{stem}_prep.png"
+    result = prepare(source, out_path=str(prepared), clean_fragments=True, require_foreground=True)
+    if not result["ok"]:
+        raise ValueError(result["error"])
+
+    preview_dir = project / "reference_previews"
+    preview_dir.mkdir(exist_ok=True)
+    preview = preview_dir / f"{stem}.png"
+    with Image.open(prepared) as subject:
+        white = Image.new("RGB", subject.size, "white")
+        white.paste(subject, mask=subject.getchannel("A"))
+        white.save(preview)
+
+    paths = list(state.get("candidates") or [])
+    paths.append(str(prepared))
+    pm.save_selected_image(project, prepared.read_bytes())
+    conv.cancel_autopilot(state, "已选择参考图")
+    state.update(candidates=paths, selected_idx=len(paths) - 1, selected=str(prepared),
+                 ref_upload=str(preview), phase="selecting", img_stage="hd")
+    return str(preview)
+
+
 def on_reference_uploaded(file_obj, state: dict):
     """用户上传一张参考图 → 直接作为本组的"已选图"，点「生成建模」就按它建模。
 
@@ -772,10 +803,6 @@ def on_reference_uploaded(file_obj, state: dict):
     可靠路线是"照这张图画"：让用户把参考图丢进来，直接拿它建模（或喂给图生图/编辑模型）。
     以前界面**完全没有上传入口** ✗，参考图只能靠联网搜（相关性还不稳）。
     """
-    import shutil
-    if not state or not state.get("path"):
-        yield state, *_update_ui_with_note(state, "还没建对话组，先发一句话再上传参考图。")
-        return
     src = getattr(file_obj, "name", None) or (file_obj if isinstance(file_obj, str) else None)
     if not src or not Path(src).exists():
         src = getattr(file_obj, "path", None)          # gr.File 新版把路径放 .path
@@ -783,31 +810,14 @@ def on_reference_uploaded(file_obj, state: dict):
         yield state, *_update_ui_with_note(state, "没读到图片文件，换一张再试（png/jpg/webp）。")
         return
     try:
-        proj = Path(state["path"])
-        cdir = proj / "candidates"
-        cdir.mkdir(parents=True, exist_ok=True)
-        dst = cdir / f"ref_{int(time.time())}{Path(src).suffix.lower() or '.png'}"
-        shutil.copyfile(src, dst)
-        cands = list(state.get("candidates") or [])
-        cands.append(str(dst))
-        state["candidates"] = cands
-        state["selected_idx"] = len(cands) - 1
-        state["selected"] = str(dst)
-        # 标记"这是用户给的参考图" → 下次点生图时走 Qwen-Image-2.1 参考图工作流
-        # （照图生成指定角色；纯文字生图对 IP 角色只能猜 ✗）
-        state["ref_upload"] = str(dst)
-        pm.save_selected_image(proj, dst.read_bytes())      # 落盘 selected.jpg，刷新后不丢
-        state["phase"] = "selecting"                        # → 按钮出「修改图片 / 生成 3D」
-        conv._append_conversation(
-            state, "user", "（上传了一张参考图）", "", images=[str(dst)])
-        conv._append_conversation(
-            state, "assistant", "",
-            "✅ 已收到参考图，作为本组的造型依据。\n\n"
-            "下一步：点 **生成 3D** 就按这张图做 3D 模型（IP 角色/特定形象这条最稳 —— "
-            "纯文字描述只能猜长相）。", images=[str(dst)])
+        if not state or not state.get("path"):
+            state = pm.create_project()
+        preview = _select_prepared_reference(state, src)
+        conv._append_conversation(state, "user", "（上传了一张参考图）", "", images=[preview])
+        conv._append_conversation(state, "assistant", "",
+            "已清理参考图。可直接点 **生成 3D**，也可以在下方输入修改要求。", images=[preview])
         pm.save_project(state)
-        yield state, *_update_ui_with_note(
-            state, f"🖼 参考图已就位（{Path(src).name}）→ 点「生成 3D」按它建模")
+        yield state, *_update_ui_with_note(state, "参考图已就位，可以生成 3D")
     except Exception as e:
         yield state, *_update_ui_with_note(state, f"参考图处理失败：{e!r}")
 
@@ -969,11 +979,13 @@ def on_upload_and_edit(file_obj, prompt: str, state: dict):
     站内 React 端不像 Gradio 页面那样有持久 gr.State，
     upload 和 edit 分成两个事件会丢 ref_upload；合并成一个事件最稳。
     """
-    st = state
-    if file_obj is not None:
+    if file_obj is not None and not (state or {}).get("ref_upload"):
         for out in on_reference_uploaded(file_obj, state):
-            st = out[0]
-    yield from on_edit_with_prompt(prompt, st)
+            state = out[0]
+            yield out
+        if not (state or {}).get("ref_upload"):
+            return
+    yield from on_edit_with_prompt(prompt, state)
 
 
 def on_edit_with_prompt(prompt: str, state: dict):
@@ -988,26 +1000,31 @@ def on_edit_with_prompt(prompt: str, state: dict):
     if not text:
         yield state, *_update_ui_with_note(state, "请在图片旁边写一句要改什么，比如「改成蓝色」「加一对翅膀」。")
         return
-    try:
-        from backend.conversation import _apply_refinement
-        _apply_refinement(state, text)
-    except Exception as e:
-        print(f"[DSH] edit prompt apply failed: {e!r}", flush=True)
-    state.setdefault("req_notes", []).append(text)
-    state["ref_upload"] = src
     conv.cancel_autopilot(state, "用户按提示词改图")
-    import backend.timings as T
     t0 = time.time()
     yield state, *_update_ui(state, ring=ring_html("image_512"))
     try:
-        result = conv._do_generate_images(state)
-        prj = result.get("project", state)
-        # 改图后给出预览，不自动建模；用户确认后再点生成建模
-        conv.cancel_autopilot(prj, "改图后等待用户确认")
-        el = time.time() - t0
-        yield prj, *_update_ui(prj, ring=ring_html("image_512", el, done=True))
+        from backend.pipeline import Pipeline
+
+        edit_prompt = (
+            f"{text}\nUse the reference image and preserve unchanged features. "
+            "Keep one complete subject on a pure white background with no shadows, platform or debris."
+        )
+        pipe = Pipeline()
+        model = state.get("image_model") or pipe.config.get("stages", {}).get("image", {}).get("default_model")
+        results = pipe.generate_images(edit_prompt, count=1, model_key=model,
+                                      quality_name="快速", resolution="512×512 (快速)",
+                                      reference_image=src, skip_cache=True)
+        if not results or not results[0].success:
+            raise RuntimeError(results[0].error if results else "未返回修改后的图片")
+        preview = _select_prepared_reference(state, results[0].output_path)
+        conv._append_conversation(state, "user", text, "")
+        conv._append_conversation(state, "assistant", "",
+            "已按提示修改并清理图片。确认预览后可生成 3D。", images=[preview])
+        pm.save_project(state)
+        yield state, *_update_ui(state, ring=ring_html("image_512", time.time() - t0, done=True))
     except Exception as e:
-        yield state, *_update_ui_with_note(state, f"改图失败：{e!r}")
+        yield state, *_update_ui_with_note(state, f"改图失败：{e}")
 
 
 def on_btn_edit(state: dict):
@@ -1211,13 +1228,17 @@ def build():
                     msg = gr.Textbox(placeholder="描述你想创作的物品…", lines=1, max_lines=6,
                                      scale=8, min_width=120, elem_id="chat_input",
                                      show_label=False, container=False)
-                    ref_up = gr.UploadButton("上传图片", file_types=["image"],
-                                             size="sm", scale=0, min_width=90, elem_id="ref_up")
                     send = gr.Button("发送", variant="primary", scale=0, min_width=76, elem_id="send_btn")
-                with gr.Accordion("图片修改", open=False, elem_classes="edit-accordion"):
+                with gr.Group(elem_classes="reference-panel"):
+                    with gr.Row(elem_classes="reference-header"):
+                        gr.HTML('<div class="reference-title"><strong>参考图建模</strong><span>上传后自动清理背景，也可以先按提示修改。</span></div>')
+                        ref_up = gr.UploadButton("上传图片", file_types=["image"],
+                                                 size="sm", scale=0, min_width=112, elem_id="ref_up")
+                        btn_model = gr.Button("生成 3D", variant="primary", scale=0, min_width=104,
+                                              visible=_init_btns["model"]["visible"], elem_id="btn_model")
                     with gr.Row(elem_classes="input-row input-row-upload"):
                         edit_prompt = gr.Textbox(
-                            placeholder="上传图片后，描述需要修改的内容…", lines=1,
+                            placeholder="可选：例如给主体加一对翅膀，保留原有姿势", lines=1,
                             scale=8, min_width=120, show_label=False, container=False,
                             elem_id="edit_prompt")
                         btn_edit_submit = gr.Button("修改图片", variant="secondary",
@@ -1228,7 +1249,6 @@ def build():
                     btn_refine = gr.Button("✨ 继续细化", variant="secondary", visible=_init_btns["refine"]["visible"], elem_id="btn_refine")
                     btn_gen = gr.Button("🎨 生成图片", variant="primary", visible=_init_btns["gen"]["visible"], elem_id="btn_gen")
                     btn_edit = gr.Button("✏️ 修改图片", variant="secondary", visible=_init_btns["edit"]["visible"], elem_id="btn_edit")
-                    btn_model = gr.Button("🧊 生成 3D", variant="primary", visible=_init_btns["model"]["visible"], elem_id="btn_model")
                     btn_new = gr.Button("➕ 新建作品", variant="secondary", visible=_init_btns["new"]["visible"], elem_id="btn_new")
                     btn_stl = gr.Button("📦 导出 STL", variant="secondary", visible=_init_btns["stl"]["visible"], elem_id="btn_stl")
                     # 「🎯 采用为参考图」：联网找图后必须确认 → 端到端 bug A 修
