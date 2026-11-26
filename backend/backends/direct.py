@@ -667,11 +667,26 @@ class DirectBackend:
                       guidance_scale=guidance, octree_resolution=octree,
                       num_chunks=2000 if low_ram else 8000, output_type="trimesh")
         mesh = meshes[0] if isinstance(meshes, (list, tuple)) else meshes
+
+        # 【2026-11-26 修】直连后端原来完全没读 params["max_facenum"]，
+        # 导致 2mini@512 直接吐 327 万面（ComfyUI 那条路是 20 万）。
+        # 实测（低显存账本）：面数不影响采样显存，但会影响收尾时间、内存、
+        # 以及后面 STL 导出/切片器的加载时间 —— 所以这里补上 quadric 减面。
+        faces_before = int(len(mesh.faces))
+        max_faces = int(params.get("max_facenum") or 0)
+        if max_faces > 0 and faces_before > max_faces:
+            try:
+                mesh = mesh.simplify_quadric_decimation(face_count=max_faces)
+                self._log(f"[direct] 减面 {faces_before:,} → {len(mesh.faces):,}"
+                          f"（max_facenum={max_faces:,}）")
+            except Exception as e:
+                self._log(f"[direct] 减面失败，保留原网格 {faces_before:,} 面：{e}")
+
         name = f"direct3d_{int(time.time())}_{uuid.uuid4().hex[:6]}.glb"
         path = self.out_root / "3d" / name
         mesh.export(str(path))
         self._log(f"[direct] 3D 完成 {round(time.time()-t0,1)}s "
-                  f"faces={len(mesh.faces)} → {name}")
+                  f"faces={len(mesh.faces):,} → {name}")
         return [path]
 
     # ── 生命周期 ──────────────────────────────────────────────
