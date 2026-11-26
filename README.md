@@ -75,7 +75,7 @@ r = pipe.generate_3d_multiview({
 
 ### 方式一：解压后双击
 
-1. 下载 [`forgeform-v3.1.2.zip`](https://github.com/TIANKONGskyy/forgeform/releases/latest) 并解压
+1. 下载 [`forgeform-v3.8.0.zip`](https://github.com/TIANKONGskyy/forgeform/releases/latest) 并解压
 2. 双击 **`启动.bat`**
 
 它会依次做：检查 Python → 建 `.venv` 并装依赖（3–5 分钟，只一次）→ 首次运行跑配置向导
