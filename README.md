@@ -24,12 +24,31 @@
 |---|---|---|
 | 对话 | 需求解析、参数补齐、多轮修改 | 本地 LLM（OpenAI 兼容端点 / Ollama） |
 | 出图 | 文生图，1–4 张候选，参考图 i2i、局部重绘 | ComfyUI 或 diffusers 直连 |
-| 建模 | 单图生 3D | ComfyUI（Hunyuan3D 2.1）或 hy3dgen 直连 |
-| 导出 | GLB → STL：减面、补洞、水密、毫米、居中贴地 | trimesh / pymeshlab / pymeshfix |
+| 建模 | 单图生 3D；**多视图（四张真实照片）生 3D** | ComfyUI（Hunyuan3D 2.1 / V2 2mv）或 hy3dgen 直连 |
+| 贴图 | PBR 上色（albedo + metallicRoughness） | ComfyUI（Hunyuan3D Paint PBR 2.1） |
+| 骨骼 | 自动绑定（模板骨架 / RigAnything） | Blender headless + 可选 RigAnything |
+| 动作 | BVH mocap 重定向（走 / 挥 / 鞠 / 待机） | Blender headless（纯 CPU） |
+| 精修 | 粗网格 + 参考图 → 更细网格（可选档） | Direct3D-V3 |
+| 导出 | GLB → STL：小壳过滤、减面、补洞、水密、毫米、居中贴地 | trimesh / pymeshlab / pymeshfix |
 | 打印 | 局域网发现拓竹打印机并直发 | bambu-cli（可选） |
 | 管理 | 对话组、项目归档、模型库、显存/温度监控 | 内置 |
 
 逆向入口：上传视频抽帧建模、上传 GLB 直接转 STL。
+
+**多视图怎么用**（v3.8.0 新增，实测比单图更准）：
+
+```python
+from backend.pipeline import Pipeline
+pipe = Pipeline("config.json")
+r = pipe.generate_3d_multiview({
+    "front": "正面.jpg", "back": "背面.jpg",
+    "left":  "左侧.jpg", "right": "右侧.jpg",
+}, quality_name="高质量")
+```
+
+拍照只有一条硬要求：**四张同仰角、方位严格 90°**。物体在画布里多大无所谓
+（管线自己按 bbox 归一化，实测尺度差 2.2 倍反而分数更高）。
+**不要预先抠图**——送透明底/黑底进去会被再抠一遍，实测 0.4872 → 0.3112。
 
 ## 实测（Tesla V100 32G，单卡）
 
@@ -39,8 +58,15 @@
 | 出图 1024²，30 步（含中→英翻译） | ≈ 140–170 s |
 | 建模 Hunyuan3D 2.1，256 octree | ≈ 160 s |
 | 建模 Hunyuan3D 2.1，512 octree | ≈ 8–10 min |
+| **建模 多视图 2mv@512（四张真实照片）** | **≈ 84 s，49 万面，水密** |
 | 建模 Hunyuan3D 2mini 直连，256 octree | 加载 42 s + 推理 13 s |
+| 贴图 Paint PBR 2.1（120k 面，2048² atlas） | ≈ 216 s，峰值 13.7 GB |
+| 精修 Direct3D-V3，512 档 4 步 | ≈ 33 s，峰值 5.8 GiB |
+| 绑定 模板骨架（任意水密网格） | 8–68 s，零显存 |
+| 绑定 RigAnything（角色，52 骨含手指） | ≈ 52 s，峰值 4.7 GB |
+| 动作 BVH 重定向（24 帧循环） | ≈ 3 s，纯 CPU |
 | 导出 STL（20 万面 → 8 万面） | ≈ 3–6 s |
+
 
 四个作品的真跑记录（每件含耗时、面数、水密、STL 四视角渲染）：
 `docs/showcase/`
@@ -138,6 +164,9 @@ vLLM / 本地 diffusers 模型，然后给出可选方案：
 | `docs/EXTENSIBILITY.md` | 扩展点：换模型、给 agent 用、加 stage |
 | `docs/ARCHITECTURE.md` | 模块职责与核心机制 |
 | `docs/DECISIONS.md` | D1–D10 设计决策记录 |
+| [`docs/RESEARCH-MASTER-2026-11-26.md`](docs/RESEARCH-MASTER-2026-11-26.md) | 六方向实测总表（贴图 / 骨骼 / 运动 / 精度 / 多视图 / 低显存） |
+| [`docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`](docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md) | 本机环境事实与踩坑清单（V100 没有 OpenGL、SDPA 只有 EFFICIENT 等） |
+| [`docs/MERGE-CODEX-2026-11-26.md`](docs/MERGE-CODEX-2026-11-26.md) | v3.8.0 合并了什么、拒了什么、为什么 |
 | `skills/forgeform/SKILL.md` | 给 agent 用的技能文件 |
 | `CONTRIBUTING.md` / `SECURITY.md` | 贡献约定 / 安全说明 |
 
