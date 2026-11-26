@@ -97,3 +97,35 @@ if max_faces > 0 and faces_before > max_faces:
 已改为**优先本地目录**（`FORGEFORM_PAINT_PBR_DIR` 环境变量 → 3D-Pack `Checkpoints` 下自动定位），
 找不到才回落官方下载。路径解析已验证命中 6.41 GB 权重。
 **注意：补丁要重启 ComfyUI 才生效。**
+
+---
+
+## 八、贴图方向实测结论（2026-11-26 12:30）
+
+### 结果
+
+飞机用 Hunyuan3D Paint-PBR 2.1 上色：**216.5 s / 峰值 13.7 GB / 峰值 83°C**，120k 面、atlas 2048²、1898 岛、覆盖率 63.4%、GLB 7.14 MB。
+白机身 + 深蓝垂尾/舷窗条带，涂装方向正确，**无块状串色**；桨叶/起落架有轻度噪点（多视图遮挡）。
+
+同材质区域色相 σ（饱和加权、按 UV 岛）：**atlas 6.46°**，渲染 az0/45/90 = 8.81/7.61/5.22°。
+对比 Codex 旧角色贴图：atlas 24.98°，渲染 12.68/19.03/19.73°，青绿占比 26–28%（飞机 9–20%）。
+
+### 三个必须记住的结论
+
+**① Codex 那版青绿块不是 UV 边界溢色**
+
+UV 岛掩膜 + atlas dilation(12 px) 做完指标**零变化**（12.68°→12.66°、青绿 23.96%→23.96%）。
+根因是**多视图反投影把外套的青绿抹进了裤子/靴子的 chart 内部**。
+能救的是**岛约束中值协调**：σ 12.68°→8.32°（−34%）。事后修补天花板就到这；正路是把跨缝 3D 邻接一致性做进烘焙阶段。
+
+**② trimesh 读 GLB 后 UV 是 OpenGL 约定，取样必须 `row = (1 - v)`**
+
+搞反的后果：整机变"蓝白迷彩"，看起来像模型上色崩了。
+判据：3D 相邻面色差均值取小者（飞机 16.16 vs 23.15；角色 7.92 vs 13.88）。
+
+**③ 主实例的 TexGen 节点会白下 11 GB**
+
+3D-Pack 的 `[Comfy3D] Hunyuan3D 21 TexGen` 走 `multiviewDiffusionNet` 里写死的 `snapshot_download`
+（下到 hub cache，不认 `Checkpoints/` 本地权重），hf-mirror 下 hf_hub 会 0 字节卡死。
+**已在 `Gen_3D_Modules/Hunyuan3D_2_1/hy3dpaint/utils/multiview_utils.py` 打补丁：优先本地目录（`FORGEFORM_PAINT_PBR_DIR` 环境变量 → Checkpoints 自动定位），找不到才回落下载。重启 ComfyUI 生效。**
+在补丁生效前，干净可用的路径是**隔离实例**（独立 base-directory + 独立端口），本次就是这么跑的。
