@@ -31,6 +31,32 @@
 
 **已经验证可行的**：Codex 那套 52 骨人形骨架 + Blender 手动权重（`人物骨骼_四种动作.blend`），腿骨超长 6.4%、步态支撑期只有 3–5 帧（我修成 11–12 帧）。
 
+### 实测补充（2026-11-26，详见 `work/research/rig/RESULT.md`）
+
+**已经做出来的**：`work/research/rig/auto_rig.py` —— 模板骨架（humanoid / quadruped / aircraft / chain 自采样链）+ Blender 热扩散自动权重 + 伪骨清理 + 质量闸门 `rig_gate.py`。
+任意水密网格 28–68 s 出「带 skin 的 GLB + 骨骼线 PNG」，**无权重顶点 = 0**，glTF 合规（`JOINTS_0`/`WEIGHTS_0`/`inverseBindMatrices` 全在）。
+实测：兔 chain p99 1.05 / 撕裂 0.13%；飞机 p99 1.08 / 0.04%；人形（迈步姿势）模板法 4.38% → 清伪骨后 **0.59%**；同一份人形换 chain **0.00%**。
+
+**天花板不在算法，在姿势**：模板法只对中性姿势成立。坐着的兔子用四足模板 11/19 根骨在体外；迈步的人形用对称腿骨会落在两腿之间的空气里。
+根因实测：`upper_arm.R` 在迈步人形上抢到 **45% 的顶点**（手臂骨被拉回体内后，热扩散合理地把它判给了躯干顶点），一摆臂就把半个身子拖走 → 局部拉伸 12.2% 的边。
+所以管线里必须有「闸门 + 回退 chain」这条兜底链，而不是迷信模板。
+
+**两个会影响架构的坑（都在 Windows + 本机环境实测）**：
+
+1. **`import bpy` 必须在 trimesh / torch 之前**。顺序反了会 `ImportError: DLL load failed while importing bpy: 找不到指定的程序`。
+   实测矩阵：bpy 最先 → OK；`torch,trimesh,bpy`、`tqdm,trimesh,bpy`、`numpy,tqdm,trimesh,bpy` → 全 FAIL。
+   另外 miniconda 里那个 `bpy 4.2.0` pip wheel **不带 Cycles 渲染器**（`'CYCLES' not in engine enum`），能建网格但不能渲 → 渲染必须走 `blender.exe -b`。
+   RigAnything 的 `inference.py` 恰好第 7 行 import bpy、第 15 行 import trimesh，**只要把它当入口进程跑就安全**，别从已经 import 过 torch 的封装里 import 它。
+
+2. **trimesh 5.0 的 glTF 加载器会丢掉 skin/权重**。`trimesh.load(rigged.glb)` 能读回几何（`ok_read=true`），但 `scene.geometry` 里没有任何 skin/joints/weights 属性，joint 只剩普通 graph 节点 —— 拿不到权重就没法蒙皮。
+   **架构结论：前端摆姿势必须用 Three.js `GLTFLoader`（认 `JOINTS_0`/`WEIGHTS_0`，已验证 GLB 里确实有），后端不要用 trimesh 读 rigged GLB。**
+   切片器只要网格：从 GLB 导 STL 不崩，导出来是 **rest pose**、`watertight=True`、顶点数回到原始、bbox 与源网格一致（GLB 里顶点按法线拆开约 6 倍冗余，导 STL 时会重新 weld）。
+
+**权重清单实测（hf-mirror）**：UniRig 真实仓库是 `VAST-AI/UniRig`（`VAST-AI-Research/UniRig` 只是 308 重定向），推理必需 6.44 GB；RigAnything 是 `Isabellaliu/RigAnything`（注意 `liu` 不是 `Liu`），单文件 2.34 GB。
+**UniRig 在 V100 上不能直接跑**：`PTv3Object.py` 硬 `import flash_attn` 且 `assert flash_attn is not None`，用的是 FA2 的 varlen API（只支持 sm80+），另有 `torch_scatter` 强依赖和 bf16 autocast。
+**RigAnything 能跑**：无 sm80 专属算子，模型本体 195,369,478 参数 / 0.73 GB fp32，ckpt 123/123 tensor 全对上（离线自检 PASS）。
+
+
 ## 三、运动（Animation / Retarget）
 
 | 方案 | 说明 |
@@ -53,11 +79,28 @@
 
 | 方案 | 状态 |
 |---|---|
-| Hunyuan3D-2mv（本地） | 权重齐（`hunyuan3d-dit-v2-mv-fast` 4.7 GB + Zero123Plus 5.4 GB）；合成 6 视图路线实测最差（0.3233） |
+| Hunyuan3D-2mv（本地） | 权重齐（`hunyuan3d-dit-v2-mv-fast` 4.7 GB + Zero123Plus 5.4 GB）；合成 6 视图路线实测最差（0.3233，4 张里 3 张是编的） |
 | **Pixal3D** | TencentARC，[GitHub](https://github.com/TencentARC/Pixal3D)；有 GGUF 版可低显存跑（[指南](https://pixal3d.ai/blog/pixal3d-complete-guide)） |
 | MV-Adapter / Era3D / Wonder3D | 均需额外权重 |
 
-**关键实测结论**：真实照片直连 2mv 反而更差（0.267），原因是 5 张照片**仰角不一致**（正视略仰、背视俯拍机尾、侧视平视）。四视图必须同仰角、同尺度。
+### 实测（2026-11-26，详见 `work/research/multiview/RESULT.md`）
+
+| 输入 | eval（产品图参照，辅助） | 四视图 IoU（对 `plane_21` 真值口径） | geo 中位 / P90 (mm) |
+|---|---|---|---|
+| `plane_21` 自己（单图 2.1 基线） | 0.4709 | 0.998 | 0 / 0 |
+| 理想输入（自 `plane_21` 渲正交四视图） | 0.4067 | 0.709 | 1.12 / 2.91 |
+| **真实照片·白底原图直出** | **0.4872** | 0.636 | 2.29 / 6.73 |
+| 真实照片·外部正交化后 | 0.4895 | 0.636 | 1.77 / 8.97 |
+| 早先那版（预遮罩产物 `feiji_real_512.glb`） | 0.3112 | 0.434 | 6.53 / 29.96 |
+
+**三条必须记住的结论**：
+
+1. **别预遮罩**：`ComfyUI LoadImage` 只输出 RGB（alpha 单独走 MASK），`Multi_Background_Remover` 拿到的永远是 3 通道 → **必然重跑 birefnet**。早先那版 0.267/0.311 不是"照片差"，是送进去的是透明/黑底图，birefnet 在非白底上抠坏了 mask。规则：**喂白底原图，不预遮罩。**
+2. **外部预归一化是冗余的**：`MVImageProcessorV2.recenter()` 会按 alpha bbox 裁切 → 按**最大边**缩放到 512×0.85 → 居中。所以「统一高度/留白/居中」管线会重做。实测把同一批照片正交化（1200 px 最大边、88% 占画、白底 alpha）后，四视图 IoU 0.6357→0.6362（噪声内）、geo 中位 2.29→1.77 mm 但 P90 6.73→8.97 mm —— **不构成改进**。想提升只能改**视角一致性**（同仰角、方位严格 90°、无透视）或换更强骨架，改像素预处理没用。
+3. **真实照片直连已是正收益**：0.4872 > 单图基线 0.4709 > 理想输入组 0.4067（后者低是因为 `plane_21` 本身比真机瘦，不是 2mv 的错）。
+
+**一句话**：2mv 这条线现在卡在**视角**，不在像素预处理，也不在尺度归不归一。
+
 
 ## 六、低显存本地部署
 
@@ -73,7 +116,7 @@
 
 ---
 
-## 七、本轮修掉的两个产品级 bug（2026-11-26 12:20）
+## 七、本轮修掉的三个产品级 bug（2026-11-26）
 
 ### 1. 直连后端忽略 `max_facenum`（`backend/backends/direct.py`）
 
@@ -97,6 +140,14 @@ if max_faces > 0 and faces_before > max_faces:
 已改为**优先本地目录**（`FORGEFORM_PAINT_PBR_DIR` 环境变量 → 3D-Pack `Checkpoints` 下自动定位），
 找不到才回落官方下载。路径解析已验证命中 6.41 GB 权重。
 **注意：补丁要重启 ComfyUI 才生效。**
+
+### 3. 采样线程用 `self._stop` 撞了 `Thread._stop()`（精度脚本）
+
+监控线程把停止信号存成 `self._stop`（`threading.Event`），结束时 `join()` 触发
+`TypeError: 'Event' object is not callable` —— 因为 `_stop` 是 `threading.Thread` 的内部方法名，
+被实例属性覆盖后解释器会把它当方法调用。症状很隐蔽：**15 步跑完、显存正常释放，但产物没落盘**。
+统一改名为 `_stop_evt`（或任何非 `_stop` / `_start` / `_target` 的名字）。
+凡自己写采样/看门狗线程的都适用。
 
 ---
 
