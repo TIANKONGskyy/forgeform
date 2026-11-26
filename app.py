@@ -1207,6 +1207,10 @@ def build():
             )
             btn_new_top = gr.Button("➕ 新建作品", variant="secondary", scale=1, min_width=96)
 
+        # 独立参数化工作台，不修改对话项目状态。
+        from backend.cultural_ui import render as render_cultural_lab
+        render_cultural_lab()
+
         # ── 主体：左侧对话区（宽）+ 右侧侧边栏（窄）────
         with gr.Row(elem_classes="main-wrap"):
             # 对话区（宽，占主视觉）

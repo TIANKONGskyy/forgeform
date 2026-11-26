@@ -774,6 +774,49 @@ class Pipeline:
     
     # ─── 3D 产物质量闸 ────────────────────────────────────
 
+    def _drop_debris(self, path: str, min_faces: int = 200,
+                     min_ratio: float = 0.002) -> dict:
+        """把"碎屑级"连通块从 3D 产物里删掉，写回原路径（2026-11-26）。
+
+        为什么单独做一步：Direct3D-V3 / 部分 voxel 输出的典型形态是
+        「1 个大块 + 上千个 <100 面碎壳」（实测 1290 块里 1275 块是碎壳，合计 0.86% 面）。
+        `_mesh_parts` 只数块数 → 会把它当碎块云拒掉；切片器里这些碎壳会变成一堆浮尘。
+
+        只删同时满足「面数 < 绝对下限」和「占比 < min_ratio」的块 ——
+        机翼下浮筒、眼镜腿这类**有意义的分离件**面数够多，能留下。
+
+        返回 {"removed": bool, "removed_parts": int, "removed_faces": int,
+              "kept_parts": int, "faces": int}
+        """
+        import numpy as np
+        import trimesh
+        out = {"removed": False, "removed_parts": 0, "removed_faces": 0,
+               "kept_parts": 0, "faces": 0}
+        m = trimesh.load(path, force="mesh")
+        total = len(m.faces)
+        out["faces"] = total
+        if total == 0:
+            return out
+        comps = trimesh.graph.connected_components(m.face_adjacency, min_len=1)
+        out["kept_parts"] = len(comps)
+        if len(comps) <= 1:
+            return out
+
+        floor = max(int(min_faces), int(total * float(min_ratio)))
+        keep = [c for c in comps if len(c) >= floor]
+        drop = [c for c in comps if len(c) < floor]
+        if not keep or not drop:
+            return out
+
+        keep_idx = np.concatenate(keep) if len(keep) > 1 else keep[0]
+        m.update_faces(np.isin(np.arange(total), keep_idx))
+        m.remove_unreferenced_vertices()
+        m.export(path)
+        out.update({"removed": True, "removed_parts": len(drop),
+                    "removed_faces": int(sum(len(c) for c in drop)),
+                    "kept_parts": len(keep), "faces": int(len(m.faces))})
+        return out
+
     def _mesh_parts(self, path: str) -> tuple:
         """(连通块数, 面数)；读不动返回 (-1, -1)"""
         try:
@@ -865,6 +908,26 @@ class Pipeline:
         why = f"{parts} 个连通块 / {faces} 面"
         if flat:
             why += f" / 疑似夹带背景板（{flat_msg}）"
+        # ★ 2026-11-26 小壳过滤：碎块云先去掉碎屑再判，别一上来就判死。
+        #   实测 Direct3D-V3 / 部分 voxel 输出是"1 个大块 + 上千个 <100 面碎壳"
+        #   （1275 块只占 0.86% 面）—— 直接按连通块数判会把它当碎块云拒掉，
+        #   而它其实是可用的单体。这里只删"细碎"，不动有意义的分离件。
+        if bad and parts and parts > 1 and not flat:
+            try:
+                fixed = self._drop_debris(output_path)
+                if fixed and fixed.get("removed"):
+                    parts2, faces2 = self._mesh_parts(output_path)
+                    self._log(f"🧹 小壳过滤: 连通块 {parts} → {parts2}"
+                              f"（清理 {fixed['removed_parts']} 块 / {fixed['removed_faces']} 面），"
+                              f"面数 {faces:,} → {faces2:,}")
+                    parts, faces = parts2, faces2
+                    flat, flat_msg = self._mesh_is_flat_slab(output_path)
+                    bad = parts < 0 or parts > 200 or faces < 100 or flat
+                    why = f"{parts} 个连通块 / {faces} 面"
+                    if flat:
+                        why += f" / 疑似夹带背景板（{flat_msg}）"
+            except Exception as _e:
+                self._log(f"🧹 小壳过滤跳过（{type(_e).__name__}: {_e}）")
         self._log(f"🧊 3D 质量闸: {why} {'→ 不合格' if bad else '→ 通过'}")
         if not bad:
             return StageResult(True, output_path)
@@ -921,6 +984,137 @@ class Pipeline:
         except Exception as exc:
             return StageResult(False, error=f"云端建模失败: {type(exc).__name__}: {exc}",
                                duration_s=_t.time() - t0)
+
+    def generate_3d_multiview(self, views, model_key: str = "hunyuan3d",
+                              quality_name: str = "标准", max_facenum: int = 0,
+                              octree_override: int = 0, seed: int = -1) -> object:
+        """多视图建模：四张真实照片直连 2mv（2026-11-26 实测后接入）。
+
+        ## 为什么走这条路，以及为什么**不做任何预处理**
+
+        实测（同一架飞机，四视图剪影 IoU + 表面距离）：
+
+        | 输入 | 照片参照 IoU | 表面误差中位 |
+        |---|---|---|
+        | 单图 2.1@512（原产品路径） | 0.4709 | — |
+        | **真实照片·白底原图直出** | **0.4872** | **2.29 mm** |
+        | 真实照片·预先抠图（alpha 遮罩） | 0.3112 | 6.53 mm |
+
+        原因是链路本身：`LoadImage` 只输出 3 通道 RGB（alpha 走单独 MASK），
+        `Multi_Background_Remover` **必然重跑 birefnet**。送透明底/黑底进去，
+        等于给 birefnet 一个坏输入 → 抠出来的是坏 mask → 几何歪。
+        **所以这里不 rembg、不紧裁、不正交化、不做尺度归一，原图直接上传。**
+
+        另一半实测结论：2mv 自己会归一化尺度（`MVImageProcessorV2.recenter()`
+        按 alpha bbox 裁切 → 最大边缩放到 512×0.85 → 居中），外部再做尺度/留白/居中纯属冗余
+        （四张图物体大小拉开 2.2 倍，IoU 反而从 0.709 升到 0.744）。
+        真正的硬要求只有一条：**四张同仰角、方位严格 90°**。
+
+        Args:
+            views: dict {"front","back","left","right"} -> 图片路径，
+                   或按上述顺序排列的 4 个路径的 list/tuple。
+        """
+        from .stages.base import StageResult
+
+        # ── 参数归一 ──
+        keys = ("front", "back", "left", "right")
+        if isinstance(views, dict):
+            vmap = {k: views.get(k) for k in keys}
+        else:
+            seq = list(views or [])
+            vmap = dict(zip(keys, seq))
+        missing = [k for k, v in vmap.items() if not v or not Path(v).exists()]
+        if missing:
+            return StageResult(False, error=f"多视图输入缺图或路径不存在: {missing}")
+
+        if not hasattr(self.comfy, "_build_multiview_real_workflow"):
+            return StageResult(
+                False, error="当前后端不支持多视图（需要 ComfyUI 后端，"
+                             "且 comfy_client 带 _build_multiview_real_workflow）")
+
+        # ★ 2026-11-26 实测坑：**这里绝对不能调 _free_vram() / _release_chat_gpu()**。
+        #   `_free_vram()` 打 ComfyUI 的 `/free` 把模型全卸了，包括
+        #   `Multi_Background_Remover` 要用的 birefnet —— 卸载后该节点返回 None，
+        #   下游 `hy3dgen` 的 `MVImageProcessorV2.load_image()` 对 None 做
+        #   `cv2.resize` 就炸 `src is not a numpy array`。
+        #   复现对照：同一份工作流 / 同一批图，只要不先 /free 就 100% 成功（97 s），
+        #   先 /free 则 60 s 内必失败。单图路径需要让显存，多视图不需要。
+
+        # ── 原图直传（**不预处理**，原因见 docstring）──
+        td_models = self.config.get("models", {}).get("3d", {})
+        model_cfg = dict(td_models.get(model_key) or {})
+        # ★ 2026-11-26 实测坑：config 里 3D 模型的 generation_mode 是**单视图**的
+        #   （例如 "Hunyuan3D-2-Fast"）。原样传下去时，MV 节点会加载单视图管线，
+        #   它的预处理器只认单张图 → 对四视图 dict 里取到的 None 调 cv2.resize，
+        #   报 `src is not a numpy array`（60 秒内必失败）。
+        #   多视图必须强制走 2mv 系列；config 显式写成 mv-* 时尊重 config。
+        _gm = str(model_cfg.get("generation_mode") or "")
+        if "mv" not in _gm.lower():
+            model_cfg["generation_mode"] = "Hunyuan3D-2mv-Fast"
+            if _gm:
+                self._log(f"🧊 多视图: generation_mode '{_gm}' → 'Hunyuan3D-2mv-Fast'（单视图模型不能跑四视图）")
+        uploaded = {}
+        try:
+            for k in keys:
+                uploaded[k] = self._upload_image(str(vmap[k]), "3d", model_cfg)
+        except Exception as e:
+            return StageResult(False, error=f"多视图图片上传失败: {e}")
+
+        self._log("🧊 多视图建模: 4 张原图直传（不抠图、不归一化 —— 抠图反而更差）")
+
+        output_path = str(Path(self.config["paths"]["output"]) / "3d"
+                          / f"model_mv_{int(time.time())}.glb")
+        octree = int(octree_override or 0) or (
+            384 if quality_name in ("快速", "标准") else 512)
+        params = {
+            "model_config": model_cfg,
+            "model_key": model_key,
+            "real_views": uploaded,
+            "seed": int(seed) if seed is not None else -1,
+            "octree_resolution": octree,
+            # 研究侧实测基准是 512 档 / guidance 5.0（四视图 0.4872 那组）
+            "guidance_scale": 5.0,
+            "steps": 30,
+            "output_path": output_path,
+        }
+        if int(max_facenum or 0) > 0:
+            params["max_facenum"] = int(max_facenum)
+        self._log(f"🧊 多视图精度: octree={octree} guidance={params['guidance_scale']} "
+                  f"steps={params['steps']}")
+
+        try:
+            t_start = time.time()
+            prompt_id = self.comfy.submit_workflow(
+                self.comfy._build_multiview_real_workflow(params), stage="3d")
+            self._log(f"3D 任务已提交（多视图）: {prompt_id[:8]}...")
+            _t3 = 2400
+            try:
+                _t3 = int(((self.config.get("stages") or {}).get("3d") or {})
+                          .get("timeout_s") or 2400)
+            except Exception:
+                pass
+            result = self.comfy.wait_for_completion(prompt_id, timeout=_t3, thermal_guard=True)
+            if result.get("status") == "error":
+                return StageResult(False, error=str(result.get("error") or "多视图建模失败"))
+
+            # 产物落点：Save 3D Mesh 写到 ComfyUI output（文件名 = output_path 的 name）
+            candidates = [Path(output_path)]
+            comfy_out = Path(self.config["paths"]["comfyui"]) / "output" / Path(output_path).name
+            candidates.append(comfy_out)
+            got = next((p for p in candidates
+                        if p.is_file() and p.stat().st_mtime >= t_start - 5), None)
+            if got is None:
+                return StageResult(False, error="多视图建模完成但没取到网格文件")
+            if got != Path(output_path):
+                shutil.copy2(got, output_path)
+            self.state.current_glb_path = output_path
+            self.state.steps_done.append("3d")
+            self._log(f"✅ 多视图模型已保存: {output_path}")
+            return self._finalize_3d(output_path, model_key, quality_name,
+                                     str(vmap["front"]), True,
+                                     max_facenum=max_facenum, octree_override=octree)
+        except Exception as e:
+            return StageResult(False, error=f"多视图建模异常: {type(e).__name__}: {e}")
 
     def generate_3d(self, model_key: str = "hunyuan3d", quality_name: str = "标准",
                     image_path: str = None, _fallback_tried: bool = False,

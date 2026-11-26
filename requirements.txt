@@ -22,6 +22,7 @@ matplotlib>=3.8
 
 # ── 3D / 网格 ─────────────────────────────────────────────
 trimesh>=4.5
+manifold3d>=3.0
 shapely>=2.0
 mapbox-earcut>=1.0
 pymeshlab>=2025.1

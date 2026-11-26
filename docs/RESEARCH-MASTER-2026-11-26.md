@@ -223,3 +223,51 @@
 
 **所以拍照规范只有一条硬要求：四张同仰角、方位严格 90°，物体在画布里多大无所谓。**
 像素级预处理（正交化、尺度归一、留白统一）全部可以省掉。
+
+---
+
+## 十、接入产品时踩到的两个坑（2026-11-26 22:00）
+
+多视图入口接进 `Pipeline.generate_3d_multiview()` 时，同样的工作流、同样的图，
+在产品路径下 **100% 失败**，报：
+
+```
+[Hunyuan3D_V2_ShapeGen_MV] Shape generation failed:
+OpenCV(5.0.0) error: (-5:Bad argument) in function 'resize'
+src is not a numpy array, neither a scalar
+```
+
+对照实验（同一批图、同一 ComfyUI、同一 seed）：
+- 研究脚本直调：**成功，97 s，490,754 面，水密**
+- 产品方法调用：**60 s 内必失败**
+
+定位到两个原因，都已修：
+
+### ① `generation_mode` 用了单视图模型
+
+config 里 `models.3d.hunyuan21.generation_mode = "Hunyuan3D-2-Fast"`（单视图）。
+原样传给 MV 节点 → 它加载**单视图管线**，而四视图 dict 进去后预处理器只认单张，
+对 `None` 调 `cv2.resize` → 就是上面那个报错。
+
+修法：`generate_3d_multiview` 强制把非 `mv-*` 的 generation_mode 改成
+`Hunyuan3D-2mv-Fast` 并记日志。回归测试 `test_multiview_forces_mv_generation_mode`。
+
+### ② 建模前先 `/free` 会把抠图模型卸掉
+
+`_free_vram()` 打 ComfyUI 的 `/free`，把包括 **birefnet** 在内的模型全卸了。
+`Multi_Background_Remover` 卸载后返回 None → 下游同样 `cv2.resize(None)` 崩。
+
+**单图路径需要让显存，多视图路径不需要**（2mv 自己要保住抠图模型）。
+修法：`generate_3d_multiview` 不调 `_release_chat_gpu()` / `_free_vram()` / `_wait_gpu_cool()`。
+
+修完后产品路径实测：**84 s，490,754 面，水密=True**，
+产物 `outputs/3d/model_mv_1795701854.glb`，预览 `outputs/3d/mv_product_preview.png`。
+四发、浮筒、T 尾都在。
+
+### 顺带落地
+
+- `mesh_optimizer._remove_debris()`：小壳过滤（独立于「只留最大块」），
+  默认阈值 200 面 / 0.2%，实测把「1 大块 + 300 个 80 面碎壳」正确清成 1 块
+- `Pipeline._drop_debris()`：质量闸前置的同款清理（Direct3D-V3 那类 1290 块产物能过闸）
+- `tools/asset_refine_rig.py`：精修（Direct3D-V3）与绑定（RigAnything/模板）的薄封装，
+  实测 `rig --tier template` 对 plane_21.stl 产出 14 关节、`ALL_OK=true` 的 rigged GLB

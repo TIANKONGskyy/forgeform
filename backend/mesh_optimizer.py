@@ -85,6 +85,14 @@ class OptConfig:
     # 漂浮碎片（2026-10-20：独立开关，不再只藏在 repair 里）
     remove_floating: bool = True
 
+    # ★ 2026-11-26 小壳过滤（实测依据：Direct3D-V3 512 档输出 1290 个连通分量，
+    #   1275 个是 <100 面的碎壳，只占 0.86% 面 —— 不做这步会被质量闸判成"碎块云"
+    #   直接拒掉，或者进切片器变成一堆浮尘）。
+    #   debris_min_faces：绝对下限，低于它直接删
+    #   debris_min_ratio：相对下限，低于总量的这个比例也删
+    debris_min_faces: int = 200
+    debris_min_ratio: float = 0.002
+
     # 固化（2026-09-22）：TripoSplat 产出的是"壳"（百万面、数千碎片、非水密），
     # 切片器无法当实心件。开启后若仍不水密 → 体素化 + Marching Cubes 重建封闭实体。
     solidify: bool = True
@@ -157,7 +165,10 @@ class MeshOptimizer:
             result.log.append(f"[Slice+Reground] → 底面已对齐 Z=0")
             
             # 2026-10-20：漂浮碎片先删，再进 repair/flatten（宇凯要求"建模不要有浮空"）
+            # ★ 2026-11-26：先做小壳过滤（碎屑），再做"只留主体"。
+            #   顺序不能反：反过来会先用最大块把分离件全删掉，小壳过滤就没意义了。
             if config.remove_floating:
+                mesh = self._remove_debris(mesh, config, result.log)
                 mesh = self._remove_floating(mesh, result.log)
 
             # 2026-08-14：底面平整（加平底座，宇凯要求底面平整）
@@ -346,6 +357,46 @@ class MeshOptimizer:
             log.append(f"  [slice_bottom] 失败：{e}")
             return mesh
     
+    def _remove_debris(self, mesh: trimesh.Trimesh, config: "OptConfig",
+                       log: list) -> trimesh.Trimesh:
+        """小壳过滤（2026-11-26）：删掉细碎连通块，但**保留有意义的多个部件**。
+
+        和 `_remove_floating`（只留最大块）的区别：
+        - `_remove_floating` 是"只要主体"，会误删模型本身的分离件（背包带、眼镜腿、机翼下的浮筒）
+        - 这里按"面数绝对下限 + 占总量比例"两道门槛筛，只掉真正的碎屑
+
+        实测依据：Direct3D-V3 512 档输出 1,727,578 面 / 1290 连通块，
+        最大块占 98.99% 面，1275 个 <100 面的碎壳合计只占 0.86%。
+        """
+        try:
+            comps = trimesh.graph.connected_components(mesh.face_adjacency, min_len=1)
+        except Exception as e:
+            log.append(f"  [debris] 连通块分析失败：{e}")
+            return mesh
+        total = len(mesh.faces)
+        if len(comps) <= 1 or total == 0:
+            return mesh
+
+        floor = max(int(config.debris_min_faces), int(total * config.debris_min_ratio))
+        keep, dropped = [], 0
+        for c in comps:
+            if len(c) >= floor:
+                keep.append(c)
+            else:
+                dropped += len(c)
+        if not keep:
+            log.append(f"  [debris] 全部 {len(comps)} 块都小于阈值 {floor} 面，保留原网格")
+            return mesh
+        if dropped == 0:
+            log.append(f"  [debris] {len(comps)} 个连通块都够大（最小阈值 {floor} 面），不动")
+            return mesh
+        keep_idx = np.concatenate(keep) if len(keep) > 1 else keep[0]
+        mesh.update_faces(np.isin(np.arange(total), keep_idx))
+        mesh.remove_unreferenced_vertices()
+        log.append(f"  [debris] 删掉 {len(comps) - len(keep)} 个碎块（{dropped} 面，"
+                   f"占 {dropped / total * 100:.2f}%），保留 {len(keep)} 块 / {len(mesh.faces):,} 面")
+        return mesh
+
     def _remove_floating(self, mesh: trimesh.Trimesh, log: list) -> trimesh.Trimesh:
         """只保留最大连通体，删掉所有漂浮碎片（2026-10-20 独立成步）。"""
         try:
