@@ -1,0 +1,110 @@
+{
+  "2.1@512 侧视": {
+    "side": 0.6987,
+    "front": 0.4314,
+    "top": 0.2826,
+    "mean": 0.4709,
+    "faces": 406180,
+    "watertight": true,
+    "axes": {
+      "len": "X",
+      "span": "Y",
+      "height": "Z"
+    },
+    "extents_mm": [
+      172.0,
+      200.0,
+      51.6
+    ]
+  },
+  "俯视修正后": {
+    "side": 0.4887,
+    "front": 0.4314,
+    "top": 0.1666,
+    "mean": 0.3622,
+    "faces": 406180,
+    "watertight": true,
+    "axes": {
+      "len": "X",
+      "span": "Y",
+      "height": "Z"
+    },
+    "extents_mm": [
+      201.2,
+      200.0,
+      51.6
+    ]
+  },
+  "2.1@768 侧视": {
+    "side": 0.6676,
+    "front": 0.4473,
+    "top": 0.2757,
+    "mean": 0.4635,
+    "faces": 1065476,
+    "watertight": true,
+    "axes": {
+      "len": "X",
+      "span": "Y",
+      "height": "Z"
+    },
+    "extents_mm": [
+      175.9,
+      200.0,
+      52.8
+    ]
+  },
+  "2mini@512 侧视": {
+    "side": 0.6852,
+    "front": 0.3779,
+    "top": 0.2926,
+    "mean": 0.4519,
+    "faces": 200000,
+    "watertight": true,
+    "axes": {
+      "len": "X",
+      "span": "Y",
+      "height": "Z"
+    },
+    "extents_mm": [
+      168.3,
+      200.0,
+      51.1
+    ]
+  },
+  "2.1@512 正视": {
+    "side": 0.6635,
+    "front": 0.4624,
+    "top": 0.2962,
+    "mean": 0.474,
+    "faces": 574014,
+    "watertight": true,
+    "axes": {
+      "len": "Y",
+      "span": "X",
+      "height": "Z"
+    },
+    "extents_mm": [
+      200.0,
+      195.0,
+      59.9
+    ]
+  },
+  "合成多视图": {
+    "side": 0.5598,
+    "front": 0.2425,
+    "top": 0.1676,
+    "mean": 0.3233,
+    "faces": 341050,
+    "watertight": true,
+    "axes": {
+      "len": "X",
+      "span": "Y",
+      "height": "Z"
+    },
+    "extents_mm": [
+      188.4,
+      200.0,
+      45.9
+    ]
+  }
+}
