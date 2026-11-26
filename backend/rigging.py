@@ -134,8 +134,10 @@ def bind_model(input_path, output_dir, *, tier="template", template="auto",
             capture_output=True, env=env, cwd=str(ROOT), timeout=timeout)
         log = (proc.stdout or b"").decode("utf-8", "replace") + \
               (proc.stderr or b"").decode("utf-8", "replace")
-        produced = sorted(out_dir.glob("*_rigged.glb"),
-                          key=lambda p: p.stat().st_mtime, reverse=True)
+        produced = sorted(
+            [p for p in list(out_dir.glob("*_rigged.glb")) + list(out_dir.rglob("*.glb"))
+             if p.name.endswith("_rig.glb") or p.name.endswith("_rigged.glb")],
+            key=lambda p: p.stat().st_mtime, reverse=True)
         if not produced:
             raise RuntimeError(f"绑定没有产出 GLB（退出码 {proc.returncode}）：{log[-400:]}")
         info = _validate_glb(produced[0])

@@ -84,6 +84,41 @@ def refine(image: Path, mesh: Path, out: Path, *, steps: int = 4,
 
 # ────────────────────────────── 绑定 ──────────────────────────────
 
+def _run_riganything(mesh: Path, out_dir: Path, result: dict) -> dict:
+    """跑 RigAnything 真推理（研究侧脚本），产出 52 根语义骨的 GLB。
+
+    实测（V100 32G，human_body.stl 50k 顶点）：52 骨 / 52.3 s / 峰值 5,669 MiB / 撕裂 0.061%。
+    顶点数 > 8k 面时必须简化，否则 PyTorch 吃到 27.5 GB 会 OOM —— 这里按面数自动加 --simplify。
+    """
+    script = RESEARCH / "rig" / "run_riganything.py"
+    if not script.exists():
+        return {**result, "error": f"缺 {script}（RigAnything 研究环境未部署）"}
+    import trimesh
+    faces = 0
+    try:
+        faces = int(len(trimesh.load(str(mesh), force="mesh").faces))
+    except Exception:
+        pass
+    env = dict(os.environ)
+    env.update(PYTHONPATH="", PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+    # ★ 2026-11-27 修：RigAnything 依赖 easydict / open3d，装在研究侧独立 venv 里；
+    #   用 miniconda 的解释器跑会 `ModuleNotFoundError: No module named 'easydict'`。
+    ra_py = RESEARCH / "rig" / "venv_riganything" / "Scripts" / "python.exe"
+    interp = str(ra_py) if ra_py.is_file() else PY
+    cmd = [interp, str(script), "--mesh", str(mesh), "--out", str(out_dir)]
+    if faces > 20_000:
+        cmd += ["--simplify", "8192"]
+    proc = subprocess.run(cmd, capture_output=True, env=env, cwd=str(RESEARCH / "rig"),
+                          timeout=1800)
+    log = (proc.stdout or b"").decode("utf-8", "replace") + \
+          (proc.stderr or b"").decode("utf-8", "replace")
+    glbs = sorted(out_dir.rglob("*rig*.glb"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not glbs:
+        return {**result, "error": "RigAnything 没有产出 GLB", "log": log[-2000:]}
+    return {**result, "ok": True, "artifacts": [str(glbs[0])],
+            "faces_in": faces, "log": log[-1000:]}
+
+
 def rig(mesh: Path, out_dir: Path, *, tier: str = "auto",
         template: str = "auto") -> dict:
     """自动绑定。tier: auto|template|riganything。
@@ -92,15 +127,14 @@ def rig(mesh: Path, out_dir: Path, *, tier: str = "auto",
     - riganything：RigAnything 真推理（约 52 s，4.7 GB 显存，52 根语义骨）
     - auto：角色（人形/四足）优先 riganything，硬表面走 template
     """
-    out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     result = {"ok": False, "tier": tier, "artifacts": []}
 
-    use_riganything = tier == "riganything"
-    if tier == "auto":
-        # 判据用"是否近似人形/四足"太玄，先用模型复杂度做保守判定：
-        # 面数 > 400k（硬表面/扫描件）走模板，否则先试模板，失败再上 RigAnything。
-        use_riganything = False
+    # ★ 2026-11-27 修：`--tier riganything` 原来只跑模板、然后在 note 里说"需手动跑"，
+    #   等于这个档位是假的（实测报 joints=21，而 RigAnything 应该给 52 根语义骨）。
+    #   现在真的分派：riganything 直接跑研究侧的推理脚本；auto = 先模板，闸门不过再上它。
+    if tier == "riganything":
+        return _run_riganything(mesh, out_dir, result)
 
     tmpl_script = RESEARCH / "rig" / "auto_rig.py"
     if not tmpl_script.exists():

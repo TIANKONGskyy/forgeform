@@ -163,3 +163,66 @@ def test_validate_glb_rejects_mesh_without_skin(tmp_path: Path):
     with pytest.raises(RuntimeError) as ei:
         rigging._validate_glb(p)
     assert "蒙皮" in str(ei.value)
+
+# ────────────────── 2026-11-27 验证中发现并修掉的三个 bug ──────────────────
+
+def test_riganything_tier_dispatches_to_its_own_runner(tmp_path: Path, monkeypatch):
+    """`--tier riganything` 曾经是假的：只跑模板、在 note 里写"需手动跑"。
+
+    现在必须真的走到 RigAnything 执行器；缺执行器时要报错，而不是静默给模板结果。
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ff_asset_refine_rig", r"D:\ForgeForm-oss\tools\asset_refine_rig.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    mesh = tmp_path / "m.stl"
+    mesh.write_bytes(b"solid x\nendsolid x\n")
+    monkeypatch.setattr(mod, "RESEARCH", tmp_path / "no_research")
+
+    r = mod.rig(mesh, tmp_path / "out", tier="riganything")
+    assert r["ok"] is False
+    assert "run_riganything" in str(r.get("error", ""))
+
+
+def test_rig_produced_glob_accepts_both_naming_schemes(tmp_path: Path):
+    """模板档产出 *_rigged.glb、RigAnything 产出 *_rig.glb —— 后端两种都要认。
+
+    曾经的 bug：只 glob *_rigged.glb，RigAnything 明明产出了却报"没有产出 GLB"。
+    """
+    from backend import rigging
+
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "human_simplified.glb").write_bytes(b"x")      # 中间件，不能选
+    rigged = out / "character_simplified_rig.glb"
+    rigged.write_bytes(b"x")
+
+    cands = [p for p in list(out.glob("*_rigged.glb")) + list(out.rglob("*.glb"))
+             if p.name.endswith("_rig.glb") or p.name.endswith("_rigged.glb")]
+    assert [p.name for p in cands] == ["character_simplified_rig.glb"]
+
+
+def test_validate_glb_accepts_52_joint_skin(tmp_path: Path):
+    """RigAnything 的产物是 52 关节，校验器不能把多关节当异常。"""
+    import json as _json
+    import struct as _struct
+
+    from backend import rigging
+
+    doc = {
+        "asset": {"version": "2.0"},
+        "skins": [{"joints": list(range(52))}],
+        "nodes": [{"skin": 0}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "JOINTS_0": 1,
+                                                  "WEIGHTS_0": 2}}]}],
+    }
+    p = tmp_path / "ra.glb"
+    body = _json.dumps(doc).encode("utf-8")
+    body += b" " * ((4 - len(body) % 4) % 4)
+    p.write_bytes(b"glTF" + _struct.pack("<II", 2, 12 + 8 + len(body)) +
+                  _struct.pack("<II", len(body), 0x4E4F534A) + body)
+    info = rigging._validate_glb(p)
+    assert info["joints"] == 52
