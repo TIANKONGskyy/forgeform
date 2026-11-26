@@ -91,6 +91,24 @@ desktop.ini
 *.log
 !docs/*.log
 
+# ★ 2026-11-26：研究过程产物（六方向攻坚）不入库。
+#   里面有 RigAnything 权重（2.34 GB）、venv（open3d 的 DLL 156 MB）、
+#   上千张渲染图和 glb —— 合计十几 GB，GitHub 直接拒收（GH001 >100MB）。
+#   结论与数字已经写进 docs/RESEARCH-MASTER-2026-11-26.md，这里只留本地。
+work/research/
+# 但研究脚本本身值得留着：按需单独放行（见 README 的文档表）
+!work/research/*/
+!work/research/*/*.py
+!work/research/*/*.md
+# 子环境与权重一律不进
+work/research/**/venv*/
+work/research/**/models/
+work/research/**/*.glb
+work/research/**/*.stl
+work/research/**/*.blend
+work/research/**/*.png
+work/research/**/*.mp4
+
 # 本地预览服务的 pid
 .server.pid
 
