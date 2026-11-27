@@ -1,165 +1,295 @@
 # -*- coding: utf-8 -*-
-"""铸想全流程端到端测试：LLM 扩写 → 出图 → 建模 → STL。
+"""铸想全链路实测：每个模型跑一遍 → 修改产物 → 收集数据（2026-11-28）。
 
-跑的是真入口（pipeline 的方法），不绕过：
-    enhance_prompt / generate_images / generate_3d / export_stl
+用法：
+    python tools/e2e_full.py --out D:\e2e_2026-11-28 [--only image,3d,paint,...]
 
-每步记耗时 + 产物 + 关键指标，最后写出 outputs/e2e/e2e_report.json。
+产物：
+    <out>/report.json   每一步的耗时 / 峰值显存 / 产物 / 指标
+    <out>/report.md     人能读的表格
+    <out>/files/        所有产物（图片 / GLB / STL / 贴图 / 动作）
+    <out>/logs/         每一步的原始输出
+
+设计：任何一步失败都继续跑下一步（记 error），最后统一汇总 —— 实测要的是
+"哪条路能通、通的时候多快"，不是遇错就停。
 """
 from __future__ import annotations
 
+import argparse
 import json
+import os
+import shutil
+import subprocess
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
 
-sys.path.insert(0, r"D:\ForgeForm-oss")
 ROOT = Path(r"D:\ForgeForm-oss")
-OUT = ROOT / "outputs" / "e2e"
+sys.path.insert(0, str(ROOT))
 
-PROMPT = "做一个猫头鹰摆件，翅膀收拢，圆胖身体，陶土质感，能直接 3D 打印"
+PROMPT = "一个简约的白色陶瓷马克杯，圆柱杯身，带把手，single object, pure white background"
+OUT = Path(r"D:\e2e_2026-11-28")
+RESULTS: list[dict] = []
+VRAM_PEAK = {"mb": 0}
+_STOP = threading.Event()
 
+
+def _vram_watch() -> None:
+    while not _STOP.wait(2):
+        try:
+            out = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=memory.used,temperature.gpu",
+                 "--format=csv,noheader,nounits"], text=True, timeout=8).strip().splitlines()[0]
+            mb = int(out.split(",")[0])
+            VRAM_PEAK["mb"] = max(VRAM_PEAK["mb"], mb)
+        except Exception:
+            pass
+
+
+def rec(step: str, ok: bool, seconds: float, detail: str = "", **extra) -> None:
+    row = {"step": step, "ok": bool(ok), "seconds": round(seconds, 1),
+           "peak_vram_mb": VRAM_PEAK["mb"], "detail": str(detail)[:400], **extra}
+    RESULTS.append(row)
+    print(f"  {'✓' if ok else '✗'} {step:<34} {row['seconds']:>7.1f}s  "
+          f"vram {row['peak_vram_mb']:>6} MB  {str(detail)[:110]}", flush=True)
+
+
+def keep(path: str | Path, name: str) -> str:
+    """把产物复制进 <out>/files 并返回新路径。"""
+    try:
+        src = Path(path)
+        if not src.is_file():
+            return ""
+        dst = OUT / "files" / f"{name}{src.suffix.lower()}"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        return str(dst)
+    except Exception:
+        return ""
+
+
+def mesh_info(path: str) -> dict:
+    try:
+        import trimesh
+        m = trimesh.load(path, force="mesh")
+        return {"faces": int(len(m.faces)), "watertight": bool(m.is_watertight),
+                "extents_mm": [round(float(x), 1) for x in m.extents]}
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+# ───────────────────────── 1. 出图（每个图像模型）─────────────────────────
+
+def step_images(pipe, image_keys: list[str]) -> dict[str, str]:
+    """跑遍所有出图模型，返回 {model_key: 图片路径}。"""
+    got: dict[str, str] = {}
+    for key in image_keys:
+        t0 = time.time()
+        try:
+            res = pipe.generate_images(PROMPT, count=1, model_key=key,
+                                       quality_name="快速", resolution="512×512", seed=42)
+            r = res[0] if res else None
+            ok = bool(r and getattr(r, "success", False) and r.output_path)
+            path = getattr(r, "output_path", "") if ok else ""
+            rec(f"出图 · {key}", ok, time.time() - t0,
+                Path(path).name if ok else str(getattr(r, "error", ""))[:160],
+                file=keep(path, f"img_{key}"))
+            if ok:
+                got[key] = path
+        except Exception as e:
+            rec(f"出图 · {key}", False, time.time() - t0, f"{type(e).__name__}: {e}")
+    return got
+
+
+# ───────────────────────── 2. 建模（每个 3D 模型）─────────────────────────
+
+def step_3d(pipe, image_path: str, keys_3d: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for key in keys_3d:
+        if key == "multiview":
+            rec("建模 · multiview", False, 0, "需要四视图，单图路径跳过（单独测）")
+            continue
+        t0 = time.time()
+        try:
+            r = pipe.generate_3d(image_path, model_key=key, quality_name="快速",
+                                 max_facenum=200000, seed=42)
+            ok = bool(getattr(r, "success", False) and r.output_path)
+            info = mesh_info(r.output_path) if ok else {}
+            rec(f"建模 · {key}", ok, time.time() - t0,
+                f"{info.get('faces','?')}面 水密={info.get('watertight','?')}" if ok
+                else str(getattr(r, "error", ""))[:160],
+                file=keep(r.output_path, f"model_{key}") if ok else "", **info)
+            if ok:
+                out[key] = r.output_path
+        except Exception as e:
+            rec(f"建模 · {key}", False, time.time() - t0, f"{type(e).__name__}: {e}")
+    return out
+
+
+# ───────────────────────── 3. 后处理（贴图/骨骼/动画/精修）─────────────────
+
+def step_post(model_path: str, image_path: str, mv_path: str) -> None:
+    import importlib.util
+
+    from backend import rigging
+
+    # 骨骼（模板档，CPU）
+    t0 = time.time()
+    try:
+        r = rigging.bind_model(model_path, str(OUT / "rig"), tier="template")
+        rec("骨骼 · 模板", r.get("ok", False), time.time() - t0,
+            f"{r.get('joints')} 关节", file=keep(r["path"], "rigged_template"))
+    except Exception as e:
+        rec("骨骼 · 模板", False, time.time() - t0, f"{type(e).__name__}: {e}")
+
+    # 动画（BVH 重定向，CPU）
+    motion = ROOT / "work" / "research" / "motion"
+    if (motion / "人物_BVH步态_重定向.blend").is_file():
+        t0 = time.time()
+        try:
+            inner = OUT / "logs" / "_motion.py"
+            inner.parent.mkdir(parents=True, exist_ok=True)
+            out_blend = OUT / "files" / "motion_walk.blend"
+            inner.write_text(
+                f'import sys\nsys.path.insert(0, r"{motion}")\nimport retarget_lib\n'
+                f'r = retarget_lib.retarget_bvh(r"{motion / "人物_BVH步态_重定向.blend"}",'
+                f' r"{motion / "bvh" / "02_01.bvh"}", r"{out_blend}", n_frames=24,'
+                f' mode="cycle", action_name="e2e_walk")\nprint("METRICS", r.get("metrics"))\n',
+                encoding="utf-8")
+            p = subprocess.run([r"D:\tools\blender\blender-4.2.23-windows-x64\blender.exe",
+                                "-b", "--factory-startup", "--python", str(inner)],
+                               capture_output=True, timeout=900)
+            log = (p.stdout or b"").decode("utf-8", "replace")
+            line = next((ln.strip() for ln in log.splitlines() if "penetration=" in ln), "")
+            rec("动画 · BVH 走路", p.returncode == 0 and out_blend.is_file(),
+                time.time() - t0, line[:120])
+        except Exception as e:
+            rec("动画 · BVH 走路", False, time.time() - t0, f"{type(e).__name__}: {e}")
+    else:
+        rec("动画 · BVH 走路", False, 0, "缺基础骨架工程（work/research/motion）")
+
+    # 贴图（fast）
+    t0 = time.time()
+    try:
+        spec = importlib.util.spec_from_file_location("paint_asset", ROOT / "tools" / "paint_asset.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        r = mod.paint(model_path, image_path, OUT / "files" / "painted.glb",
+                      texture=1024, view=512, steps=8, fast=True)
+        rec("贴图 · 快速档", r.get("ok", False), time.time() - t0,
+            f"贴图 {r.get('textures')} 张 峰值 {r.get('peak_vram_mib')} MB",
+            file=str(OUT / "files" / "painted.glb") if r.get("ok") else "")
+    except Exception as e:
+        rec("贴图 · 快速档", False, time.time() - t0, f"{type(e).__name__}: {e}")
+
+    # 精修（Direct3D 4 步）
+    t0 = time.time()
+    try:
+        spec = importlib.util.spec_from_file_location("ar", ROOT / "tools" / "asset_refine_rig.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        r = mod.refine(Path(image_path), Path(model_path),
+                       OUT / "files" / "refined.glb", steps=4)
+        d = r.get("debris") or {}
+        rec("精修 · Direct3D 4 步", r.get("ok", False), time.time() - t0,
+            f"碎壳 {d.get('removed_parts','-')}→{d.get('kept_parts','-')} 块", file=r.get("out", ""))
+    except Exception as e:
+        rec("精修 · Direct3D 4 步", False, time.time() - t0, f"{type(e).__name__}: {e}")
+
+
+# ───────────────────────── 4. 用模型修改产物 ─────────────────────────
+
+def step_modify(pipe, image_path: str, model_path: str) -> None:
+    """修改 = 文字改参考图 → 用改后的图重建一次，对比两次的面数/水密。"""
+    from backend import multiview_prompt as mp
+
+    t0 = time.time()
+    edited = ""
+    try:
+        views = {"front": image_path, "back": image_path}
+        edited = mp.generate_reference(views, "只把杯子颜色改成深蓝色，形状和把手完全不变", seed=2026)
+        ok = bool(edited) and Path(edited).is_file()
+        rec("修改 · 文字改参考图", ok, time.time() - t0,
+            Path(edited).name if ok else "无产物", file=keep(edited, "edited_front"))
+    except Exception as e:
+        rec("修改 · 文字改参考图", False, time.time() - t0, f"{type(e).__name__}: {e}")
+        return
+
+    t0 = time.time()
+    try:
+        r = pipe.generate_3d(edited, model_key="hunyuan21", quality_name="快速",
+                             max_facenum=200000, seed=43)
+        ok = bool(getattr(r, "success", False) and r.output_path)
+        info = mesh_info(r.output_path) if ok else {}
+        rec("修改 · 重建 3D", ok, time.time() - t0,
+            f"{info.get('faces','?')}面 水密={info.get('watertight','?')}" if ok
+            else str(getattr(r, "error", ""))[:160],
+            file=keep(r.output_path, "model_after_modify") if ok else "", **info)
+    except Exception as e:
+        rec("修改 · 重建 3D", False, time.time() - t0, f"{type(e).__name__}: {e}")
+
+
+# ───────────────────────── main ─────────────────────────
 
 def main() -> int:
-    OUT.mkdir(parents=True, exist_ok=True)
-    cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
-    cfg["backend"] = {"mode": "auto"}     # 出图走 ComfyUI，建模再切直连
-    cfg["stages"]["image"]["default_model"] = "z_image"
-    tmp = Path(r"C:\Users\mac\AppData\Local\Temp\e2e_cfg.json")
-    tmp.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", default=str(OUT))
+    ap.add_argument("--only", default="image,3d,post,modify")
+    ns = ap.parse_args()
+    global OUT
+    OUT = Path(ns.out)
+    for d in ("files", "logs", "rig"):
+        (OUT / d).mkdir(parents=True, exist_ok=True)
 
-    from backend.pipeline import Pipeline
+    threading.Thread(target=_vram_watch, daemon=True).start()
+    cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
+    image_keys = list(((cfg.get("models") or {}).get("image") or {}).keys())
+    keys_3d = list(((cfg.get("models") or {}).get("3d") or {}).keys())
+    only = {x.strip() for x in ns.only.split(",")}
 
-    rep: dict = {"prompt_zh": PROMPT, "steps": [], "ok": False}
     t_all = time.time()
+    from backend.pipeline import Pipeline
+    pipe = Pipeline(str(ROOT / "config.json"))
 
-    def step(name: str, ok: bool, sec: float, **extra) -> None:
-        rec = {"step": name, "ok": ok, "sec": round(sec, 1), **extra}
-        rep["steps"].append(rec)
-        mark = "OK " if ok else "FAIL"
-        print(f"  [{mark}] {name:<14} {sec:>7.1f}s  "
-              f"{extra.get('detail', '')}", flush=True)
+    imgs: dict[str, str] = {}
+    models: dict[str, str] = {}
+    if "image" in only:
+        imgs = step_images(pipe, image_keys)
+    base_img = imgs.get("qwen21_ref") or next(iter(imgs.values()), "")
+    if not base_img and (OUT / "files").is_dir():
+        cand = sorted((OUT / "files").glob("img_*"))
+        base_img = str(cand[0]) if cand else ""
+    if "3d" in only and base_img:
+        models = step_3d(pipe, base_img, keys_3d)
+    base_model = models.get("hunyuan21") or next(iter(models.values()), "")
+    if "post" in only and base_model:
+        step_post(base_model, base_img, models.get("multiview", ""))
+    if "modify" in only and base_img and base_model:
+        step_modify(pipe, base_img, base_model)
 
-    pipe = Pipeline(str(tmp))
-    print("=" * 70)
-    print("铸想全流程 · LLM 扩写 → 出图 → 建模 → STL")
-    print("=" * 70)
-    print(f"输入: {PROMPT}\n")
-
-    # ── 1. LLM 扩写 ──────────────────────────────────────────
-    print("[1] LLM 扩写")
-    t0 = time.time()
-    enhanced = ""
-    try:
-        enhanced = pipe.enhance_prompt(PROMPT)
-        ok = bool(enhanced) and enhanced != PROMPT
-        step("llm_enhance", ok, time.time() - t0,
-             detail=f"{len(PROMPT)} → {len(enhanced)} 字符",
-             output=enhanced[:400] if ok else "")
-        print(f"        {enhanced[:160]}")
-    except Exception as exc:
-        step("llm_enhance", False, time.time() - t0, detail=f"{type(exc).__name__}: {exc}")
-        traceback.print_exc()
-
-    # ── 2. 出图 ──────────────────────────────────────────────
-    print("\n[2] 出图（z_image）")
-    t0 = time.time()
-    img_path = ""
-    try:
-        imgs = pipe.generate_images(PROMPT, count=1, model_key="z_image",
-                                    quality_name="标准", resolution="1024×1024",
-                                    skip_cache=True)
-        ok = bool(imgs and getattr(imgs[0], "success", False))
-        if ok:
-            img_path = str(imgs[0].output_path)
-            step("image", True, time.time() - t0,
-                 detail=f"{Path(img_path).name} "
-                        f"{Path(img_path).stat().st_size // 1024} KB",
-                 path=img_path)
-        else:
-            step("image", False, time.time() - t0,
-                 detail=str(getattr(imgs[0], "error", "?"))[:120] if imgs else "无返回")
-    except Exception as exc:
-        step("image", False, time.time() - t0, detail=f"{type(exc).__name__}: {exc}")
-        traceback.print_exc()
-
-    # ── 3. 建模（直连 2mini，带后处理）───────────────────────
-    print("\n[3] 建模（2mini 直连 · 512 octree）")
-    glb_path = ""
-    if img_path:
-        cfg["backend"] = {"mode": "direct"}
-        tmp.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
-        pipe2 = Pipeline(str(tmp))
-        t0 = time.time()
-        try:
-            r = pipe2.generate_3d(model_key="hunyuan_mini", quality_name="标准",
-                                  image_path=img_path, octree_override=512)
-            ok = bool(getattr(r, "success", False))
-            if ok:
-                glb_path = str(r.output_path)
-                import trimesh
-                m = trimesh.load(glb_path, force="mesh")
-                d = m.bounds[1] - m.bounds[0]
-                step("mesh", True, time.time() - t0,
-                     detail=f"{len(m.faces):,} 面 · "
-                            f"{d[0]:.2f}×{d[1]:.2f}×{d[2]:.2f} · "
-                            f"厚度 {d[2] / max(d[0], d[1]) * 100:.0f}% · "
-                            f"水密 {bool(m.is_watertight)}",
-                     path=glb_path,
-                     faces=int(len(m.faces)),
-                     thickness_pct=round(float(d[2] / max(d[0], d[1]) * 100), 1),
-                     watertight=bool(m.is_watertight))
-            else:
-                step("mesh", False, time.time() - t0,
-                     detail=str(getattr(r, "error", "?"))[:120])
-        except Exception as exc:
-            step("mesh", False, time.time() - t0, detail=f"{type(exc).__name__}: {exc}")
-            traceback.print_exc()
-    else:
-        step("mesh", False, 0, detail="跳过（没有图）")
-
-    # ── 4. STL ───────────────────────────────────────────────
-    print("\n[4] 导出 STL（水密 + 毫米）")
-    if glb_path:
-        t0 = time.time()
-        try:
-            s = pipe2.export_stl(glb_path, target_size_mm=80)
-            ok = bool(getattr(s, "success", False))
-            if ok:
-                stl = Path(s.output_path)
-                import trimesh
-                m = trimesh.load(str(stl), force="mesh")
-                step("stl", True, time.time() - t0,
-                     detail=f"{stl.name} {stl.stat().st_size // 1024} KB · "
-                            f"{len(m.faces):,} 面 · 水密 {bool(m.is_watertight)} · "
-                            f"尺寸 {m.extents[0]:.0f}×{m.extents[1]:.0f}×{m.extents[2]:.0f} mm",
-                     path=str(stl),
-                     watertight=bool(m.is_watertight),
-                     extents_mm=[round(float(x), 1) for x in m.extents])
-                rep["stl"] = str(stl)
-            else:
-                step("stl", False, time.time() - t0,
-                     detail=str(getattr(s, "error", "?"))[:120])
-        except Exception as exc:
-            step("stl", False, time.time() - t0, detail=f"{type(exc).__name__}: {exc}")
-            traceback.print_exc()
-    else:
-        step("stl", False, 0, detail="跳过（没有模型）")
-
+    _STOP.set()
     total = time.time() - t_all
-    rep["total_sec"] = round(total, 1)
-    rep["ok"] = all(s["ok"] for s in rep["steps"])
-    (OUT / "e2e_report.json").write_text(
-        json.dumps(rep, ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = {"when": time.strftime("%Y-%m-%d %H:%M:%S"), "total_seconds": round(total, 1),
+               "peak_vram_mb": VRAM_PEAK["mb"], "prompt": PROMPT,
+               "image_models": image_keys, "models_3d": keys_3d, "results": RESULTS}
+    (OUT / "report.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                                     encoding="utf-8")
 
-    print("\n" + "=" * 70)
-    okn = sum(1 for s in rep["steps"] if s["ok"])
-    print(f"{okn}/{len(rep['steps'])} 步通过 · 总耗时 {total / 60:.1f} 分钟")
-    print(f"报告: {OUT / 'e2e_report.json'}")
-    print("=" * 70)
-    return 0 if rep["ok"] else 1
+    ok_n = sum(1 for r in RESULTS if r["ok"])
+    lines = [f"# 铸想全链路实测（{payload['when']}）", "",
+             f"总耗时 **{total/60:.1f} 分钟** · 峰值显存 **{VRAM_PEAK['mb']} MB** · "
+             f"成功 {ok_n}/{len(RESULTS)}", "",
+             "| 步骤 | 结果 | 耗时(s) | 峰值显存(MB) | 说明 |", "|---|---|---|---|---|"]
+    for r in RESULTS:
+        lines.append(f"| {r['step']} | {'✓' if r['ok'] else '✗'} | {r['seconds']} | "
+                     f"{r['peak_vram_mb']} | {r['detail'][:90]} |")
+    (OUT / "report.md").write_text("\n".join(lines), encoding="utf-8")
+    print(f"\n  汇总 {ok_n}/{len(RESULTS)} · {total/60:.1f} 分钟 · 峰值 {VRAM_PEAK['mb']} MB")
+    print(f"  报告：{OUT / 'report.md'}")
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

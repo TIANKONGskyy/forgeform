@@ -173,20 +173,55 @@ def _sh(cmd: list[str], cwd: Path | None = None, timeout: int = 3600) -> str:
 
 
 def _clone_pack(log) -> str:
-    target = COMFY / "custom_nodes" / "ComfyUI-3D-Pack"
-    if target.is_dir():
+    """装 ComfyUI-3D-Pack：用 zip（实测 git clone 走 gh-proxy 会卡在 0 字节）。"""
+    import io
+    import zipfile
+
+    import requests
+
+    target = COMFY / "custom_nodes" / "ComfyUI-3D-Pack-main"
+    # 判据必须看真实内容：只认 __init__.py + nodes 目录
+    if (target / "__init__.py").is_file() and (target / "nodes.py").is_file():
         return "已存在"
-    urls = ["https://gh-proxy.com/https://github.com/MrForExample/ComfyUI-3D-Pack.git",
-            "https://ghfast.top/https://github.com/MrForExample/ComfyUI-3D-Pack.git",
-            "https://github.com/MrForExample/ComfyUI-3D-Pack.git"]
+
+    dst = COMFY / "custom_nodes"
+    dst.mkdir(parents=True, exist_ok=True)
+    keep = target / "Checkpoints"
+    tmp_keep = Path(os.environ.get("TEMP", ".")) / "ff_ckpt_keep"
+    if keep.is_dir():
+        if tmp_keep.exists():
+            shutil.rmtree(tmp_keep, ignore_errors=True)
+        shutil.move(str(keep), str(tmp_keep))
+
+    urls = [
+        "https://gh-proxy.com/https://codeload.github.com/MrForExample/ComfyUI-3D-Pack/zip/refs/heads/main",
+        "https://ghfast.top/https://codeload.github.com/MrForExample/ComfyUI-3D-Pack/zip/refs/heads/main",
+    ]
     err = ""
     for u in urls:
         try:
-            _sh(["git", "clone", "--depth", "1", u, str(target)], timeout=1800)
-            return u
+            log(f"    zip {u.split('/')[2]} ...")
+            r = requests.get(u, timeout=300, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code != 200:
+                raise RuntimeError(f"HTTP {r.status_code}")
+            z = zipfile.ZipFile(io.BytesIO(r.content))
+            top = z.namelist()[0].split("/")[0]
+            z.extractall(dst)
+            ext = dst / top
+            if ext != target:
+                if target.exists():
+                    shutil.rmtree(target, ignore_errors=True)
+                ext.rename(target)
+            if tmp_keep.exists():
+                dest = target / "Checkpoints"
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if dest.exists():
+                    shutil.rmtree(dest, ignore_errors=True)
+                shutil.move(str(tmp_keep), str(dest))
+            return f"zip {len(r.content)//1024//1024} MB"
         except Exception as e:
-            err = str(e)
-            log(f"  clone 失败（{u.split('/')[2]}）：{str(e)[:100]}")
+            err = f"{type(e).__name__}: {e}"
+            log(f"    ✗ {err}")
     raise RuntimeError(err)
 
 
@@ -263,6 +298,69 @@ def _install_comfy_source(log) -> str:
         _sh([interp, "-m", "pip", "install", "-q", "-i", el, "-r", str(req)],
             timeout=3600)
     return "源码安装完成"
+
+# 3D-Pack 需要的纯 Python 依赖；编译型 CUDA 包（spconv/cumm/slangtorch/nerfacc）
+# 在 Windows + 新版 torch 上极易失败，单独探测并提示
+PACK_PIP = [
+    "cmake", "ninja", "pccm", "PyGithub", "requests", "numpy", "einops", "scipy",
+    "kornia", "opencv-python", "pillow", "diffusers", "transformers", "safetensors",
+    "open_clip_torch", "torchmetrics", "pytorch_msssim", "pytorch-lightning", "peft",
+    "rembg", "onnxruntime", "imageio", "imageio-ffmpeg", "matplotlib", "trimesh",
+    "fast-simplification", "plyfile", "pygltflib", "xatlas", "pymeshlab", "gpytoolbox",
+    "PyMCubes", "pyvista", "pymeshfix", "igraph", "open3d", "torchtyping", "tqdm",
+    "jaxtyping", "packaging", "OmegaConf", "pyhocon", "iopath", "easydict", "mmgp",
+]
+
+
+def _install_pack_deps(log) -> str:
+    """装 3D-Pack 依赖 + 两个 git 依赖（kiui/utils3d，用 zip 装）。
+
+    2026-11-28 实测：3D-Pack 的 requirements 里有 spconv-cu126 / cumm / slangtorch /
+    nerfacc 这些需要现场编译的 CUDA 包，Windows + torch2.6 基本编不过；
+    而 Hunyuan3D 图生 3D 只用得到纯 Python 那部分，所以这里只装纯 Python 依赖，
+    并把缺的编译包列出来提示用户。
+    """
+    import importlib
+
+    from backend import downloader as dl
+
+    el = os.environ.get("PIP_INDEX_URL") or "https://pypi.tuna.tsinghua.edu.cn/simple"
+    _sh([sys.executable, "-m", "pip", "install", "-q", "-i", el] + PACK_PIP, timeout=3600)
+
+    # kiui / utils3d 只有 GitHub，走 zip
+    deps = Path(os.environ.get("TEMP", ".")) / "ff_pack_deps"
+    deps.mkdir(parents=True, exist_ok=True)
+    for name, url in (
+        ("kiui", "https://gh-proxy.com/https://codeload.github.com/ashawkey/kiuikit/zip/refs/heads/main"),
+        ("utils3d", "https://gh-proxy.com/https://codeload.github.com/EasternJournalist/utils3d/zip/refs/heads/main"),
+    ):
+        try:
+            importlib.import_module(name)
+            continue
+        except Exception:
+            pass
+        zpath = deps / f"{name}.zip"
+        res = dl.download({"name": name, "url": url, "dest": str(zpath)}, dl.Meter(), conns=2)
+        if not res.get("ok"):
+            log(f"    ✗ {name} 下载失败")
+            continue
+        import zipfile
+        with zipfile.ZipFile(zpath) as z:
+            z.extractall(deps / name)
+        sub = next((p for p in (deps / name).iterdir() if p.is_dir()), None)
+        if sub:
+            _sh([sys.executable, "-m", "pip", "install", "-q", str(sub)], timeout=1800)
+
+    missing = []
+    for m in ("spconv", "cumm", "slangtorch", "nerfacc", "torch_scatter"):
+        try:
+            importlib.import_module(m)
+        except Exception:
+            missing.append(m)
+    if missing:
+        log(f"    ⚠ 缺编译型 CUDA 包：{', '.join(missing)}（Windows 上难编；缺它们只影响部分节点）")
+    return "ok"
+
 
 def _extract_archive(log) -> str:
     """解压 ComfyUI 便携版（7z 用 7z.exe，zip 用 Python）。"""
@@ -368,7 +466,8 @@ def main(argv=None) -> int:
     jobs = [
         ("下载权重", download_task, []),
         comfy_job,
-        ("3D-Pack 仓库", lambda: _clone_pack(log), []),
+        ("3D-Pack 仓库", lambda: _clone_pack(log), ["安装 ComfyUI(源码)"]),
+        ("3D-Pack 依赖", lambda: _install_pack_deps(log), ["3D-Pack 仓库"]),
         ("铸想依赖(pip)", _pip_main, []),
     ]
     out = runner.run(jobs)
