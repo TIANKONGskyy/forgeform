@@ -167,8 +167,8 @@ def build_sidebar(state: dict) -> str:
     phase_txt = PHASE_CN.get(phase, phase)
     phase_done = phase in ("stl", "done")
 
-    steps = [("confirm", "🎨", "图片"), ("selecting", "🖼", "选图"),
-             ("3d", "🧊", "3D"), ("stl", "📦", "STL")]
+    steps = [("confirm", "◐", "图片"), ("selecting", "◈", "选图"),
+             ("3d", "◇", "3D"), ("stl", "▤", "STL")]
     order = ["empty", "confirm", "generating", "selecting", "editing", "3d", "stl", "done"]
     cur = order.index(phase) if phase in order else 0
 
@@ -224,17 +224,17 @@ def build_sidebar(state: dict) -> str:
         sel = cands[0] if cands else ""
     u = _furl(sel)
     if u:
-        rows.append(("🖼", "选中图", _fsize(sel), u))
+        rows.append(("◈", "选中图", _fsize(sel), u))
 
     glb = state.get("glb_path", "")
     u = _furl(glb)
     if u:
-        rows.append(("🧊", "3D 模型 .glb", _fsize(glb), u))
+        rows.append(("◇", "3D 模型 .glb", _fsize(glb), u))
 
     stl = state.get("stl_path", "")
     u = _furl(stl)
     if u:
-        rows.append(("📦", "打印模型 .stl", _fsize(stl), u))
+        rows.append(("▤", "打印模型 .stl", _fsize(stl), u))
 
     # ★ 2026-11-15：模型详情（厂商/量化/框架/本机实测耗时）。
     #   之前只显示名字，用户不知道 Q5_K_M 是几 bit、哪个公司的、跑一张要多久。
@@ -360,7 +360,10 @@ def build_sidebar(state: dict) -> str:
 # ══════════════════════════════════════════════════════════════════
 # CSS
 # ══════════════════════════════════════════════════════════════════
+# 视觉系统 v2（2026-11-27）：creative.css 保留结构基础，forgeform.css 接管全部视觉
 CSS = (ROOT / "ui" / "creative.css").read_text(encoding="utf-8")
+CSS += "\n\n/* ── forgeform.css (v2 design system) ── */\n"
+CSS += (ROOT / "ui" / "forgeform.css").read_text(encoding="utf-8")
 
 
 THEME_JS = r"""() => {
@@ -1386,14 +1389,14 @@ def build():
         with gr.Row(elem_classes="main-wrap"):
             # 对话区（宽，占主视觉）
             # 左列：产物库（常驻）。所有能力产物自动入库，点「打开」直接进查看器
-            with gr.Column(scale=2, min_width=200, elem_classes="asset-col"):
+            with gr.Column(scale=2, min_width=236, elem_classes="asset-col"):
                 asset_side = gr.HTML(asset_ui.sidebar_html(), elem_id="asset_side")
                 asset_pick = gr.Dropdown(choices=asset_ui.choices(), value=None,
-                                         label="选择产物", show_label=True,
+                                         label="", show_label=False,
                                          container=False, elem_id="asset_pick")
                 with gr.Row(elem_classes="asset-actions"):
                     asset_refresh = gr.Button("刷新", size="sm", elem_id="asset_refresh")
-                    asset_open = gr.Button("打开", size="sm", variant="secondary",
+                    asset_open = gr.Button("打开选中", size="sm", variant="secondary",
                                            elem_id="asset_open")
             with gr.Column(scale=7, min_width=300, elem_classes="chat-col"):
                 # 欢迎页（空对话时显示）

@@ -1,0 +1,673 @@
+/* ══════════════════════════════════════════════════════════════════
+   铸想 ForgeForm · 视觉系统 v2（2026-11-27 整体重建）
+   --------------------------------------------------------------
+   设计目标：一个体系，而不是一堆补丁。
+     1. 一套 token（颜色/间距/圆角/阴影/字阶），全站只引用 token
+     2. 深色为默认，浅色为主题变体（同一套 token 换值）
+     3. "贴图" = 纯 CSS 生成的三层底纹（网格 / 光晕 / 噪点），不加载图片
+     4. 动效只动 transform / opacity（不动 background-position，避免回流与白带）
+     5. 每个组件只有一种"正确长相"，不叠多套覆盖
+
+   加载顺序：creative.css（结构基础）→ 本文件（视觉接管）
+   ══════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* 底色四层：页面 → 面板 → 卡片 → 悬浮 */
+  --ff-bg: #080b12;
+  --ff-bg-2: #0c111a;
+  --ff-panel: #121926;
+  --ff-panel-2: #172031;
+  --ff-line: #223049;
+  --ff-line-soft: #1a2436;
+
+  /* 文字三阶 */
+  --ff-text: #e9eefb;
+  --ff-text-2: #b8c4da;
+  --ff-muted: #7f8da6;
+
+  /* 主色（violet）与辅色（cyan），只用于强调、边框、渐变 */
+  --ff-accent: #8b7cff;
+  --ff-accent-2: #4cc9f0;
+  --ff-ok: #3ddc97;
+  --ff-warn: #ffb454;
+  --ff-err: #ff6b81;
+
+  /* 形状 */
+  --ff-r-sm: 8px;
+  --ff-r: 12px;
+  --ff-r-lg: 18px;
+  --ff-r-pill: 999px;
+
+  /* 阴影：只用两级，避免到处发光 */
+  --ff-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  --ff-shadow-sm: 0 2px 10px rgba(0, 0, 0, .25);
+
+  /* 字阶 */
+  --ff-fs-xs: 11px;
+  --ff-fs-sm: 12.5px;
+  --ff-fs: 14px;
+  --ff-fs-lg: 17px;
+  --ff-fs-xl: 22px;
+
+  /* 间距 */
+  --ff-gap: 14px;
+  --ff-pad: 18px;
+}
+
+body[data-ff-theme="light"] {
+  --ff-bg: #f6f8fc;
+  --ff-bg-2: #eef2f9;
+  --ff-panel: #ffffff;
+  --ff-panel-2: #f7f9fd;
+  --ff-line: #dde5f0;
+  --ff-line-soft: #e8eef7;
+  --ff-text: #16202f;
+  --ff-text-2: #3d4c63;
+  --ff-muted: #6b7c94;
+  --ff-accent: #6b5cf6;
+  --ff-accent-2: #0ea5c9;
+  --ff-shadow: 0 10px 24px rgba(22, 32, 47, .08);
+  --ff-shadow-sm: 0 2px 8px rgba(22, 32, 47, .06);
+}
+
+/* ── 底纹（"贴图"）：网格 + 双光晕 + 极轻噪点 ───────────────── */
+body,
+.gradio-container {
+  background-color: var(--ff-bg) !important;
+  color: var(--ff-text) !important;
+  font-family: "Inter", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif !important;
+  font-size: var(--ff-fs) !important;
+  letter-spacing: .01em !important;
+}
+
+body::before {
+  content: "" !important;
+  position: fixed !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+  z-index: 0 !important;
+  background:
+    radial-gradient(900px 520px at 12% -8%, color-mix(in srgb, var(--ff-accent) 16%, transparent), transparent 70%),
+    radial-gradient(760px 460px at 92% 6%, color-mix(in srgb, var(--ff-accent-2) 12%, transparent), transparent 72%),
+    linear-gradient(180deg, var(--ff-bg-2), var(--ff-bg) 42%);
+}
+
+body::after {
+  content: "" !important;
+  position: fixed !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+  z-index: 0 !important;
+  opacity: .5 !important;
+  /* 细网格：1px 线，24px 一格 —— 这就是本项目的"材质" */
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--ff-line) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--ff-line) 55%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(120% 90% at 50% 0%, #000 30%, transparent 78%);
+}
+
+.gradio-container {
+  position: relative !important;
+  z-index: 1 !important;
+  max-width: 1520px !important;
+  margin: 0 auto !important;
+  padding: 18px 26px 40px !important;
+}
+
+/* ── 顶栏 ─────────────────────────────────────────────────── */
+.navbar {
+  align-items: center !important;
+  gap: var(--ff-gap) !important;
+  padding: 12px 18px !important;
+  margin-bottom: 16px !important;
+  border: 1px solid var(--ff-line-soft) !important;
+  border-radius: var(--ff-r-lg) !important;
+  background: color-mix(in srgb, var(--ff-panel) 82%, transparent) !important;
+  backdrop-filter: blur(14px) !important;
+  box-shadow: var(--ff-shadow-sm) !important;
+}
+
+.nav-logo {
+  font-size: var(--ff-fs-lg) !important;
+  font-weight: 700 !important;
+  letter-spacing: .16em !important;
+  color: var(--ff-text) !important;
+}
+
+.nav-logo .dot {
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 50% !important;
+  background: linear-gradient(135deg, var(--ff-accent), var(--ff-accent-2)) !important;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ff-accent) 16%, transparent) !important;
+}
+
+/* 下拉 / 输入 */
+#history_dd,
+#img_model_dd,
+#model_3d_dd,
+#asset_pick,
+#mo_bvh {
+  border: 1px solid var(--ff-line) !important;
+  border-radius: var(--ff-r) !important;
+  background: var(--ff-panel-2) !important;
+  box-shadow: none !important;
+}
+
+#history_dd input,
+#img_model_dd input,
+#model_3d_dd input,
+#asset_pick input {
+  background: transparent !important;
+  color: var(--ff-text) !important;
+  font-size: var(--ff-fs-sm) !important;
+}
+
+/* ── 主区三列 ─────────────────────────────────────────────── */
+.main-wrap {
+  gap: var(--ff-gap) !important;
+  align-items: flex-start !important;
+  padding-top: 0 !important;
+}
+
+/* 左列：产物库 */
+.asset-col {
+  position: sticky !important;
+  top: 12px !important;
+  padding: var(--ff-pad) !important;
+  border: 1px solid var(--ff-line-soft) !important;
+  border-radius: var(--ff-r-lg) !important;
+  background: color-mix(in srgb, var(--ff-panel) 86%, transparent) !important;
+  backdrop-filter: blur(10px) !important;
+  box-shadow: var(--ff-shadow-sm) !important;
+}
+
+.asset-col .ast-head {
+  border-bottom: 1px solid var(--ff-line) !important;
+  padding-bottom: 10px !important;
+}
+
+.asset-col .ast-title {
+  font-size: var(--ff-fs-sm) !important;
+  letter-spacing: .14em !important;
+  color: var(--ff-text) !important;
+}
+
+.asset-col .ast-count {
+  font-size: var(--ff-fs-xs) !important;
+  color: var(--ff-muted) !important;
+}
+
+.asset-col .ast-list {
+  gap: 2px !important;
+  padding-top: 8px !important;
+  max-height: min(54vh, 470px) !important;
+}
+
+.asset-col .ast-item {
+  border: 0 !important;
+  border-left: 2px solid var(--k) !important;
+  border-radius: var(--ff-r-sm) !important;
+  background: transparent !important;
+  padding: 8px 9px !important;
+  transition: background .16s ease, transform .16s ease !important;
+}
+
+.asset-col .ast-item:hover {
+  background: color-mix(in srgb, var(--ff-accent) 10%, var(--ff-panel-2)) !important;
+  transform: translateX(2px) !important;
+}
+
+.asset-col .ast-name {
+  font-size: var(--ff-fs-sm) !important;
+  color: var(--ff-text) !important;
+}
+
+.asset-col .ast-meta {
+  font-size: var(--ff-fs-xs) !important;
+  color: var(--ff-muted) !important;
+}
+
+.asset-col .ast-glyph {
+  font-size: 12px !important;
+  opacity: .95 !important;
+}
+
+.asset-col .ast-head + .ast-list + .asset-actions,
+.asset-col .asset-actions {
+  margin-top: 10px !important;
+  gap: 8px !important;
+}
+
+/* 中列：对话 */
+.chat-col {
+  gap: 12px !important;
+}
+
+#chatbox {
+  border: 1px solid var(--ff-line-soft) !important;
+  border-radius: var(--ff-r-lg) !important;
+  background: color-mix(in srgb, var(--ff-panel) 78%, transparent) !important;
+  box-shadow: var(--ff-shadow-sm) !important;
+  padding: 6px !important;
+}
+
+#chatbox .message {
+  border-radius: var(--ff-r) !important;
+  border: 1px solid transparent !important;
+  padding: 12px 14px !important;
+  font-size: var(--ff-fs) !important;
+  line-height: 1.85 !important;
+}
+
+#chatbox .message.bot {
+  background: var(--ff-panel-2) !important;
+  border-color: var(--ff-line-soft) !important;
+  color: var(--ff-text) !important;
+}
+
+#chatbox .message.user {
+  background: linear-gradient(135deg,
+      color-mix(in srgb, var(--ff-accent) 18%, var(--ff-panel-2)),
+      color-mix(in srgb, var(--ff-accent-2) 14%, var(--ff-panel-2))) !important;
+  border-color: color-mix(in srgb, var(--ff-accent) 30%, transparent) !important;
+  color: var(--ff-text) !important;
+}
+
+#chatbox .message p,
+#chatbox .message li {
+  color: inherit !important;
+  line-height: 1.85 !important;
+}
+
+/* 输入行 */
+#chat_input textarea {
+  background: var(--ff-panel-2) !important;
+  border: 1px solid var(--ff-line) !important;
+  border-radius: var(--ff-r) !important;
+  color: var(--ff-text) !important;
+  font-size: var(--ff-fs) !important;
+  padding: 12px 14px !important;
+}
+
+#chat_input textarea:focus {
+  border-color: color-mix(in srgb, var(--ff-accent) 55%, var(--ff-line)) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ff-accent) 16%, transparent) !important;
+}
+
+#send_btn {
+  background: linear-gradient(135deg, var(--ff-accent), var(--ff-accent-2)) !important;
+  color: #0a0e17 !important;
+  border: 0 !important;
+  border-radius: var(--ff-r) !important;
+  font-weight: 700 !important;
+  font-size: var(--ff-fs-sm) !important;
+  min-width: 78px !important;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--ff-accent) 28%, transparent) !important;
+  transition: transform .16s ease, box-shadow .16s ease !important;
+}
+
+#send_btn:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--ff-accent) 34%, transparent) !important;
+}
+
+/* 参考图面板 */
+.reference-panel {
+  border: 1px solid var(--ff-line-soft) !important;
+  border-radius: var(--ff-r-lg) !important;
+  background: color-mix(in srgb, var(--ff-panel) 72%, transparent) !important;
+  padding: 14px 16px !important;
+}
+
+.reference-title strong {
+  font-size: var(--ff-fs-sm) !important;
+  color: var(--ff-text) !important;
+}
+
+.reference-title span {
+  font-size: var(--ff-fs-xs) !important;
+  color: var(--ff-muted) !important;
+}
+
+#ref_up,
+#btn_edit_submit,
+#btn_model {
+  border-radius: var(--ff-r) !important;
+  font-size: var(--ff-fs-sm) !important;
+  white-space: nowrap !important;
+}
+
+/* 动作按钮 */
+.action-bar {
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+}
+
+.action-bar button {
+  border-radius: var(--ff-r) !important;
+  border: 1px solid var(--ff-line) !important;
+  background: var(--ff-panel-2) !important;
+  color: var(--ff-text) !important;
+  font-size: var(--ff-fs-sm) !important;
+  padding: 9px 14px !important;
+  transition: border-color .16s ease, background .16s ease, transform .16s ease !important;
+}
+
+.action-bar button:hover {
+  border-color: color-mix(in srgb, var(--ff-accent) 45%, var(--ff-line)) !important;
+  transform: translateY(-1px) !important;
+}
+
+.action-bar button.primary,
+#btn_gen,
+#btn_adopt {
+  background: linear-gradient(135deg, var(--ff-accent), var(--ff-accent-2)) !important;
+  border: 0 !important;
+  color: #0a0e17 !important;
+  font-weight: 600 !important;
+}
+
+/* 精度档 / 模型栏 */
+#quality_radio {
+  gap: 6px !important;
+}
+
+#quality_radio label {
+  border: 1px solid var(--ff-line) !important;
+  border-radius: var(--ff-r-pill) !important;
+  background: transparent !important;
+  color: var(--ff-muted) !important;
+  font-size: var(--ff-fs-xs) !important;
+  padding: 6px 13px !important;
+  transition: color .16s ease, border-color .16s ease, background .16s ease !important;
+}
+
+#quality_radio label:has(input:checked) {
+  border-color: color-mix(in srgb, var(--ff-accent) 60%, var(--ff-line)) !important;
+  background: color-mix(in srgb, var(--ff-accent) 14%, transparent) !important;
+  color: var(--ff-text) !important;
+}
+
+#btn_calib {
+  border: 1px dashed var(--ff-line) !important;
+  border-radius: var(--ff-r) !important;
+  background: transparent !important;
+  color: var(--ff-muted) !important;
+  font-size: var(--ff-fs-xs) !important;
+}
+
+/* 3D 查看器 */
+#glb_viewer {
+  border: 1px solid var(--ff-line-soft) !important;
+  border-radius: var(--ff-r-lg) !important;
+  background:
+    radial-gradient(60% 60% at 50% 42%, color-mix(in srgb, var(--ff-accent) 9%, transparent), transparent 70%),
+    var(--ff-panel-2) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ff-line) 50%, transparent) !important;
+}
+
+/* 右列：状态 */
+.side-col {
+  padding: 0 !important;
+}
+
+.sidebar {
+  border: 1px solid var(--ff-line-soft) !important;
+  border-radius: var(--ff-r-lg) !important;
+  background: color-mix(in srgb, var(--ff-panel) 86%, transparent) !important;
+  backdrop-filter: blur(10px) !important;
+  padding: var(--ff-pad) !important;
+  box-shadow: var(--ff-shadow-sm) !important;
+}
+
+.sb-title {
+  font-size: var(--ff-fs-sm) !important;
+  letter-spacing: .08em !important;
+}
+
+.phase-badge {
+  border: 1px solid color-mix(in srgb, var(--ff-accent) 40%, var(--ff-line)) !important;
+  border-radius: var(--ff-r-pill) !important;
+  background: color-mix(in srgb, var(--ff-accent) 12%, transparent) !important;
+  color: var(--ff-text) !important;
+  font-size: var(--ff-fs-xs) !important;
+  padding: 3px 10px !important;
+}
+
+.sb-sec {
+  border-top: 1px solid var(--ff-line-soft) !important;
+  padding-top: 12px !important;
+  margin-top: 12px !important;
+}
+
+.sb-label {
+  font-size: var(--ff-fs-xs) !important;
+  letter-spacing: .12em !important;
+  color: var(--ff-muted) !important;
+  text-transform: uppercase !important;
+}
+
+.sidebar .kv .k {
+  color: var(--ff-muted) !important;
+  font-size: var(--ff-fs-xs) !important;
+}
+
+.sidebar .kv .v {
+  color: var(--ff-text-2) !important;
+  font-size: var(--ff-fs-sm) !important;
+}
+
+.sidebar details > summary {
+  color: var(--ff-muted) !important;
+  font-size: var(--ff-fs-xs) !important;
+  letter-spacing: .06em !important;
+}
+
+/* 能力台（折叠区）统一外观 */
+.edit-accordion,
+.gradio-accordion {
+  border: 1px solid var(--ff-line-soft) !important;
+  border-radius: var(--ff-r-lg) !important;
+  background: color-mix(in srgb, var(--ff-panel) 76%, transparent) !important;
+}
+
+.edit-accordion > button,
+.gradio-accordion > button {
+  font-size: var(--ff-fs-sm) !important;
+  color: var(--ff-text-2) !important;
+  background: transparent !important;
+}
+
+/* 标签页（能力台内部）*/
+.tab-nav button {
+  font-size: var(--ff-fs-sm) !important;
+  color: var(--ff-muted) !important;
+  border-radius: var(--ff-r) var(--ff-r) 0 0 !important;
+}
+
+.tab-nav button.selected {
+  color: var(--ff-text) !important;
+  border-bottom: 2px solid var(--ff-accent) !important;
+}
+
+/* 产物库整页卡片 */
+.ast-group h3 {
+  font-size: var(--ff-fs-sm) !important;
+  letter-spacing: .04em !important;
+}
+
+.ast-card {
+  border: 1px solid var(--ff-line-soft) !important;
+  border-top: 2px solid var(--k) !important;
+  border-radius: var(--ff-r) !important;
+  background: var(--ff-panel-2) !important;
+  transition: transform .16s ease, border-color .16s ease !important;
+}
+
+.ast-card:hover {
+  transform: translateY(-2px) !important;
+  border-color: color-mix(in srgb, var(--k) 45%, var(--ff-line)) !important;
+}
+
+.ast-card-name {
+  font-size: var(--ff-fs-sm) !important;
+  color: var(--ff-text) !important;
+}
+
+.ast-card-meta,
+.ast-card-time {
+  color: var(--ff-muted) !important;
+  font-size: var(--ff-fs-xs) !important;
+}
+
+/* 文件 / 进度等零散件 */
+#stl_file,
+.file-preview {
+  border: 1px solid var(--ff-line-soft) !important;
+  border-radius: var(--ff-r) !important;
+  background: var(--ff-panel-2) !important;
+}
+
+/* 滚动条：细、暗、不抢戏 */
+* {
+  scrollbar-width: thin !important;
+  scrollbar-color: var(--ff-line) transparent !important;
+}
+
+*::-webkit-scrollbar {
+  width: 8px !important;
+  height: 8px !important;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--ff-line) !important;
+  border-radius: 99px !important;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+/* 浅色主题微调（底纹弱化，避免灰雾）*/
+body[data-ff-theme="light"]::before {
+  background:
+    radial-gradient(900px 520px at 10% -10%, color-mix(in srgb, var(--ff-accent) 10%, transparent), transparent 70%),
+    radial-gradient(760px 460px at 92% 4%, color-mix(in srgb, var(--ff-accent-2) 9%, transparent), transparent 72%),
+    linear-gradient(180deg, #ffffff, var(--ff-bg) 46%);
+}
+
+body[data-ff-theme="light"]::after {
+  opacity: .28 !important;
+}
+
+/* 响应式：<1200 收成两列，<860 收成单列 */
+@media (max-width: 1200px) {
+  .main-wrap {
+    flex-wrap: wrap !important;
+  }
+
+  .asset-col {
+    position: static !important;
+    order: 2 !important;
+    flex: 1 1 100% !important;
+    max-width: 100% !important;
+  }
+
+  .asset-col .ast-list {
+    max-height: 190px !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .gradio-container {
+    padding: 12px 14px 28px !important;
+  }
+
+  .chat-col,
+  .side-col {
+    flex: 1 1 100% !important;
+    max-width: 100% !important;
+  }
+
+  .navbar {
+    flex-wrap: wrap !important;
+  }
+}
+
+
+/* ── 收尾：标签与形符细节（2026-11-27）─────────────────── */
+#asset_pick label,
+#mo_bvh label,
+#img_model_dd label,
+#model_3d_dd label {
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--ff-muted) !important;
+  font-size: var(--ff-fs-xs) !important;
+  letter-spacing: .1em !important;
+  padding: 0 2px !important;
+}
+
+#asset_pick .wrap,
+#asset_pick .secondary-wrap {
+  border: 1px solid var(--ff-line) !important;
+  border-radius: var(--ff-r) !important;
+  background: var(--ff-panel-2) !important;
+}
+
+/* 侧栏链路进度：字形放大、当前步高亮 */
+.sidebar .flow,
+.sidebar .chain,
+.sidebar [class*="flow"] .step,
+.sidebar [class*="chain"] .step {
+  font-size: 15px !important;
+  color: var(--ff-text-2) !important;
+  opacity: 1 !important;
+}
+
+.sidebar [class*="flow"] .active,
+.sidebar [class*="chain"] .active {
+  color: var(--ff-accent) !important;
+}
+
+/* 查看器悬浮：轻微上浮，暗示可交互 */
+#glb_viewer:hover {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ff-accent) 30%, transparent),
+    0 12px 32px rgba(0, 0, 0, .28) !important;
+  transition: box-shadow .2s ease !important;
+}
+
+/* 主容器顶部一条极细渐变，作为品牌线 */
+.gradio-container::before {
+  content: "" !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: 2px !important;
+  z-index: 5 !important;
+  background: linear-gradient(90deg, transparent,
+      color-mix(in srgb, var(--ff-accent) 70%, transparent),
+      color-mix(in srgb, var(--ff-accent-2) 70%, transparent), transparent) !important;
+  opacity: .8 !important;
+  pointer-events: none !important;
+}
+
+
+/* 链路进度（实际结构 .pipe-row / .pipe-step） */
+.pipe-row{display:flex!important;align-items:flex-start!important;gap:6px!important;
+ margin-top:8px!important;font-size:14px!important;color:var(--ff-text-2)!important}
+.pipe-row>div{text-align:center!important;line-height:1.5!important}
+.pipe-row>div small{font-size:10.5px!important;color:var(--ff-muted)!important;letter-spacing:.04em!important}
+.pipe-row .done,.pipe-row .active{color:var(--ff-accent)!important}
+.pipe-row .active{text-shadow:0 0 12px color-mix(in srgb,var(--ff-accent) 55%,transparent)!important}
+.pipe-arrow{color:var(--ff-line)!important;font-size:11px!important;margin-top:2px!important}
+
+/* 产物库下拉：Gradio 的 label 用 .label-wrap 包裹，直接打掉它的白底 */
+#asset_pick .label-wrap,#asset_pick label{background:transparent!important;border:0!important}
+#asset_pick .label-wrap span,#asset_pick label span{color:var(--ff-muted)!important;
+ font-size:var(--ff-fs-xs)!important;letter-spacing:.1em!important}
+#asset_pick{background:transparent!important;border:0!important}
+#asset_pick .wrap-inner,#asset_pick .wrap{background:var(--ff-panel-2)!important}
