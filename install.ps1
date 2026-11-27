@@ -33,7 +33,7 @@ $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 
 $Repo = 'TIANKONGskyy/forgeform'
-$PinnedTag = 'v3.8.8'
+$PinnedTag = 'v3.9.0'
 $TimeoutSec = 30      # per source; github.com direct must not hang for 3 minutes
 
 function Say($msg, $color = 'Cyan') { Write-Host $msg -ForegroundColor $color }
@@ -55,21 +55,18 @@ if ([version]$pyVer -lt [version]'3.10') {
 
 # --- 1. resolve tag --------------------------------------------------------
 if (-not $Tag) {
+    # 解析最新版本：用 releases 列表 API（`/releases/latest` 会被 gh-proxy 缓存住旧值，
+    # 实测拿到 v3.8.9 而实际最新是 v3.9.0 —— 2026-11-28）
     $Tag = $PinnedTag
+    $api = "https://gh-proxy.com/https://api.github.com/repos/$Repo/releases?per_page=5&x=$(Get-Random)"
     try {
-        $probe = "https://gh-proxy.com/https://github.com/$Repo/releases/latest"
-        $resp = Invoke-WebRequest -Uri $probe -MaximumRedirection 0 -ErrorAction SilentlyContinue -UseBasicParsing -TimeoutSec $TimeoutSec
-        if ($resp.Headers.Location) {
-            $m = [regex]::Match($resp.Headers.Location, '/tag/(v[0-9.]+)')
-            if ($m.Success) { $Tag = $m.Groups[1].Value }
+        $resp = Invoke-WebRequest -Uri $api -UseBasicParsing -TimeoutSec $TimeoutSec
+        $rels = $resp.Content | ConvertFrom-Json
+        foreach ($r in $rels) {
+            if (-not $r.draft -and -not $r.prerelease -and $r.tag_name) { $Tag = $r.tag_name; break }
         }
     } catch {
-        # 3xx is expected here; PS throws on MaximumRedirection 0 in some versions
-        if ($_.Exception.Response -and $_.Exception.Response.Headers.Location) {
-            $loc = $_.Exception.Response.Headers.Location.ToString()
-            $m = [regex]::Match($loc, '/tag/(v[0-9.]+)')
-            if ($m.Success) { $Tag = $m.Groups[1].Value }
-        }
+        Say '  (无法解析最新版本，用内置的 pin)' 'DarkGray'
     }
 }
 Say "release tag: $Tag"
