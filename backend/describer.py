@@ -5,7 +5,7 @@
 会把 num_predict 预算吃光 → response/content 为空 → 上层走兜底模板。
 所以这里统一按配置传 think/num_predict，并在"正文为空"时自动降档重试一次。
 """
-import subprocess, threading, json, time, re
+import os, subprocess, threading, json, time, re
 from pathlib import Path
 
 
@@ -122,7 +122,13 @@ def _call_ollama(prompt: str, timeout: int = 60, json_mode: bool = False) -> str
         # 返回非 JSON 文本 → agent 解析失败 → 优雅回退关键词路径（不崩、不抢显存）。
         print("[DSH] 微调训练进行中，拒绝加载对话模型（避免抢显存）")
         return "[训练进行中，对话模型暂时不可用]"
-    if _agent_cfg_light().get("provider") == "strata":
+    prov = _agent_cfg_light().get("provider") or ""
+    if prov == "remote" or (prov in ("", "auto") and remote_ready()):
+        out = _call_remote(prompt, timeout=timeout, json_mode=json_mode)
+        if out:
+            return out
+        # 远程不通就继续走本地降级（没装本地时最终会返回安全模板，不会崩）
+    if prov == "strata":
         return _call_strata(prompt, timeout=timeout, json_mode=json_mode)
     p = _profile()
     try:
@@ -289,6 +295,65 @@ use the English name so the diffusion model recognises the IP.
 If you are NOT confident the IP is well-known, follow the ★★★ rule above instead —
 describing appearance from the user's words, without claiming canon accuracy."""
 
+
+
+# ── 远程 OpenAI 兼容通道（2026-11-27：不装本地模型也能对话）───────────────
+def _remote_cfg() -> dict:
+    """config.json → models.llm.remote = {base_url, model, api_key_env, timeout}"""
+    return (LLM_CFG.get("remote") or {}) if isinstance(LLM_CFG, dict) else {}
+
+
+def _remote_key(rc: dict) -> str:
+    """密钥优先取环境变量，其次 `.secrets`（不写进 config）。"""
+    env = rc.get("api_key_env") or "FORGEFORM_LLM_KEY"
+    key = os.environ.get(env, "").strip()
+    if key:
+        return key
+    try:
+        from . import secrets as S
+        key = (S.get_secret(env) or "") if hasattr(S, "get_secret") else ""
+        return key or ""
+    except Exception:
+        return ""
+
+
+def remote_ready() -> bool:
+    rc = _remote_cfg()
+    return bool(rc.get("base_url") and rc.get("model"))
+
+
+def _call_remote(prompt: str, timeout: int = 120, json_mode: bool = False) -> str:
+    """OpenAI 兼容 /chat/completions。失败返回空串，让上层走降级。"""
+    rc = _remote_cfg()
+    base = (rc.get("base_url") or "").rstrip("/")
+    if not base:
+        return ""
+    url = base + ("/chat/completions" if base.endswith("/v1") else "/v1/chat/completions")
+    body = {
+        "model": rc.get("model"),
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": float(rc.get("temperature", 0.4)),
+        "max_tokens": int(rc.get("max_tokens", 1200)),
+        "stream": False,
+    }
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    headers = {"Content-Type": "application/json"}
+    key = _remote_key(rc)
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    try:
+        import requests
+        r = requests.post(url, json=body, headers=headers,
+                          timeout=float(rc.get("timeout", timeout)))
+        if r.status_code != 200:
+            print(f"[DSH] 远程模型 HTTP {r.status_code}: {r.text[:160]}")
+            return ""
+        data = r.json()
+        return ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "") or ""
+    except Exception as e:
+        print(f"[DSH] 远程模型调用失败: {type(e).__name__}: {e}")
+        return ""
 
 def _strip_think_tags(text: str) -> str:
     """去掉推理模型可能混进正文的  thinking…<｜end▁of▁thinking｜> / <thinking>…</thinking> 段"""

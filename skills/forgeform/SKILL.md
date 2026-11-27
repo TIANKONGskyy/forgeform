@@ -1,58 +1,74 @@
 ---
 name: forgeform
-description: 使用铸想 ForgeForm 通过文字或参考图生成、修改、检查和导出可打印 3D 模型，或配置与排查它的本地模型和运行环境。用户要求调用铸想、ForgeForm、其工作流或 API 时使用。
+description: 用铸想 ForgeForm 把一句话或一张图变成可打印 3D 模型——对话、出图、单图/多视图建模、PBR 贴图、骨骼绑定、BVH 动画、Direct3D 精修、STL 导出与打印。用户要求调用铸想、改模型、绑骨骼、上色、做动画、导出打印文件或排查它的环境时使用。
 license: AGPL-3.0
 metadata:
   author: ZYKT studio
   homepage: https://github.com/TIANKONGskyy/forgeform
-  version: "3.7.3"
+  version: "3.8.4"
 ---
 
 # 铸想 ForgeForm
 
-铸想由 ZYKT studio 开发，提供对话、出图、图生 3D 和 STL 导出。先确认用户想要的对象、尺寸、现有参考图和所需交付；未知参数可用合理默认值，避免擅自下载大模型、删除数据或调整用户配置。单视图生成不适合要求精确孔位、公差或螺纹的零件，应建议参数化 CAD。网格水密并不保证可打印或尺寸准确，交付前仍须用切片器检查薄壁、悬空和支撑。
+## 能力速查（先看这张表）
 
-## 选择入口与检查环境
+| 我要什么 | 怎么做 | 耗时 | 需要什么 |
+|---|---|---|---|
+| 从一句话造模型 | 对话说需求 → 点「生成图片」→「生成 3D」 | 3–12 min | 出图模型 + 3D 模型 |
+| 从照片造模型 | 四张白底原图（正/背/左/右，同仰角 90°）→ `Pipeline.generate_3d_multiview()` | ~85 s | Hunyuan3D 2mv |
+| 提高精度 | 对话说「精修一下」或「精修 15 步」 | ~1 min | Direct3D-V3 |
+| 上色 / 贴图 | 对话说「上个色」（要参考图） | 8–20 min | Paint PBR |
+| 绑骨骼 | 对话说「给它绑骨骼」 | ~40 s | 无（模板档纯 CPU） |
+| 绑语义骨（含手指） | 说「用 RigAnything 绑骨骼」 | ~50 s | RigAnything 2.2 GB |
+| 加动作 | 说「做个走路动画 / 让它跑起来 / 挥手」 | ~15 s | 无（纯 CPU） |
+| 导出打印 | 点「导出 STL」，自动水密化+缩放+贴地 | 2–5 s | 无 |
+| 看所有产物 | 「🛠 能力工作台 → ⑥ 我的资产」 | — | 无 |
+| 环境坏了 | `python tools/doctor.py` / `python tools/report.py` | 秒级 | 无 |
 
-- 确定当前安装目录和 `VERSION`，以该目录源码与配置为准，不假定固定路径、模型已安装或服务已启动。Windows 启动入口是 `启动.bat`，配置界面默认 `127.0.0.1:7861`，创作界面默认 `127.0.0.1:7860`；可在启动参数中更改。
-- Studio `GET /api/ping`、`GET /api/status`、`GET /api/catalog`、`GET /api/hardware` 可查询状态。扫描是 **POST** `/api/scan`，安装、配置、启动、取消及删除等写操作也用 POST：从本机 Studio 页面取得 `STUDIO_TOKEN`，以 `X-Studio-Token` 发送，并遵守服务的来源校验。异步任务轮询 `/api/status` 至结束，检查错误和日志。不要输出或提交令牌。
-- 生成不一定依赖 ComfyUI：`backend.mode` 可为 `auto`、`comfyui` 或 `direct`，实际路由取决于权重和运行环境。确认配置中模型 key、路径和已安装依赖；`tools/doctor.py` 和 Studio 的扫描可帮助诊断。先检查 ComfyUI `/queue` 和 GPU 使用，避开别人的运行任务；不要自行中断其他任务或卸载共享服务。
-- 扫描会检查本地模型文件、分片和复用方案节点，但这不等于验证权重可加载或完整推理成功。按实际选择的模型和质量档验证运行；显存及可用内存紧张时优先选低资源配置。低配进程限额实验不能代替真实整机测试。
-- 对程序调用，若独立 API 服务可用，先读其 `/openapi.json`：默认 `127.0.0.1:7863`，`GET /v1/health` 无需密钥，`POST /v1/generate` 提交异步任务，`GET /v1/jobs/{id}` 查状态，`GET /v1/jobs/{id}/files/{image|glb|stl}` 获取产物；需已有授权的 `Authorization: Bearer` 密钥。不要为测试随意创建或公开密钥。`tools/api_server.py` 是接口事实来源。
+**产品入口只有一处**：对话、界面按钮、CLI 都调用同一套函数，所以任何一条路跑通即代表全部可用。
 
-## 本地 Python 工作流
+## 判断用户想要哪条路
 
-在安装目录、项目使用的 Python 环境执行；模型 key 从当前 `config.json` 和已安装权重确定，输出写到用户允许的位置。以下展示方法，实际参数按用户需求和硬件选择：
+- **有明确实物**（笔筒、支架、齿轮）→ 走单图/多视图；要求孔位/公差/螺纹 → 直接建议参数化 CAD（单视图生不出精确孔）
+- **要角色/摆件** → 单图建模后再绑骨骼 + 动作
+- **已有照片** → 先问是不是四张同仰角白底图：是 → 多视图（更准）；不是 → 单图
+- **只想上色/加动作** → 必须有现成 GLB，问清楚是哪个产物（资产编号或路径）
+
+## 环境与入口
+
+- 界面对话 `:7860`，Studio 配置 `:7861`，对外 API `:7863`（`/v1/generate` 异步、`/v1/jobs/{id}` 轮询）
+- ComfyUI 默认 `:8188`；`config.json → backend.mode` 可设 `auto|comfyui|direct`
+- 配置：`config.json`；密钥走 `.secrets` 或环境变量，**不要写进 config 或仓库**
+- 零模型也能启动：出图/建模/贴图/精修/语义骨会明确报缺什么，对话与纯几何功能照常
+
+## 常见动作的代码入口
 
 ```python
-from pathlib import Path
 from backend.pipeline import Pipeline
+from backend import rigging, assets
 
-pipe = Pipeline()  # 默认读取安装目录的 config.json
-images = pipe.generate_images(
-    "a single ceramic owl figurine, white background", count=1,
-    model_key="<已安装的出图模型 key>", quality_name="快速",
-    resolution="512×512 (快速)", skip_cache=True,
-)
-if not images or not images[0].success:
-    raise RuntimeError(images[0].error if images else "没有生成图片")
-image_path = images[0].output_path
-assert Path(image_path).is_file()
-mesh = pipe.generate_3d(model_key="<已安装的建模模型 key>",
-                        quality_name="快速", image_path=image_path)
-if not mesh.success:
-    raise RuntimeError(mesh.error)
-assert Path(mesh.output_path).is_file()
-stl = pipe.export_stl(mesh.output_path, target_size_mm=80)
-if not stl.success:
-    raise RuntimeError(stl.error)
-assert Path(stl.output_path).is_file()
+pipe = Pipeline("config.json")
+pipe.generate_3d("front.png", quality_name="高质量")                  # 单图
+pipe.generate_3d_multiview({"front": "f.png", "back": "b.png",
+                            "left": "l.png", "right": "r.png"})       # 多视图
+rigging.bind_model("model.glb", "out/", tier="template")             # 骨骼（CPU）
 ```
 
-`generate_images` 返回结果列表，`generate_3d` 与 `export_stl` 返回 `StageResult`；检查 `success`、`error`、`output_path`。长任务可能耗时数分钟，不要以短 HTTP 超时或空响应判断成功。参考图优先走用户指定图；按需使用 `reference_image`，并确认所选模型支持该模式。不要猜模型 ID 或生成未请求的内容。
+```powershell
+python tools/paint_asset.py --mesh m.stl --image ref.png --out out.glb --fast
+python tools/asset_refine_rig.py refine --image ref.png --mesh m.obj --out r.glb --steps 4
+python tools/collect_gallery.py --out D:\模型总览
+```
 
-## 验证与交付
+## 交付前必须验证
 
-- 检查图像可读取且与描述相符；用 `trimesh` 读取 GLB/STL，报告面数、包围盒毫米尺寸、连通性和 `is_watertight`。检查预览外形是否有背景板、碎块或明显变形；记录质量闸、降级、失败及耗时，不能用旧文件冒充本次产物。
-- 若失败，保留原始报错。显存不足时先检查占用及队列；只对本次任务的模型做释放或调整，选择更适合的已安装模型或质量档再试。若没有合适模型或资源被占用，说明缺失与下一步，不破坏其他任务。
-- 修改铸想源码后，运行相关测试；`python -m pytest` 与 `python tools/verify.py --fast` 分别覆盖行为与项目契约。真实推理和打印效果需要单独实测。修改配置前保留原始文件；不要提交配置、权重、密钥、作品或生成产物。
+1. `trimesh.load(...).is_watertight` — 切片软件把空壳当垃圾
+2. 单位与尺寸：导出 STL 走「导出 STL」按钮，别自己转
+3. 带贴图/骨骼的 GLB **不保证水密**，要打印就重新导出
+4. 多视图照片：不预抠图、不归一化，尺度差异无害
+
+## 出错时
+
+- 先 `python tools/doctor.py`（10 项体检，每项给修复命令）
+- 再 `python tools/report.py`（脱敏诊断包，可直接贴 issue）
+- 失败会记进 `logs/capability-failures.jsonl`，诊断包里带上

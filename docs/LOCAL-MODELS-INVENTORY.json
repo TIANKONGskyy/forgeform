@@ -1,0 +1,369 @@
+{
+  "time": "2026-11-27 19:58:31",
+  "total_bytes": 444230262875,
+  "total_human": "413.7 GB",
+  "targets": [
+    {
+      "name": "ComfyUI 本体与权重",
+      "path": "D:\\ComfyUI-New",
+      "exists": true,
+      "desc": "出图 / 建模 / 贴图 / 视频的后端",
+      "bytes": 373913769998,
+      "files": 8207,
+      "checkpoints": [
+        {
+          "path": "D:\\ComfyUI-New\\models\\text_encoders\\qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors",
+          "mb": 25142
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\diffusion_models\\minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+          "mb": 19999
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\diffusion_models\\minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+          "mb": 19999
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\diffusion_models\\flux2-dev-q4_k_m.gguf",
+          "mb": 19098
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\text_encoders\\Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf",
+          "mb": 13670
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\unet\\Wan2.2-I2V-A14B-HighNoise-Q5_K_S.gguf",
+          "mb": 9668
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\unet\\Wan2.2-I2V-A14B-LowNoise-Q5_K_S.gguf",
+          "mb": 9668
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\diffusion_models\\acestep_v1.5_xl_turbo_bf16.safetensors",
+          "mb": 9513
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\text_encoders\\qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors",
+          "mb": 9032
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\text_encoders\\qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors",
+          "mb": 9032
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\text_encoders\\qwen3vl_8b_int8_convrot.safetensors",
+          "mb": 8918
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\text_encoders\\flux2-klein-9b-encoder-q8_0.gguf",
+          "mb": 8306
+        },
+        {
+          "path": "D:\\ComfyUI-New\\custom_nodes\\ComfyUI-3D-Pack-main\\Checkpoints\\Diffusers\\tencent\\Hunyuan3D-2_1\\hunyuan3d-dit-v2-1\\model.fp16.ckpt",
+          "mb": 7025
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\checkpoints\\hunyuan_3d_v2.1.safetensors",
+          "mb": 7025
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\checkpoints\\tencent\\Hunyuan3D-2_1\\hunyuan3d-dit-v2-1\\model.fp16.ckpt",
+          "mb": 7025
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\diffusion_models\\hunyuan3d-dit-v2-1_fp16.ckpt",
+          "mb": 7025
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\diffusion_models\\qwen_image_2.1_int8_convrot.safetensors",
+          "mb": 6921
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\diffusion_models\\z_image_turbo-Q8_0.gguf",
+          "mb": 6890
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\diffusion_models\\flux-2-klein-9b-Q5_K_M.gguf",
+          "mb": 6694
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\text_encoders\\umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+          "mb": 6424
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\diffusion_models\\pixal3d_int8_convrot.safetensors",
+          "mb": 5326
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\diffusion_models\\trellis_2_int8_convrot.safetensors",
+          "mb": 5010
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\vae\\minimax_h3_video_vae_fp16.safetensors",
+          "mb": 4967
+        },
+        {
+          "path": "D:\\ComfyUI-New\\custom_nodes\\ComfyUI-3D-Pack-main\\Checkpoints\\Diffusers\\tencent\\Hunyuan3D-2\\hunyuan3d-dit-v2-0-fast\\model.fp16.safetensors",
+          "mb": 4702
+        },
+        {
+          "path": "D:\\ComfyUI-New\\custom_nodes\\ComfyUI-3D-Pack-main\\Checkpoints\\Diffusers\\tencent\\Hunyuan3D-2\\hunyuan3d-dit-v2-0-fast\\hunyuan3d-dit-v2-0-fast\\model.fp16.safetensors",
+          "mb": 4702
+        },
+        {
+          "path": "D:\\ComfyUI-New\\custom_nodes\\ComfyUI-3D-Pack-main\\Checkpoints\\Diffusers\\tencent\\Hunyuan3D-2\\hunyuan3d-dit-v2-0-turbo\\model.fp16.safetensors",
+          "mb": 4702
+        },
+        {
+          "path": "D:\\ComfyUI-New\\custom_nodes\\ComfyUI-3D-Pack-main\\Checkpoints\\Diffusers\\tencent\\Hunyuan3D-2mv\\hunyuan3d-dit-v2-mv-fast\\model.fp16.safetensors",
+          "mb": 4702
+        },
+        {
+          "path": "D:\\ComfyUI-New\\custom_nodes\\ComfyUI-3D-Pack-main\\Checkpoints\\Diffusers\\tencent\\Hunyuan3D-2mv\\hunyuan3d-dit-v2-mv-turbo\\model.fp16.safetensors",
+          "mb": 4702
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\checkpoints\\hunyuan3d-dit-v2-mv-fast\\model.fp16.safetensors",
+          "mb": 4702
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\text_encoders\\t5xxl_fp8_e4m3fn.safetensors",
+          "mb": 4667
+        },
+        {
+          "path": "D:\\ComfyUI-New\\custom_nodes\\ComfyUI-3D-Pack-main\\Checkpoints\\StableFast3D\\model.safetensors",
+          "mb": 3838
+        },
+        {
+          "path": "D:\\ComfyUI-New\\custom_nodes\\ComfyUI-3D-Pack-main\\Checkpoints\\Diffusers\\tencent\\Hunyuan3D-2_1\\hunyuan3d-paintpbr-v2-1\\unet\\diffusion_pytorch_model.bin",
+          "mb": 3743
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\diffusers\\hunyuan3d-paintpbr\\unet\\diffusion_pytorch_model.bin",
+          "mb": 3743
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\diffusers\\hunyuan3d-paintpbr_flat_bak\\unet.bin",
+          "mb": 3743
+        },
+        {
+          "path": "D:\\ComfyUI-New\\custom_nodes\\ComfyUI-3D-Pack-main\\Checkpoints\\Diffusers\\sudo-ai\\zero123plus-v1.2\\unet\\diffusion_pytorch_model.safetensors",
+          "mb": 3303
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\text_encoders\\Qwen3-4B-UD-Q5_K_XL.gguf",
+          "mb": 2771
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\microsoft\\TRELLIS.2-4B\\ckpts\\slat_flow_img2shape_dit_1_3B_1024_bf16.safetensors",
+          "mb": 2465
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\microsoft\\TRELLIS.2-4B\\ckpts\\slat_flow_img2shape_dit_1_3B_512_bf16.safetensors",
+          "mb": 2465
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\microsoft\\TRELLIS.2-4B\\ckpts\\slat_flow_imgshape2tex_dit_1_3B_1024_bf16.safetensors",
+          "mb": 2465
+        },
+        {
+          "path": "D:\\ComfyUI-New\\models\\microsoft\\TRELLIS.2-4B\\ckpts\\slat_flow_imgshape2tex_dit_1_3B_512_bf16.safetensors",
+          "mb": 2465
+        }
+      ]
+    },
+    {
+      "name": "ComfyUI Python 环境",
+      "path": "D:\\comfy312",
+      "exists": true,
+      "desc": "ComfyUI 专用 venv（uv 建）",
+      "bytes": 16077646466,
+      "files": 71916,
+      "checkpoints": []
+    },
+    {
+      "name": "铸想模型目录",
+      "path": "D:\\ForgeForm-oss\\models",
+      "exists": true,
+      "desc": "config.json 里登记的本地 3D 权重",
+      "bytes": 25675872112,
+      "files": 43,
+      "checkpoints": [
+        {
+          "path": "D:\\ForgeForm-oss\\models\\flux2klein4b\\transformer\\diffusion_pytorch_model.safetensors",
+          "mb": 7392
+        },
+        {
+          "path": "D:\\ForgeForm-oss\\models\\flux2klein4b\\text_encoder\\model-00002-of-00002.safetensors",
+          "mb": 2935
+        },
+        {
+          "path": "D:\\ForgeForm-oss\\models\\sd15\\unet\\diffusion_pytorch_model.fp16.bin",
+          "mb": 1640
+        },
+        {
+          "path": "D:\\ForgeForm-oss\\models\\sd15\\unet\\diffusion_pytorch_model.fp16.safetensors",
+          "mb": 1639
+        },
+        {
+          "path": "D:\\ForgeForm-oss\\models\\sd15\\text_encoder\\model.safetensors",
+          "mb": 469
+        },
+        {
+          "path": "D:\\ForgeForm-oss\\models\\sd15\\text_encoder\\pytorch_model.bin",
+          "mb": 469
+        },
+        {
+          "path": "D:\\ForgeForm-oss\\models\\sd15\\text_encoder\\model.fp16.safetensors",
+          "mb": 235
+        },
+        {
+          "path": "D:\\ForgeForm-oss\\models\\sd15\\text_encoder\\pytorch_model.fp16.bin",
+          "mb": 235
+        }
+      ]
+    },
+    {
+      "name": "铸想研究权重",
+      "path": "D:\\ForgeForm-oss\\work\\research",
+      "exists": true,
+      "desc": "Direct3D-V3 / RigAnything / Paint 等",
+      "bytes": 17594651170,
+      "files": 957,
+      "checkpoints": [
+        {
+          "path": "D:\\ForgeForm-oss\\work\\research\\precision\\weights\\Direct3D-V3\\shape_transformers_1024\\model.safetensors",
+          "mb": 4757
+        },
+        {
+          "path": "D:\\ForgeForm-oss\\work\\research\\precision\\weights\\Direct3D-V3\\shape_transformers_512\\model.safetensors",
+          "mb": 4757
+        },
+        {
+          "path": "D:\\ForgeForm-oss\\work\\research\\precision\\weights\\dinov3-vith16plus\\model.safetensors",
+          "mb": 3207
+        },
+        {
+          "path": "D:\\ForgeForm-oss\\work\\research\\rig\\models\\riganything_ckpt.pt",
+          "mb": 2236
+        }
+      ]
+    },
+    {
+      "name": "Hy3Dgen 权重缓存",
+      "path": "C:\\Users\\mac\\.cache\\hy3dgen",
+      "exists": false,
+      "desc": "hy3dgen 自动下载"
+    },
+    {
+      "name": "HuggingFace 缓存",
+      "path": "C:\\Users\\mac\\.cache\\huggingface",
+      "exists": true,
+      "desc": "transformers 等",
+      "bytes": 5180770397,
+      "files": 41,
+      "checkpoints": [
+        {
+          "path": "C:\\Users\\mac\\.cache\\huggingface\\hub\\models--facebook--dinov2-giant\\snapshots\\611a9d42f2335e0f921f1e313ad3c1b7178d206d\\model.safetensors",
+          "mb": 4335
+        },
+        {
+          "path": "C:\\Users\\mac\\.cache\\huggingface\\hub\\models--Systran--faster-whisper-small\\snapshots\\536b0662742c02347bc0e980a01041f333bce120\\model.bin",
+          "mb": 461
+        }
+      ]
+    },
+    {
+      "name": "Ollama 模型库",
+      "path": "C:\\Users\\mac\\.ollama\\models",
+      "exists": false,
+      "desc": "本地对话 / 向量模型"
+    },
+    {
+      "name": "Ollama 程序目录",
+      "path": "C:\\Users\\mac\\AppData\\Local\\Programs\\Ollama",
+      "exists": true,
+      "desc": "ollama.exe",
+      "bytes": 2947840936,
+      "files": 980,
+      "checkpoints": []
+    },
+    {
+      "name": "Strata 服务",
+      "path": "D:\\tools\\strata",
+      "exists": false,
+      "desc": "Qwen3.8 125B（旧对话模型）"
+    },
+    {
+      "name": "铸想输出",
+      "path": "D:\\ForgeForm-oss\\outputs",
+      "exists": true,
+      "desc": "产物（不是模型，但占地方）",
+      "bytes": 2839711796,
+      "files": 718,
+      "checkpoints": []
+    }
+  ],
+  "ollama_models": [
+    {
+      "name": "qwen2.5:3b",
+      "size_gb": 1.8,
+      "params": "3.1B"
+    },
+    {
+      "name": "zykt-scratch-default:latest",
+      "size_gb": 0.06,
+      "params": "28.97M"
+    },
+    {
+      "name": "zykt-scratch-gguf:latest",
+      "size_gb": 0.06,
+      "params": "28.97M"
+    },
+    {
+      "name": "zykt-scout-v3-q4:latest",
+      "size_gb": 0.37,
+      "params": "494.03M"
+    },
+    {
+      "name": "zykt-scout-v3:latest",
+      "size_gb": 0.93,
+      "params": "494.03M"
+    },
+    {
+      "name": "zykt-scout-v2-q4:latest",
+      "size_gb": 0.37,
+      "params": "494.03M"
+    },
+    {
+      "name": "zykt-scout-v2:latest",
+      "size_gb": 0.93,
+      "params": "494.03M"
+    },
+    {
+      "name": "embeddinggemma:latest",
+      "size_gb": 0.58,
+      "params": "307.58M"
+    },
+    {
+      "name": "zykt-small:latest",
+      "size_gb": 0.46,
+      "params": "630.17M"
+    },
+    {
+      "name": "gpt-oss:20b",
+      "size_gb": 12.85,
+      "params": "20.9B"
+    },
+    {
+      "name": "qwen3.8:latest",
+      "size_gb": 16.52,
+      "params": "27.3B"
+    }
+  ],
+  "disk": {
+    "C:": "3.7 GB",
+    "D:": "19.9 GB"
+  }
+}

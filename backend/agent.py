@@ -325,7 +325,14 @@ def _build_compact_prompt(user_text: str, state: dict) -> str:
           f"颜色={p.get('color') or '未定'} ｜ 尺寸={size_s} ｜ 风格={p.get('style') or '未定'} ｜ "
           f"图={'有' if state.get('candidates') else '无'} ｜ "
           f"3D={'有' if state.get('glb_path') else '无'} ｜ STL={'有' if state.get('stl_path') else '无'}")
-    return (f"{_COMPACT_SYS}{_load_knowledge()}\n\n【工作流状态】{st}\n\n"
+    # ★ 2026-11-27：注入能力速查（skills/*/SKILL.md 的「能力速查」段）。
+    #   小模型/远程模型都能靠这 700 字知道"自己能干什么、怎么调、要多久"。
+    try:
+        from . import skills as _skills
+        _cap = _skills.prompt_block()
+    except Exception:
+        _cap = ""
+    return (f"{_COMPACT_SYS}{_load_knowledge()}{_cap}\n\n【工作流状态】{st}\n\n"
             f"【最近对话】{recent_turns(state)}\n\n【用户这句话】{(user_text or '').strip()}")
 
 

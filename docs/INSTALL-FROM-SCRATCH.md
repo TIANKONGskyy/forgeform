@@ -1,0 +1,162 @@
+# 从零安装铸想（本机已清空模型后的实测路径）
+
+> 2026-11-27 本机删除了 ComfyUI、comfy312、Ollama 与全部本地权重（约 477 GB）。
+> 这份文档是**按"什么模型都没有"的状态**写的，每步都标了会卡在哪。
+
+## 0. 现在机器上还剩什么
+
+| 还在 | 说明 |
+|---|---|
+| `D:\ForgeForm-oss`（源码） | 8.7 GB（含 outputs 产物） |
+| `D:\forgeform-v3.8.4.zip` | 安装包 3.3 MB |
+| Python `D:\miniconda3` | 3.11.15，torch 2.14.1+cu126 已装 |
+| V100 32G | 驱动 580.88 |
+
+**没有**：ComfyUI、ComfyUI 的 venv、Ollama、任何 3D/图像/对话权重。
+
+## 1. 冒烟：零模型能不能起来（30 秒）
+
+```powershell
+cd D:\ForgeForm-oss
+$env:PYTHONPATH=''; $env:PYTHONIOENCODING='utf-8'
+python tools/doctor.py
+python app.py
+```
+
+**预期**：`doctor` 报 8/10，明确列出「ComfyUI 目录不存在」「3D 权重 0/2」；
+`app.py` 能开户到 7860，对话可用（走规则/远程模型），出图与建模会**明确报缺什么**，不会崩。
+
+实测（2026-11-27）：
+
+```
+✓ Python 3.11.15  ✓ 依赖齐全  ✓ GPU  ✓ torch CUDA
+✗ ComfyUI 配置的目录不存在：D:\ComfyUI-New
+✗ 3D 权重 0/2 已就位
+8/10 通过
+→ 界面对话返回："• 尺寸：90.0mm • 模型：qwen21_ref 以上理解正确吗？"
+```
+
+## 2. 装对话模型（三种选，按需）
+
+### 2a. 远程 API（最省事，不占显存）
+
+```jsonc
+// config.json
+"agent": { "provider": "remote" },
+"models": { "llm": { "remote": {
+    "base_url": "https://api.deepseek.com/v1",
+    "model": "deepseek-chat",
+    "api_key_env": "FORGEFORM_LLM_KEY"
+}}}
+```
+
+```powershell
+$env:FORGEFORM_LLM_KEY = "sk-..."     # 不要写进 config / 不要提交
+```
+
+**验证**：界面对话说一句，2–5 秒内回话。
+
+### 2b. 本地小模型（实测最快）
+
+```powershell
+# 装 Ollama 后
+ollama pull qwen2.5:3b
+```
+
+```jsonc
+"agent": { "provider": "ollama", "model": "qwen2.5:3b" }
+```
+
+实测本机：**冷启 12.2 s / 常驻 6.5 s**（27B 级要 60 s 以上，别用）。
+显存占用约 2 GB，和建模轮换着用没问题。
+
+### 2c. 不装对话模型
+
+`agent.provider` 留空 → 走规则路径 + 模板回复，能出图建模但不能自然对话。
+
+## 3. 装 ComfyUI（出图/建模/贴图都靠它）
+
+```powershell
+# 1) 拿便携版（GitHub 直连不通就用代理）
+iwr -useb https://gh-proxy.com/https://github.com/comfyanonymous/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z -OutFile ComfyUI.7z
+# 2) 解压到 D:\ComfyUI-New（路径别带空格/中文）
+# 3) 建一个独立 venv（不要用 portable 自带的，torch 版本可能不匹配 V100）
+python -m venv D:\comfy312
+D:\comfy312\Scripts\python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cu126
+D:\comfy312\Scripts\python.exe -m pip install -r D:\ComfyUI-New\requirements.txt
+```
+
+**启动参数（V100 必须这么起）**：
+
+```powershell
+D:\comfy312\Scripts\python.exe D:\ComfyUI-New\main.py --listen 0.0.0.0 --port 8188 `
+  --disable-cuda-malloc --use-pytorch-cross-attention
+```
+
+- **不要加 `--lowvram`**：V100 是 sm_70，采样阶段会报 `operation not supported`
+- 必须 `PYTHONIOENCODING=utf-8`（ComfyUI 日志写 emoji，GBK 会在绑端口前崩）
+
+## 4. 装 3D 节点包和权重
+
+```powershell
+# 3D-Pack（提供 Hunyuan3D 2.1 / 2mini / 2mv / Paint）
+cd D:\ComfyUI-New\custom_nodes
+git clone https://gh-proxy.com/https://github.com/MrForExample/ComfyUI-3D-Pack.git
+```
+
+权重放 `custom_nodes\ComfyUI-3D-Pack-main\Checkpoints\Diffusers\tencent\Hunyuan3D-2_1\`：
+
+| 权重 | 大小 | 用途 |
+|---|---|---|
+| `hunyuan3d-v2-1` | 4.7 GB | 单图建模（主力） |
+| `hunyuan3d-paintpbr-v2-1` | 6.4 GB | PBR 贴图 |
+
+**贴图权重的两个坑（实测，必踩）**：
+
+1. 必须是**完整 diffusers 目录**（`model_index.json` + `unet/` `vae/` `text_encoder/`），
+   平铺的 `unet.bin` 不行 → 报 `no file named model_index.json`
+2. `tokenizer/` 里 `vocab.json` 和 `merges.txt` **必须同源**，缺 merges 会报
+   `vocab and merges must be both from memory or both filenames`
+
+## 5. 接上铸想
+
+```powershell
+python tools/doctor.py --fix     # 会把 paths.comfyui 指向新目录
+```
+
+```jsonc
+// config.json
+"paths": { "comfyui": "D:\\ComfyUI-New" },
+"backend": { "mode": "auto" }
+```
+
+再跑 `python tools/doctor.py`，应该 10/10。
+
+## 6. 想要额外能力才装（都不装也能用）
+
+| 能力 | 还要装 | 大小 | 不装的后果 |
+|---|---|---|---|
+| 多视图重建 | `hunyuan3d-2mv` | ~9 GB | 只能单图建模 |
+| 精修 | Direct3D-V3 512 + DINOv3 | ~8 GB | 说「精修」会报缺权重 |
+| 语义骨骼（含手指） | RigAnything `riganything_ckpt.pt` | 2.2 GB | 只能用模板档（纯 CPU，够用） |
+| 贴图 | Paint PBR 2.1 | 6.4 GB | 不能上色 |
+| 动画 | 无 | 0 | 不装也能用 |
+
+## 7. 每步的自检命令
+
+```powershell
+python tools/doctor.py                      # 10 项体检
+python -c "import requests;print(requests.get('http://127.0.0.1:8188/system_stats').json()['system'])"
+python -c "import trimesh;m=trimesh.load('你的.stl');print(m.is_watertight)"
+python tools/report.py                      # 出问题生成脱敏诊断包
+```
+
+## 8. 已知会卡的地方（按我们踩过的顺序）
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| ComfyUI 起了但建模报「未就绪」 | 权重路径和 config 里的 key 不一致 | `doctor` 的「3D 权重」项会列出缺哪个 |
+| 贴图报 `InvalidSchema` / 连不上 | `paths.comfyui` 写成了目录而不是 URL | 已修：目录会自动用 `127.0.0.1:8188` |
+| 建模 OOM | 显存被对话模型占着 | 用远程模型，或说「先释放显存」 |
+| 对话第一次要 60 s | 27B 级模型冷启动 | 换 `qwen2.5:3b` 或远程 API |
+| 生成完 STL 是空壳 | 没走「导出 STL」 | 别自己转，走按钮（会补洞） |

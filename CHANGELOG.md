@@ -52,6 +52,37 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.8.5 — 清空本地模型后的"零模型可用"与技能包（2026-11-27）
+
+本机删除了 ComfyUI（341.9 GB）、comfy312、铸想 models（23.9 GB）、研究权重（16.7 GB）、
+`D:\models`（31.2 GB）、Ollama（模型 42.2 GB + 程序 5.9 GB）、HF 缓存（4.8 GB）——**约 477 GB**。
+清单见 `docs/LOCAL-MODELS-INVENTORY.md`。目标：验证"从零安装"的真实体验。
+
+**① 零模型也能启动（实测）**
+`doctor` 8/10：明确报「ComfyUI 目录不存在」「3D 权重 0/2」；`app.py` 正常开到 7860，
+对话返回规则模板（`尺寸：90.0mm · 模型：qwen21_ref`），出图/建模报缺什么，不崩。
+
+**② 远程对话通道**（`describer._call_remote`）
+`agent.provider = remote` → 走 `models.llm.remote`（OpenAI 兼容 `/chat/completions`，
+密钥从环境变量或 `.secrets` 读，绝不写进 config）。远程不通自动回落本地/模板。
+
+**③ 技能包**（`skills/forgeform/SKILL.md` v3.8.4 + `backend/skills.py`）
+- 技能文档重写：13 行「能力速查」表（做什么/怎么做/耗时/依赖），覆盖出图、单图与多视图建模、
+  贴图、骨骼两档、动画、精修、STL 导出、资产、体检、上报
+- 加载器只把速查段（703 字）注入 agent prompt（整篇 4 KB 会让 3B 小模型变慢），
+  带 mtime 缓存，改文件自动失效
+- 实测 prompt 里能看到「绑骨骼/精修/我的资产」等动作提示
+
+**④ 从零安装文档** `docs/INSTALL-FROM-SCRATCH.md`
+三种对话模型选型（远程 / qwen2.5:3b 冷启 12.2 s / 不装）、ComfyUI 便携版与 V100 启动参数、
+3D-Pack 权重放置、贴图的两个坑、每步自检命令、已知卡点表。
+
+**⑤ 盘点工具** `tools/inventory_models.py`
+列出 9 个目标目录的占用与 >200 MB 权重清单、Ollama 模型表，输出 JSON。
+
+**测试**：新增 4 个（技能加载与缓存失效、远程通道未配置时不抛、盘点覆盖范围），
+全量 pytest 通过，`verify.py` 152/152。
+
 ## v3.8.4 — 对话直达能力 / 资产库 / 一键开始 / 问题上报（2026-11-27）
 
 **① 对话直达能力**（`backend/capability_router.py`）

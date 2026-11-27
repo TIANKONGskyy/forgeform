@@ -492,3 +492,69 @@ def test_report_redacts_secrets(tmp_path: Path):
     with zipfile.ZipFile(z) as zf:
         blob = b"".join(zf.read(n) for n in zf.namelist() if not n.endswith("/"))
     assert b"sk-" + b"a" * 32 not in blob
+
+# ────────────────── 2026-11-27 清空模型后：远程对话 / 技能包 / 盘点 ──────────────────
+
+def test_skills_loader_reads_quick_map():
+    """skills/*/SKILL.md 的「能力速查」要能被压成注入块（agent 靠它快速学会能力）。"""
+    from backend import skills
+
+    rows = skills.list_skills()
+    assert rows, "至少要有一个技能包"
+    names = [r["name"] for r in rows]
+    assert "forgeform" in names
+    block = skills.prompt_block()
+    assert "你的能力" in block
+    # 能力表里必须能查到关键动作
+    for kw in ("绑骨骼", "精修", "上色", "导出 STL"):
+        assert kw in block, f"速查里缺 {kw}"
+
+
+def test_skills_cache_invalidates_on_change(tmp_path: Path, monkeypatch):
+    """技能文件改了要重新读（否则 agent 一直用旧能力表）。"""
+    from backend import skills
+
+    monkeypatch.setattr(skills, "SKILLS_DIR", tmp_path)
+    monkeypatch.setattr(skills, "CACHE", {})
+    d = tmp_path / "demo"
+    d.mkdir()
+    f = d / "SKILL.md"
+    f.write_text("---\nname: demo\ndescription: 第一版\n---\n\n## 能力速查\n第一版能力\n",
+                 encoding="utf-8")
+    assert "第一版能力" in skills.compact_map()
+    import time as _t
+    _t.sleep(0.01)
+    f.write_text("---\nname: demo\ndescription: 第二版\n---\n\n## 能力速查\n第二版能力\n",
+                 encoding="utf-8")
+    assert "第二版能力" in skills.compact_map()
+
+
+def test_remote_llm_channel_is_gated_by_config():
+    """没配 remote 时必须返回空串（让上层降级），不能抛异常。"""
+    from backend import describer
+
+    orig = describer.LLM_CFG
+    try:
+        describer.LLM_CFG = {"remote": {"base_url": "", "model": ""}}
+        assert describer.remote_ready() is False
+        assert describer._call_remote("hi") == ""
+        describer.LLM_CFG = {"remote": {"base_url": "http://127.0.0.1:9/v1", "model": "x",
+                                        "timeout": 1}}
+        assert describer.remote_ready() is True
+        assert describer._call_remote("hi") == ""      # 连不上也返回空，不抛
+    finally:
+        describer.LLM_CFG = orig
+
+
+def test_inventory_tool_lists_generation_paths():
+    """盘点脚本要覆盖 ComfyUI / 铸想模型 / 研究权重 / Ollama / HF 缓存。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ff_inv", r"D:\ForgeForm-oss\tools\inventory_models.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    names = " ".join(t[0] for t in mod.TARGETS)
+    for need in ("ComfyUI", "铸想模型", "研究权重", "Ollama", "HuggingFace"):
+        assert need in names, f"盘点缺 {need}"
