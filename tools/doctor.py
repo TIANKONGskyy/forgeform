@@ -367,6 +367,22 @@ def main(argv=None) -> int:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
         return 0
 
+    # 五项能力的就绪情况（2026-11-28：用户报"某功能用不了"时最常问的就是这个）
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "ff_capdoc", ROOT / "tools" / "capability_doctor.py")
+        cap = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cap)
+        print("\n  能力就绪：")
+        for name, fn in cap.CHECKS.items():
+            r = fn()
+            print(f"   {cap.ICON.get(r['state'], '?')} {name:<8} {r['detail'][:90]}")
+            if r['state'] != 'ready' and r.get('fix'):
+                print(f"       → {r['fix'][:100]}")
+    except Exception as e:
+        print(f"  （能力检查跳过：{type(e).__name__}）")
+
     bad = [r for r in rows if not r["ok"]]
     for r in rows:
         mark = "✓" if r["ok"] else "✗"

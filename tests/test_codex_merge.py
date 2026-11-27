@@ -762,3 +762,26 @@ def test_motion_reports_missing_assets(tmp_path: Path, monkeypatch):
     path, msg = capability_ui.do_motion("02_01.bvh", False)
     assert path is None
     assert "预烘焙" in msg or "骨架" in msg or "bootstrap" in msg
+
+# ────────────────── 2026-11-28 能力就绪检查 ──────────────────
+
+def test_capability_doctor_reports_all_five():
+    """一条命令要看得到五项能力的状态与补法（用户报"某功能用不了"时的第一诊断工具）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ff_capdoc", r"D:\ForgeForm-oss\tools\capability_doctor.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    rows = {}
+    for name, fn in mod.CHECKS.items():
+        rows[name] = fn()
+    assert len(rows) == 5
+    for name, r in rows.items():
+        assert r["state"] in ("ready", "partial", "blocked"), name
+        assert "detail" in r
+        if r["state"] != "ready":
+            assert r.get("fix"), f"{name} 缺修复指引"
+    # 动画在本机有预烘焙动作包，应判 ready
+    assert rows["动画"]["state"] == "ready"

@@ -52,6 +52,27 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.9.3 — 能力就绪检查（2026-11-28）
+
+新增 `tools/capability_doctor.py`：一条命令列出五项能力的状态与补法，
+并接进 `tools/doctor.py` 的输出。
+
+端到端实测发现，五项能力失败时的报错各不相同（缺脚本/缺权重/缺 CUDA 扩展/缺基础工程），
+日志散落在不同位置，用户根本不知道该补什么。现在：
+
+```
+能力就绪：
+ ✓ 骨骼绑定   模板骨架（纯 CPU，实测 53 s / 14 关节）
+ ✓ 动画      5 个预烘焙动作（52 骨）
+ ✗ 贴图 PBR  缺节点：…；缺权重：models/diffusers/hunyuan3d-paintpbr（约 6.4 GB）
+     → 装 ComfyUI-Hunyuan3D-Paint 节点包 + 权重
+ ✗ 精修      缺权重 shape_transformers_512（4.6 GB）
+ ✗ 多视图     缺 2mv 节点（3D-Pack）
+```
+
+本轮同时确认：**多视图卡在 `nvdiffrast`**（3D-Pack 的编译型 CUDA 依赖），
+与之前的 `pytorch3d` 同类问题——Windows + torch 2.7 下这些扩展需要现场编译。
+
 ## v3.9.2 — 动画能力可用（2026-11-28）
 
 - 从仓库备份恢复 5 个**预烘焙动作包**（52 骨 + 具名 Action）：walk 1–25 / run 1–19 /
