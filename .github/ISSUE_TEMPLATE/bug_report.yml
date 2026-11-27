@@ -1,89 +1,66 @@
-name: Bug 报告
-description: 出图/建模/导出跑不通，或者结果明显不对
+name: 问题上报 / Bug report
+description: 跑不起来、结果不对、界面报错——用这个模板
 title: "[bug] "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        先跑一遍 `python tools/doctor.py`，把它最后一屏贴上来 —— 一半的问题它就能定位。
-        提交前请确认已经搜过现有 issue。
+        先用一行命令生成诊断包，比手打十行环境信息管用：
 
-  - type: textarea
-    id: what
-    attributes:
-      label: 你做了什么
-      description: 具体到动作。比如"在对话里说『做一个手机支架』，点生成图片"
-      placeholder: |
-        1. 输入「...」
-        2. 点「🎨 生成图片」
-        3. ...
-    validations:
-      required: true
+        ```powershell
+        python tools/report.py
+        ```
 
-  - type: textarea
-    id: expected
-    attributes:
-      label: 你期望什么
-    validations:
-      required: true
-
-  - type: textarea
-    id: actual
-    attributes:
-      label: 实际发生了什么
-      description: 有报错就把完整 traceback 贴上（不要截断）
-    validations:
-      required: true
-
-  - type: textarea
-    id: doctor
-    attributes:
-      label: tools/doctor.py 的输出
-      description: 尽量贴完整
-      render: text
-    validations:
-      required: true
-
-  - type: input
-    id: gpu
-    attributes:
-      label: 显卡与显存
-      placeholder: 例如 Tesla V100 32G / RTX 4090 24G / 无 GPU
-    validations:
-      required: true
-
-  - type: input
-    id: os
-    attributes:
-      label: 系统与 Python 版本
-      placeholder: 例如 Windows 11 / Python 3.11.15
-    validations:
-      required: true
+        它会在 `outputs/reports/` 下生成 `forgeform-report-<时间>.zip`，
+        **已自动脱敏**（key/token/密码打码，家目录路径换成 `~`）。
+        发之前可以先解压自己看一眼。
 
   - type: dropdown
-    id: stage
+    id: area
     attributes:
       label: 哪一步出问题
-      multiple: true
       options:
         - 安装 / 启动
-        - 对话（agent 没听懂 / 回话不对）
+        - 对话（需求理解）
         - 出图
-        - 建模（3D）
-        - 导出 STL / 水密
-        - 视频
-        - 打印（Bambu）
-        - Web 界面 / 按钮
+        - 建模（单图 / 多视图）
+        - 贴图
+        - 骨骼绑定
+        - 动画
+        - 精修
+        - 导出 STL / 打印
+        - 界面显示
         - 其他
     validations:
       required: true
 
   - type: textarea
-    id: logs
+    id: what
     attributes:
-      label: 相关日志
-      description: "`logs/` 下的文件，或者 ComfyUI 那边的 stderr"
-      render: text
+      label: 你做了什么，看到了什么
+      description: 期望结果 vs 实际结果。有报错就把最后 20 行贴上来。
+      placeholder: |
+        我点了「生成 3D」，等了两分钟，界面一直显示"正在处理…"，日志里最后一行是 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境（诊断包里的 environment.json 前三行贴这里）
+      placeholder: |
+        platform: Windows-10-10.0.19045-SP0
+        python: 3.11.15
+        nvidia_smi: NVIDIA GeForce RTX 3060, 12288 MiB, 551.23
     validations:
       required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 自查
+      options:
+        - label: 我跑过 `python tools/doctor.py`，并已按提示修复
+        - label: 我附上了诊断包（zip）
+        - label: 这不是密钥泄露类问题（如果是，请不要贴任何 key，只贴报错）

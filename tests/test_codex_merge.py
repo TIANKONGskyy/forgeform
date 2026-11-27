@@ -390,3 +390,105 @@ def test_gallery_collector_lists_every_generation_path():
     for need in ("单图", "多视图", "精修", "贴图", "骨骼", "动画"):
         assert any(need in m for m in methods), f"缺生成路线：{need}"
     assert len(mod.PICKS) >= 10
+
+# ────────────────── 2026-11-27 资产管理 / 能力路由 / 一键开始与上报 ──────────────────
+
+def test_asset_store_register_dedup_and_remove(tmp_path: Path, monkeypatch):
+    """资产库：同内容只登记一次；删除后索引和文件都没了。"""
+    from backend import assets
+
+    monkeypatch.setattr(assets, "ASSETS", tmp_path / "assets")
+    monkeypatch.setattr(assets, "INDEX", tmp_path / "assets" / "index.json")
+    monkeypatch.setattr(assets, "LOCK", tmp_path / "assets" / ".lock")
+    monkeypatch.setattr(assets, "MAX_BYTES", 10 ** 9)
+
+    f = tmp_path / "a.glb"
+    f.write_bytes(b"glTF" + b"\x00" * 1000)
+    e1 = assets.register(f, "rigged", title="t1", metrics={"joints": 21})
+    e2 = assets.register(f, "rigged", title="t2")
+    assert e1["id"] == e2["id"] and e2.get("dedup") is True
+    assert len(assets.list_assets("rigged")) == 1
+    assert assets.remove(e1["id"]) is True
+    assert assets.remove(e1["id"]) is False
+    assert assets.list_assets("rigged") == []
+
+
+def test_asset_store_rejects_unknown_kind(tmp_path: Path, monkeypatch):
+    from backend import assets
+
+    monkeypatch.setattr(assets, "ASSETS", tmp_path / "assets")
+    monkeypatch.setattr(assets, "INDEX", tmp_path / "assets" / "index.json")
+    monkeypatch.setattr(assets, "LOCK", tmp_path / "assets" / ".lock")
+    f = tmp_path / "x.glb"
+    f.write_bytes(b"x")
+    try:
+        assets.register(f, "nonsense")
+    except ValueError as e:
+        assert "未知类型" in str(e)
+    else:
+        raise AssertionError("未知类型必须报错")
+
+
+def test_capability_router_hits_and_misses(tmp_path: Path):
+    """路由：能力词命中；造新东西/闲聊/没模型时不拦（让对话正常处理）。"""
+    from backend import capability_router as R
+
+    mesh = tmp_path / "m.glb"
+    mesh.write_bytes(b"glTF")
+    state = {"glb_path": str(mesh), "ref_image": str(mesh)}
+
+    assert R.route("给它绑骨骼", state)["action"] == "rig"
+    assert R.route("用 RigAnything 绑骨骼", state)["params"]["tier"] == "riganything"
+    assert R.route("上个色", state)["action"] == "paint"
+    assert R.route("精修 15 步", state)["params"]["steps"] == 15
+    assert R.route("做个走路动画", state)["params"]["bvh"] == "02_01.bvh"
+    assert R.route("让它跑起来", state)["params"]["bvh"] == "09_01_run.bvh"
+
+    # 不该抢的
+    assert R.route("做一个会走路的机器人", state) is None
+    assert R.route("设计一个杯子", state) is None
+    assert R.route("今天天气不错", state) is None
+    # 没有模型时不接能力
+    assert R.route("绑骨骼", {}) is None
+
+
+def test_doctor_checks_shape():
+    """体检每项必须有 name/ok/detail/fix —— 界面与上报都依赖这个结构。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ff_doctor", r"D:\ForgeForm-oss\tools\doctor.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    rows = mod.run_checks()
+    assert len(rows) >= 8
+    for r in rows:
+        assert set(("name", "ok", "detail")) <= set(r)
+    # 至少 Python/依赖/配置 三项必须能判定
+    names = " ".join(r["name"] for r in rows)
+    for need in ("Python", "依赖", "配置"):
+        assert need in names
+
+
+def test_report_redacts_secrets(tmp_path: Path):
+    """诊断包不能带明文密钥。"""
+    import importlib.util
+    import json as _json
+    import zipfile
+
+    spec = importlib.util.spec_from_file_location("ff_doctor2", r"D:\ForgeForm-oss\tools\doctor.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    data = {"api": {"key": "sk-" + "a" * 32}, "paths": {"root": str(Path.home()) + "/x"},
+            "note": "token=abcdef123456"}
+    red = mod.redact(data)
+    assert red["api"]["key"].startswith("<redacted")
+    assert red["paths"]["root"].startswith("~")
+    assert "<redacted>" in red["note"]
+
+    z = mod.build_report(tmp_path)
+    assert z.is_file()
+    with zipfile.ZipFile(z) as zf:
+        blob = b"".join(zf.read(n) for n in zf.namelist() if not n.endswith("/"))
+    assert b"sk-" + b"a" * 32 not in blob

@@ -39,6 +39,9 @@
 每页都有 3D 预览、下载、耗时日志；对外接口名固定为 `/cap_rig` `/cap_paint` `/cap_refine`
 `/cap_multiview` `/cap_motion`（和命令行走同一套产品入口）。
 
+**一键开始**：双击 `一键开始.ps1`（先体检再启动）；只想要环境诊断就跑 `python tools/doctor.py`。
+出问题跑 `python tools/report.py` 生成**已脱敏**诊断包，直接贴 issue。
+
 **成品总览**：`python tools/collect_gallery.py` 把所有生成路线的代表模型收进一个文件夹
 （默认 `D:\铸想模型总览`），带二进制体检表（面数/水密/贴图/关节/动画）与三视角预览图。
 

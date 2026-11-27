@@ -25,6 +25,39 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _register_asset(path: str, kind: str, params: dict | None = None, metrics: dict | None = None) -> dict:
+    """产物登记进资产库（失败不影响主流程）。"""
+    try:
+        from . import assets as asset_store
+        return asset_store.register(path, kind, params=params or {},
+                                    source="能力工作台", metrics=metrics or {})
+    except Exception:
+        return {}
+
+
+def _glb_metrics(path: str) -> dict:
+    out = {}
+    try:
+        import json as _json
+        import struct as _struct
+        raw = Path(path).read_bytes()
+        clen, _ = _struct.unpack("<II", raw[12:20])
+        doc = _json.loads(raw[20:20 + clen].decode("utf-8"))
+        out["textures"] = len(doc.get("textures") or [])
+        out["joints"] = sum(len(s.get("joints") or []) for s in (doc.get("skins") or []))
+        out["animations"] = len(doc.get("animations") or [])
+    except Exception:
+        pass
+    try:
+        import trimesh
+        m = trimesh.load(str(path), force="mesh")
+        out["faces"] = int(len(m.faces))
+        out["watertight"] = bool(m.is_watertight)
+    except Exception:
+        pass
+    return out
+
+
 def _out_dir(sub: str) -> Path:
     d = ROOT / "outputs" / "capabilities" / sub
     d.mkdir(parents=True, exist_ok=True)
@@ -61,6 +94,15 @@ def _free_gpu() -> str:
         pass
     return "/".join(notes) or "无占用"
 
+
+
+def _asset_html() -> str:
+    """资产面板内容（读索引，失败给空态）。"""
+    try:
+        from . import assets as asset_store
+        return asset_store.render_html()
+    except Exception as e:
+        return f'<div class="asset-empty">资产索引读取失败：{type(e).__name__}</div>'
 
 def _fmt(r: dict, keys) -> str:
     parts = []
@@ -236,6 +278,8 @@ def render():
 
                 def _rig(mesh, tier, tmpl):
                     path, msg = do_rig(getattr(mesh, "name", mesh), tier, tmpl)
+                    if path:
+                        _register_asset(path, "rigged", {"tier": tier}, _glb_metrics(path))
                     return path, path, msg
 
                 rig_btn.click(_rig, inputs=[rig_mesh, rig_tier, rig_tmpl],
@@ -256,6 +300,8 @@ def render():
 
                 def _paint(mesh, img, quality):
                     path, msg = do_paint(getattr(mesh, "name", mesh), img, quality)
+                    if path:
+                        _register_asset(path, "painted", {"quality": quality}, _glb_metrics(path))
                     return path, path, msg
 
                 paint_btn.click(_paint, inputs=[paint_mesh, paint_img, paint_quality],
@@ -275,6 +321,8 @@ def render():
 
                 def _refine(img, mesh, steps):
                     path, msg = do_refine(img, getattr(mesh, "name", mesh), steps)
+                    if path:
+                        _register_asset(path, "refined", {"steps": steps}, _glb_metrics(path))
                     return path, path, msg
 
                 ref_btn.click(_refine, inputs=[ref_img, ref_mesh, ref_steps],
@@ -297,6 +345,8 @@ def render():
 
                 def _mv(a, b, c, d, q):
                     path, msg = do_multiview(a, b, c, d, q)
+                    if path:
+                        _register_asset(path, "multiview", {"quality": q}, _glb_metrics(path))
                     return path, path, msg
 
                 mv_btn.click(_mv, inputs=[mv_front, mv_back, mv_left, mv_right, mv_q],
@@ -315,7 +365,36 @@ def render():
 
                 def _mo(bvh, adv):
                     path, msg = do_motion(bvh, adv)
+                    if path:
+                        _register_asset(path, "motion", {"bvh": bvh}, {})
                     return path, msg
 
                 mo_btn.click(_mo, inputs=[mo_bvh, mo_adv],
                              outputs=[mo_dl, mo_log], api_name="cap_motion")
+
+            # ⑥ 我的资产
+            with gr.Tab("⑥ 我的资产"):
+                gr.Markdown("所有能力的产物都在这里。按类型 / 时间排列，"
+                            "超容量会自动淘汰最旧的（默认 8 GB，"
+                            "可用环境变量 `FORGEFORM_ASSET_MAX_BYTES` 改）。")
+                asset_html = gr.HTML(_asset_html())
+                with gr.Row():
+                    asset_refresh = gr.Button("🔄 刷新", size="sm")
+                    report_btn = gr.Button("🩺 遇到问题？生成诊断包", size="sm")
+                report_file = gr.File(label="诊断包（已脱敏，可直接贴 issue）", visible=False)
+                report_note = gr.Markdown("")
+
+                def _refresh():
+                    return _asset_html()
+
+                def _report():
+                    try:
+                        from tools.doctor import build_report
+                        p = build_report()
+                        return gr.update(value=str(p), visible=True), \
+                            f"✓ 诊断包已生成：`{p}`（key/token/密码已打码，发之前可先自己看一遍）"
+                    except Exception as e:
+                        return gr.update(visible=False), f"✗ 生成失败：{type(e).__name__}: {e}"
+
+                asset_refresh.click(_refresh, outputs=[asset_html], api_name="cap_assets")
+                report_btn.click(_report, outputs=[report_file, report_note], api_name="cap_report")

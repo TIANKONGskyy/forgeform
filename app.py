@@ -26,6 +26,8 @@ from backend.startup import StartupChecker  # noqa: E402
 from backend import describer  # noqa: E402
 from backend import project_manager as pm  # noqa: E402  # 参考图上传要用（save_selected_image / save_project）
 from backend import intent_classifier as ic  # noqa: E402
+from backend import capability_router as cap_router  # noqa: E402  # 能力路由（绑骨骼/上色/精修/动画）
+from backend import assets as asset_store  # noqa: E402  # 资产库（统一登记产物）
 
 conv = ConversationManager()
 
@@ -640,6 +642,18 @@ def on_submit(user_input: str, state: dict):
     # Render the user's message before model warm-up or any other slow work.
     yield "", state, *_update_ui_with_note(state, "正在处理…", pending_input=user_input)
 
+    # ★ 2026-11-27：能力路由 —— 「给它绑骨骼 / 上个色 / 精修一下 / 做个走路动画」
+    #   这类指令不需要 LLM 理解，直接调产品入口干活。识别不出来就返回 None，
+    #   照常走下面的 agent / 关键词流程（不改变原有行为）。
+    try:
+        _cap = cap_router.route(user_input, state)
+    except Exception:
+        _cap = None
+    if _cap:
+        conv._append_conversation(state, "user", user_input)
+        yield from _run_capability(_cap, state)
+        return
+
     # ── agent 主导（流式：边推理边显示，首字不再干等）──
     if agent_enabled():
         # 预热的是 agent **实际要用**的模型：provider=tuned 时是微调服务，
@@ -1169,6 +1183,163 @@ def _update_ui(state: dict, glb_override: str = None, ring: str = None):
         # （gr.File 即使 value=None 也会画空框，用户会觉得"这东西一直在那里" ✗）
         gr.update(value=stl_path if stl_ok else None, visible=stl_ok),
     )
+
+
+# ══════════════════════════════════════════════════════════════════
+# 能力路由执行（对话里说"绑骨骼/上色/精修/做个走路动画"直接干活）
+# ══════════════════════════════════════════════════════════════════
+
+_CAP_LABEL = {"rig": "骨骼绑定", "paint": "贴图", "refine": "精修", "motion": "动画"}
+_CAP_ETA = {"rig": "约 40 秒～1 分钟", "paint": "约 8～20 分钟",
+            "refine": "约 1 分钟", "motion": "约 15 秒"}
+
+
+def _cap_reply(state: dict, text: str, *, ring: str = "") -> tuple:
+    """往对话里追加一条助手回复并返回 on_submit 需要的输出元组。"""
+    try:
+        conv._append_conversation(state, "assistant", "", ai_reply=text)
+        pm.save_project(state)
+    except Exception:
+        pass
+    return ("", state, *_update_ui(state, ring=ring or None))
+
+
+def _run_capability(cap: dict, state: dict):
+    """执行一次能力调用（generator，形状与 on_submit 一致：("", state, *_update_ui)）。"""
+    from backend import capability_ui as cui
+
+    action = cap["action"]
+    label = _CAP_LABEL.get(action, action)
+    src = cap.get("input") or ""
+    params = cap.get("params") or {}
+
+    yield _cap_reply(state, f"🔧 开始{label}（{cap.get('note') or ''}）—— 预计{_CAP_ETA.get(action, '一会儿')}，"
+                            f"跑完我把产物放进「我的资产」并在这里给你路径。",
+                     ring=ring_html("model"))
+
+    t0 = time.time()
+    path, msg = (None, "未执行")
+    try:
+        if action == "rig":
+            path, msg = cui.do_rig(src, params.get("tier", "template"), "auto")
+        elif action == "paint":
+            image = params.get("image") or ""
+            if not image:
+                yield _cap_reply(state, "上色需要一张参考图。先上传参考图（或先生成一张图）再说「上色」。")
+                return
+            path, msg = cui.do_paint(src, image, "快速档（预览，约 8 分钟）" if params.get("fast")
+                                     else "完整档（6 视角 · 约 20 分钟）")
+        elif action == "refine":
+            image = params.get("image") or ""
+            if not image:
+                yield _cap_reply(state, "精修需要一张参考图（用来对细节）。先上传或生成一张图再说「精修」。")
+                return
+            path, msg = cui.do_refine(image, src, int(params.get("steps", 4)))
+        elif action == "motion":
+            bvh = params.get("bvh") or ""
+            name = Path(bvh).name
+            path, msg = cui.do_motion(name, False)
+        else:
+            yield _cap_reply(state, f"不认识的能力：{action}")
+            return
+    except Exception as exc:
+        _register_report(action, state, exc)
+        yield _cap_reply(state, f"✗ {label}失败：{type(exc).__name__}: {str(exc)[:200]}\n"
+                                f"（想上报就跑 `python tools/report.py` 生成诊断包）")
+        return
+
+    ok = bool(path) and Path(str(path)).is_file()
+    el = time.time() - t0
+    if not ok:
+        _register_report(action, state, msg)
+        yield _cap_reply(state, f"✗ {label}没成功（{el:.0f}s）：{str(msg)[:240]}")
+        return
+
+    # ── 登记资产 + 更新作品状态 ──
+    kind = {"rig": "rigged", "paint": "painted", "refine": "refined", "motion": "motion"}[action]
+    metrics = _mesh_metrics(path)
+    entry = {}
+    try:
+        entry = asset_store.register(
+            path, kind, title=f"{Path(path).stem}", params=params,
+            source=f"对话 · {label}", metrics=metrics)
+    except Exception:
+        pass
+
+    try:
+        if action in ("rig", "paint", "refine"):
+            state["glb_path"] = str(path)
+            state["phase"] = "3d"
+        if action == "rig":
+            state["rigged_path"] = str(path)
+        if action == "motion":
+            state["motion_path"] = str(path)
+        if action == "paint":
+            state["painted_path"] = str(path)
+    except Exception:
+        pass
+
+    detail = " · ".join(x for x in (
+        f"{metrics.get('faces'):,} 面" if metrics.get("faces") else "",
+        "水密" if metrics.get("watertight") else "",
+        f"{metrics.get('textures')} 贴图" if metrics.get("textures") else "",
+        f"{metrics.get('joints')} 关节" if metrics.get("joints") else "",
+        f"{metrics.get('animations')} 段动画" if metrics.get("animations") else "",
+    ) if x)
+
+    reply = (f"✅ {label}完成（{el:.0f}s）\n"
+             f"· 产物：`{path}`\n"
+             + (f"· 指标：{detail}\n" if detail else "")
+             + (f"· 资产编号：`{entry.get('id')}`（已放进「我的资产」）" if entry.get("id") else "")
+             + f"\n· {str(msg)[:160]}")
+    yield _cap_reply(state, reply, ring=ring_html("model", el, done=True))
+
+
+def _mesh_metrics(path) -> dict:
+    """给资产库用的体检：面数/水密/贴图/关节/动画（失败就空着，不影响主流程）。"""
+    out = {}
+    try:
+        import json as _json
+        import struct as _struct
+
+        p = Path(path)
+        if p.suffix.lower() == ".glb":
+            raw = p.read_bytes()
+            clen, ctype = _struct.unpack("<II", raw[12:20])
+            doc = _json.loads(raw[20:20 + clen].decode("utf-8"))
+            out["textures"] = len(doc.get("textures") or [])
+            out["joints"] = sum(len(s.get("joints") or []) for s in (doc.get("skins") or []))
+            out["animations"] = len(doc.get("animations") or [])
+    except Exception:
+        pass
+    try:
+        import trimesh
+        m = trimesh.load(str(path), force="mesh")
+        out["faces"] = int(len(m.faces))
+        out["watertight"] = bool(m.is_watertight)
+    except Exception:
+        pass
+    return out
+
+
+def _register_report(action: str, state: dict, err) -> None:
+    """把失败写进 logs/capability-failures.jsonl，诊断包会带上。
+
+    为什么不留到"用户来报"：开源项目里 90% 的失败用户根本不会说，
+    下次有人报同类问题时我们能直接看到历史。
+    """
+    try:
+        import json as _json
+        p = Path(__file__).parent / "logs" / "capability-failures.jsonl"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        rec = {"time": time.strftime("%Y-%m-%d %H:%M:%S"), "action": action,
+               "error": str(err)[:600], "version": (Path(__file__).parent / "VERSION")
+               .read_text(encoding="utf-8").strip() if (Path(__file__).parent / "VERSION").is_file() else "",
+               "project": (state or {}).get("folder", "")}
+        with p.open("a", encoding="utf-8") as f:
+            f.write(_json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 # ══════════════════════════════════════════════════════════════════

@@ -52,6 +52,36 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.8.4 — 对话直达能力 / 资产库 / 一键开始 / 问题上报（2026-11-27）
+
+**① 对话直达能力**（`backend/capability_router.py`）
+在对话框里说「给它绑骨骼 / 上个色 / 精修一下 / 做个走路动画」直接干活，不走 LLM 绕圈。
+- 识别：能力词 + **必须有产物**；「做一个会走路的机器人」「设计一个杯子」不会被抢
+- 参数从话里捞：`精修 15 步`、`用 RigAnything 绑骨骼`、`让它跑起来`
+- 跑完把产物路径、面数/水密/关节数、资产编号直接回在对话里
+
+**② 资产库**（`backend/assets.py`）
+- 统一存放 `outputs/assets/<kind>/`，索引 `index.json`
+- **同内容去重**（sha256），删除同时清文件和索引
+- 容量上限 8 GB（`FORGEFORM_ASSET_MAX_BYTES` 可改），超了按时间淘汰最旧的
+- 界面「🛠 能力工作台 → ⑥ 我的资产」按类型/时间列出，带指标
+- 实测：12 件归档 + 1 件对话产物 = 13 件 / 240.7 MB
+
+**③ 一键开始**（`一键开始.ps1`）
+找 Python（PATH + 常见安装目录）→ `doctor --fix` → 启动。体检不过会**直接说缺什么**，
+不会假装启动成功。`install.ps1` 也补了体检（版本从 v3.0.0 升到当前）。
+
+**④ 问题上报**（`tools/doctor.py` / `tools/report.py`）
+- `doctor`：10 项体检（Python/依赖/GPU/torch-CUDA/ComfyUI/配置/目录/磁盘/权重/端口），
+  每项失败都给修复命令；`--fix` 自动建目录、补配置
+- `report`：生成脱敏诊断包 zip（key/token/密码打码、家目录换 `~`、日志尾部，
+  附 `capability-failures.jsonl`），本机实测零明文密钥
+- `.github/ISSUE_TEMPLATE/bug_report.yml`：带"先跑 report.py"的引导
+- `docs/QUICKSTART.md`：5 分钟上手，每步都有"怎么确认成功"
+
+**测试**：新增 6 个（资产去重/删除、未知类型拒绝、路由命中与不抢、体检结构、
+诊断包脱敏），全量 pytest 通过，`verify.py` 152/152。
+
 ## v3.8.3 — 五项能力接进界面 + 各路线成品总览（2026-11-27）
 
 **能力工作台（界面）**：`backend/capability_ui.py`，在 app 里挂一个「🛠 能力工作台」折叠面板，

@@ -21,9 +21,9 @@ $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 
 $Repo = 'TIANKONGskyy/forgeform'
-$Tag  = 'v3.0.0'
-$Zip  = 'forgeform-v3.0.0.zip'
-$DirName = 'forgeform-v3.0.0'
+$Tag  = 'v3.8.4'
+$Zip  = 'forgeform-v3.8.4.zip'
+$DirName = 'forgeform-v3.8.4'
 
 $Sources = @(
     "https://github.com/$Repo/releases/download/$Tag/$Zip",
