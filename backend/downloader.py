@@ -187,10 +187,9 @@ def download(item: dict, meter: Meter, *, conns: int = DEFAULT_CONNS,
                 if abs(size - want) > tol:
                     raise RuntimeError(f"大小不合理：服务器 {size:,} vs 清单 {want:,}（容差 {tol:,}）")
             log(f"[{name}] {host} size={size/1024/1024:.0f}MB ranges={ranges}")
-            # 预分配（不分配也行，但 seek 写稀疏文件在 Windows 上更慢）
-            with open(part, "wb") as f:
-                if size > 0:
-                    f.truncate(size)
+            # 不预分配：truncate 出来的稀疏文件 st_size 立刻等于目标值，
+            # 校验就失效了（实测 1.99 GB 的包在没下完时就报"大小正确"）。
+            part.write_bytes(b"")
             progress = {"done": 0, "total": size}
             if ranges and size > 32 * 1024 * 1024 and conns > 1:
                 step = size // conns
@@ -199,11 +198,14 @@ def download(item: dict, meter: Meter, *, conns: int = DEFAULT_CONNS,
                     s = i * step
                     e = size - 1 if i == conns - 1 else (s + step - 1)
                     spans.append((s, e))
+                written_total = 0
                 with ThreadPoolExecutor(max_workers=len(spans)) as ex:
                     futs = [ex.submit(_range_worker, url, part, s, e, meter, stop, progress)
                             for s, e in spans]
                     for f in as_completed(futs):
-                        f.result()
+                        written_total += int(f.result() or 0)
+                if written_total < size:
+                    raise RuntimeError(f"分段没下完：{written_total:,} / {size:,} 字节")
             else:
                 _range_worker(url, part, 0, -1, meter, stop, progress)
 

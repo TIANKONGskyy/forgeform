@@ -62,13 +62,14 @@ def _comfy_portable() -> dict:
     """ComfyUI 便携版：直接用官方 release 的 zip（不用 7z，Windows 自带解压）。"""
     return {
         "name": "ComfyUI-portable",
-        "url": "https://github.com/comfyanonymous/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z",
+        # 实测（2026-11-28）：github.com 直连超时，gh-proxy 能到 1.99 GB → 镜像放首位
+        "url": "https://gh-proxy.com/https://github.com/comfyanonymous/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z",
         "mirrors": [
-            "https://gh-proxy.com/https://github.com/comfyanonymous/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z",
             "https://ghfast.top/https://github.com/comfyanonymous/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z",
+            "https://github.com/comfyanonymous/ComfyUI/releases/latest/download/ComfyUI_windows_portable_nvidia.7z",
         ],
         "dest": str(Path(os.environ.get("TEMP", ".")) / "ComfyUI_windows_portable.7z"),
-        "bytes_hint": 1_600_000_000,
+        "bytes_hint": 2_085_000_000,
         "kind": "archive",
     }
 
@@ -199,6 +200,70 @@ def _pip_comfy(log) -> str:
     return "ok"
 
 
+
+def _install_comfy_source(log) -> str:
+    """源码装 ComfyUI：git clone（gh-proxy）+ pip 依赖。
+
+    ★ 2026-11-28 实测：便携版 1.99 GB，走镜像只有 0.3–1.3 MB/s（要 1 小时以上）；
+      而源码只有几十 MB，本机已有 torch，pip 依赖也能走国内源。
+      所以默认走源码，便携版留作 --comfy portable 的回退。
+    """
+    if (COMFY / "main.py").is_file():
+        return "已存在"
+    urls = ["https://gh-proxy.com/https://github.com/comfyanonymous/ComfyUI.git",
+            "https://ghfast.top/https://github.com/comfyanonymous/ComfyUI.git",
+            "https://github.com/comfyanonymous/ComfyUI.git"]
+    # 目标目录可能已经存在（先跑过 3D-Pack clone / 下过权重）→ 先 clone 到临时目录再合并，
+    # 直接 clone 会因为 "not an empty directory" 退出码 128（2026-11-28 实测）
+    COMFY.mkdir(parents=True, exist_ok=True)
+    tmp = COMFY / "_comfy_clone"
+    if tmp.exists():
+        shutil.rmtree(tmp, ignore_errors=True)
+    err = ""
+    for u in urls:
+        try:
+            log(f"    clone {u.split('/')[2]} ...")
+            _sh(["git", "clone", "--depth", "1", u, str(tmp)], timeout=1200)
+            break
+        except Exception as e:
+            err = str(e)
+    else:
+        raise RuntimeError(err)
+    for item in tmp.iterdir():
+        dest = COMFY / item.name
+        if dest.exists():
+            continue
+        shutil.move(str(item), str(dest))
+    shutil.rmtree(tmp, ignore_errors=True)
+    req = COMFY / "requirements.txt"
+    if req.is_file():
+        el = os.environ.get("PIP_INDEX_URL") or "https://pypi.tuna.tsinghua.edu.cn/simple"
+        # ★ 2026-11-28 实测：ComfyUI 新版依赖要求 Python >=3.12
+        #   （comfyui-workflow-templates-* Requires-Python >=3.12），
+        #   用 3.11 的解释器装会直接失败。优先挑一个 ≥3.12 的解释器。
+        interp = os.environ.get("FORGEFORM_COMFY_PY") or ""
+        if not interp:
+            cands = []
+            for name in ("python", "python3"):
+                q = shutil.which(name)
+                if q:
+                    cands.append(q)
+            cands.append(sys.executable)
+            for c in cands:
+                try:
+                    v = subprocess.check_output([c, "-c", "import sys;print('%d.%d'%sys.version_info[:2])"],
+                                                text=True, timeout=15).strip()
+                    if tuple(int(x) for x in v.split(".")) >= (3, 12):
+                        interp = c
+                        break
+                except Exception:
+                    continue
+            interp = interp or sys.executable
+        log(f"    pip 用解释器：{interp}")
+        _sh([interp, "-m", "pip", "install", "-q", "-i", el, "-r", str(req)],
+            timeout=3600)
+    return "源码安装完成"
+
 def _extract_archive(log) -> str:
     """解压 ComfyUI 便携版（7z 用 7z.exe，zip 用 Python）。"""
     src = _comfy_portable()["dest"]
@@ -208,9 +273,20 @@ def _extract_archive(log) -> str:
     if target.exists() and any(target.iterdir()):
         return "已存在"
     seven = shutil.which("7z") or r"C:\Program Files\7-Zip\7z.exe"
-    if Path(src).suffix.lower() == ".7z" and Path(seven).is_file():
-        _sh([seven, "x", src, f"-o{target.parent}", "-y"], timeout=1800)
-        return "7z"
+    if Path(src).suffix.lower() == ".7z":
+        if Path(seven).is_file():
+            _sh([seven, "x", src, f"-o{target.parent}", "-y"], timeout=1800)
+            return "7z"
+        # 本机实测很多 Windows 没装 7-Zip（2026-11-28）→ 用纯 Python 的 py7zr 兜底
+        try:
+            import py7zr  # noqa: F401
+        except Exception:
+            log("  · 没有 7-Zip，尝试装 py7zr")
+            _sh([sys.executable, "-m", "pip", "install", "-q", "py7zr"], timeout=600)
+        import py7zr
+        with py7zr.SevenZipFile(src, mode="r") as z:
+            z.extractall(path=target.parent)
+        return "py7zr"
     import zipfile
     with zipfile.ZipFile(src) as z:
         z.extractall(target.parent)
@@ -231,6 +307,8 @@ def main(argv=None) -> int:
     ap.add_argument("--only", default="core", choices=list(SUITES))
     ap.add_argument("--workers", type=int, default=8, help="同时下几个文件")
     ap.add_argument("--conns", type=int, default=8, help="单文件几条连接（镜像限速时越多越快）")
+    ap.add_argument("--comfy", default="source", choices=["source", "portable"],
+                    help="ComfyUI 安装方式：source=clone+pip（快，默认）；portable=便携版 1.99GB")
     ap.add_argument("--dry-run", action="store_true")
     ns = ap.parse_args(argv)
 
@@ -238,6 +316,12 @@ def main(argv=None) -> int:
         print(s, flush=True)
 
     items = weight_items(ns.only)
+    # ★ 2026-11-28 实测：ComfyUI 便携版之前只登记了 URL，压根没进下载队列，
+    #   结果"解压 ComfyUI"必然失败。这里把它并进同一批（同样多线程下）。
+    if ns.comfy == "portable":
+        comfy_item = _comfy_portable()
+        comfy_item.pop("kind", None)
+        items = items + [comfy_item]
     total_hint = sum(int(i.get("bytes_hint") or 0) for i in items)
     log(f"  套件 {ns.only}：{SUITES[ns.only]}")
     log(f"  权重 {len(items)} 个，约 {total_hint/1024**3:.1f} GB；"
@@ -255,7 +339,13 @@ def main(argv=None) -> int:
     meter_box: dict = {}
 
     def download_task():
-        res = downloader.download_all(items, workers=ns.workers, conns=ns.conns, log=log)
+        import time as _t
+
+        def _tick(p):
+            log(f"    … {p['mb']:7.0f} MB  当前 {p['mbps']:5.1f} MB/s  峰值 {p['peak']:5.1f} MB/s")
+
+        res = downloader.download_all(items, workers=ns.workers, conns=ns.conns,
+                                      log=log, on_progress=_tick)
         meter_box["results"] = res
         bad = [r for r in res if not r.get("ok")]
         if bad:
@@ -272,9 +362,12 @@ def main(argv=None) -> int:
 
     # 三条互不依赖的线同时推进：下载（内部再并行）、解压、clone；
     # pip 装铸想依赖与它们并行；ComfyUI 的 pip 要等解压+clone；配置与体检最后。
+    comfy_job = (("安装 ComfyUI(源码)", lambda: _install_comfy_source(log), [])
+                 if ns.comfy == "source"
+                 else ("解压 ComfyUI", lambda: _extract_archive(log), []))
     jobs = [
         ("下载权重", download_task, []),
-        ("解压 ComfyUI", _extract_archive, []),
+        comfy_job,
         ("3D-Pack 仓库", lambda: _clone_pack(log), []),
         ("铸想依赖(pip)", _pip_main, []),
     ]
