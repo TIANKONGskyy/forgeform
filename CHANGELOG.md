@@ -52,6 +52,25 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.9.4 — ComfyUI 一键安装脚本（2026-11-28）
+
+新增 `tools/install_comfy.py`：把端到端实测里踩过的 ComfyUI 安装步骤固化成一条命令。
+
+```
+python tools/install_comfy.py
+# venv(D盘) → torch 2.7.1+cu126 → ComfyUI 源码(zip) → requirements(过滤模板包)
+# → 3D-Pack/GGUF 节点包 → 39 个实测缺失依赖 → kiui/utils3d → 启动并验证节点
+# → 输出五项能力就绪情况
+```
+
+实测：479 秒装完，ComfyUI 起在 8188，1097 个节点，GGUF 加载器可用。
+关键保护：**覆盖源码时绝不删 `models/`**（之前因此白下 11 GB 权重）。
+
+新增 `tools/make_cuda_stubs.py`：给 `pytorch3d` / `nvdiffrast` 生成占位包，
+用于排查"缺编译扩展导致整个节点包 import 失败"的问题。
+实测结论：占位包能让部分包 import 通过，但 3D-Pack 在 import 阶段真实调用 pytorch3d，
+绕不过去 —— 多视图仍需真正编译 pytorch3d。
+
 ## v3.9.3 — 能力就绪检查（2026-11-28）
 
 新增 `tools/capability_doctor.py`：一条命令列出五项能力的状态与补法，

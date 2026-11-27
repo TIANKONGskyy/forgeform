@@ -117,3 +117,31 @@
 没有动作包时才回退到"基础骨架工程 + BVH 现场重定向"。
 
 实测：`do_motion("02_01.bvh")` → 直接交付 `motion_walk_*.blend`，52 骨具名动作。
+
+## 补充：3D-Pack 的依赖链实测（2026-11-28 07:0x–07:4x）
+
+为了跑通多视图，把 ComfyUI + 3D-Pack 重装了一遍，逐个补依赖，实测链路是：
+
+```
+pytorch3d → nvdiffrast → torch_scatter → spconv → pytorch_msssim → (pytorch3d API 真实调用)
+```
+
+前五个都能用「纯 Python 占位包」或预编译轮子骗过 import，但最后一步是
+**3D-Pack 在 import 阶段就真的调用 pytorch3d 的相机/结构 API**，占位包返回的
+空对象过不去（它自己的日志只打 `********** ERROR ***********`）。
+
+**结论**：多视图 / 贴图 / 精修 三条路都卡在"编译型 CUDA 扩展"上，不是缺个 pip 包：
+
+| 能力 | 卡点 | 性质 |
+|---|---|---|
+| 多视图 | pytorch3d 在 import 阶段被真实调用 | 必须编出 pytorch3d（Windows 无轮子） |
+| 贴图 | custom_rasterizer 内核按旧 torch 编译 | 必须用同版本 torch 重编 |
+| 精修 | Direct3D third_party CUDA 扩展 | 必须有源码 + 编译 |
+
+三条都需要「对应 torch 版本的预编译轮子」或「现场编译环境」，属于环境问题，
+不是铸想代码缺陷。产品侧已通过 `capability_doctor` 把这三条标成 blocked 并给出补法。
+
+**已沉淀的工具**：
+- `tools/install_comfy.py`：一条命令装 ComfyUI（venv→torch 2.7→源码 zip→依赖→节点包→启动验证→能力检查），
+  实测 479 s 装完，ComfyUI 1097 节点、GGUF 节点可用
+- `tools/make_cuda_stubs.py`：给 pytorch3d/nvdiffrast 生成占位包（部分场景可绕过 import；3D-Pack 不行，已在上面说明）
