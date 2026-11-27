@@ -26,6 +26,7 @@ from backend.startup import StartupChecker  # noqa: E402
 from backend import describer  # noqa: E402
 from backend import project_manager as pm  # noqa: E402  # 参考图上传要用（save_selected_image / save_project）
 from backend import intent_classifier as ic  # noqa: E402
+from backend import asset_ui  # 产物库（左列）
 from backend import capability_router as cap_router  # noqa: E402  # 能力路由（绑骨骼/上色/精修/动画）
 from backend import assets as asset_store  # noqa: E402  # 资产库（统一登记产物）
 
@@ -255,7 +256,8 @@ def build_sidebar(state: dict) -> str:
                     f'<span class="v">{val}</span></div>')
 
         detail_html = (
-            '<div class="sb-sec"><div class="sb-label">模型详情</div>'
+            '<details class="sb-details"><summary>模型详情</summary>'
+            '<div class="sb-sec">'
             '<div class="mi-head">出图 · ' + str(_pi.get("family") or _pi.get("name") or "—") + '</div>'
             + _row("厂商", _pi.get("vendor", ""))
             + _row("参数", _pi.get("params", ""))
@@ -279,7 +281,9 @@ def build_sidebar(state: dict) -> str:
             + _row("框架", _cl.get("backend", ""))
             + _row("吞吐", _cl.get("timing", ""))
             + '</div>'
+            + '</details>'
         )
+
     except Exception as _e:
         detail_html = ""
 
@@ -1378,18 +1382,19 @@ def build():
             )
             btn_new_top = gr.Button("➕ 新建作品", variant="secondary", scale=1, min_width=96)
 
-        # 独立参数化工作台，不修改对话项目状态。
-        from backend.cultural_ui import render as render_cultural_lab
-        render_cultural_lab()
-
-        # ★ 2026-11-27：五项能力工作台（骨骼/贴图/精修/多视图/动画）。
-        #   同样走"自带控件、不动主对话流程"的扩展点写法。
-        from backend.capability_ui import render as render_capabilities
-        render_capabilities()
-
         # ── 主体：左侧对话区（宽）+ 右侧侧边栏（窄）────
         with gr.Row(elem_classes="main-wrap"):
             # 对话区（宽，占主视觉）
+            # 左列：产物库（常驻）。所有能力产物自动入库，点「打开」直接进查看器
+            with gr.Column(scale=2, min_width=200, elem_classes="asset-col"):
+                asset_side = gr.HTML(asset_ui.sidebar_html(), elem_id="asset_side")
+                asset_pick = gr.Dropdown(choices=asset_ui.choices(), value=None,
+                                         label="选择产物", show_label=True,
+                                         container=False, elem_id="asset_pick")
+                with gr.Row(elem_classes="asset-actions"):
+                    asset_refresh = gr.Button("刷新", size="sm", elem_id="asset_refresh")
+                    asset_open = gr.Button("打开", size="sm", variant="secondary",
+                                           elem_id="asset_open")
             with gr.Column(scale=7, min_width=300, elem_classes="chat-col"):
                 # 欢迎页（空对话时显示）
                 hero = gr.HTML(HERO_HTML, visible=False,
@@ -1516,6 +1521,11 @@ def build():
             with gr.Column(scale=3, min_width=260, elem_classes="side-col"):
                 sidebar = gr.HTML(build_sidebar(initial), elem_id="sidebar")
 
+        # ★ 2026-11-27：五项能力工作台挪到主区下方 —— 放在对话上方会让
+        #   首屏变成"三个折叠面板 + 对话框"，而且和产物库重复（产物都进左列了）。
+        from backend.capability_ui import render as render_capabilities
+        render_capabilities()
+
         # ── 事件绑定 ──────────────────────────────────────
         # 12 个：chat, hero, viewer, 6 按钮, sidebar, history, **进度环**
         # （改这里必须同步 _update_ui 的返回值元数）
@@ -1574,6 +1584,21 @@ def build():
         btn_stl.click(fn=on_btn_export_stl, inputs=[state], outputs=[state] + ui_outputs)
         btn_new.click(fn=on_btn_new, inputs=[state], outputs=[state] + ui_outputs)
         btn_new_top.click(fn=on_btn_new, inputs=[state], outputs=[state] + ui_outputs)
+
+        # ── 产物库：刷新 / 打开 ─────────────────────────────
+        def _asset_refresh():
+            return asset_ui.sidebar_html(), gr.update(choices=asset_ui.choices())
+
+        def _asset_open(path):
+            if not path:
+                return gr.update()
+            return gr.update(value=path, visible=True)
+
+        asset_refresh.click(_asset_refresh, outputs=[asset_side, asset_pick],
+                            api_name="asset_refresh")
+        asset_open.click(_asset_open, inputs=[asset_pick], outputs=[viewer],
+                         api_name="asset_open")
+
 
         history_dd.input(fn=on_switch_project, inputs=[history_dd], outputs=[state]).then(
             fn=_update_ui, inputs=[state], outputs=ui_outputs).then(

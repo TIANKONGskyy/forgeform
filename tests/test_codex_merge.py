@@ -630,3 +630,35 @@ def test_bootstrap_plan_covers_suites():
             assert it["url"].startswith("http")
             assert Path(it["dest"]).is_absolute()
     assert "core" in mod.SUITES and "all" in mod.SUITES
+
+# ────────────────── 2026-11-27 产物库与界面精简 ──────────────────
+
+def test_asset_ui_renders_three_views():
+    """产物库要能渲染：左列（紧凑）、整页（分组卡片）、下拉选项。"""
+    from backend import asset_ui
+
+    side = asset_ui.sidebar_html()
+    assert "产物库" in side
+    assert "ast-head" in side
+
+    page = asset_ui.page_html()
+    assert "ast-page-empty" in page or "ast-group" in page
+
+    opts = asset_ui.choices()
+    assert isinstance(opts, list)
+    for o in opts[:3]:
+        assert len(o) == 2 and o[1].lower().endswith((".glb", ".stl", ".blend"))
+
+
+def test_app_layout_has_asset_column_and_no_cultural_lab():
+    """左列产物库必须在；文创工作台不该再占首屏（用户反馈界面没必要）。"""
+    import inspect
+
+    import app as app_mod
+
+    src = inspect.getsource(app_mod.build)
+    assert "asset-col" in src, "缺左列产物库"
+    assert "asset_side" in src and "asset_refresh" in src
+    assert "render_cultural_lab" not in src, "文创工作台应已移出主界面"
+    # 能力台仍然要在（只是挪到主区下方）
+    assert "render_capabilities" in src

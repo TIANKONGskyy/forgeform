@@ -97,12 +97,12 @@ def _free_gpu() -> str:
 
 
 def _asset_html() -> str:
-    """资产面板内容（读索引，失败给空态）。"""
+    """资产面板内容：与左列产物库同一套视觉（2026-11-27 统一装饰）。"""
     try:
-        from . import assets as asset_store
-        return asset_store.render_html()
+        from . import asset_ui
+        return asset_ui.page_html()
     except Exception as e:
-        return f'<div class="asset-empty">资产索引读取失败：{type(e).__name__}</div>'
+        return f'<div class="ast-page-empty">资产索引读取失败：{type(e).__name__}</div>'
 
 def _fmt(r: dict, keys) -> str:
     parts = []

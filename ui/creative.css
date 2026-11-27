@@ -333,3 +333,68 @@ body[data-ff-theme="light"] .gradio-container.gradio-container .contain #model_3
  .navbar .nav-logo{white-space:nowrap!important;font-size:17px!important;letter-spacing:1px!important}
  .navbar>button[id*="new"]{white-space:nowrap!important;min-width:90px!important}
 }
+
+/* ─────────── 产物库（2026-11-27）─────────── */
+.asset-col{align-self:flex-start!important;position:sticky!important;top:12px!important}
+.asset-col .ast-head{display:flex!important;align-items:baseline!important;justify-content:space-between!important;
+ gap:8px!important;padding:2px 2px 8px!important;border-bottom:1px solid var(--ff-line)!important}
+.asset-col .ast-title{font-size:13px!important;font-weight:600!important;letter-spacing:.08em!important;
+ color:var(--ff-text)!important;text-transform:uppercase!important}
+.asset-col .ast-count{font-size:11px!important;color:var(--ff-muted)!important}
+.asset-col .ast-empty{padding:18px 6px!important;font-size:12px!important;line-height:1.7!important;
+ color:var(--ff-muted)!important}
+.asset-col .ast-list{display:flex!important;flex-direction:column!important;gap:4px!important;
+ max-height:min(52vh,460px)!important;overflow:auto!important;padding:6px 2px 0!important}
+.asset-col .ast-item{display:flex!important;gap:8px!important;align-items:center!important;
+ padding:7px 8px!important;border:1px solid var(--ff-line)!important;border-left:2px solid var(--k)!
+ important;border-radius:8px!important;background:color-mix(in srgb,var(--ff-panel) 82%,transparent)!important}
+.asset-col .ast-glyph{color:var(--k)!important;font-size:13px!important;line-height:1!important;flex:0 0 auto!important}
+.asset-col .ast-body{display:flex!important;flex-direction:column!important;min-width:0!important}
+.asset-col .ast-name{font-size:12px!important;color:var(--ff-text)!important;white-space:nowrap!
+ important;overflow:hidden!important;text-overflow:ellipsis!important}
+.asset-col .ast-meta{font-size:10.5px!important;color:var(--ff-muted)!important;white-space:nowrap!important;
+ overflow:hidden!important;text-overflow:ellipsis!important}
+.asset-col .asset-actions{flex-wrap:nowrap!important;gap:6px!important}
+.asset-col .asset-actions button{min-height:30px!important;font-size:12px!important}
+.asset-col #asset_pick{min-height:32px!important}
+/* 整页产物库（能力台里那份）*/
+.ast-group{margin:6px 0 18px!important}
+.ast-group h3{display:flex!important;align-items:center!important;gap:8px!important;font-size:13px!important;
+ font-weight:600!important;color:var(--ff-text)!important;margin:0 0 10px!important}
+.ast-group h3 span{color:var(--k)!important}
+.ast-group h3 em{font-style:normal!important;font-size:11px!important;color:var(--ff-muted)!important;
+ border:1px solid var(--ff-line)!important;border-radius:99px!important;padding:1px 7px!important}
+.ast-grid{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(180px,1fr))!important;gap:10px!important}
+.ast-card{border:1px solid var(--ff-line)!important;border-top:2px solid var(--k)!important;border-radius:10px!
+ important;padding:10px 11px!important;background:color-mix(in srgb,var(--ff-panel) 88%,transparent)!important}
+.ast-card-top{display:flex!important;align-items:center!important;gap:7px!important}
+.ast-card-top .ast-glyph{color:var(--k)!important;font-size:13px!important}
+.ast-card-name{font-size:12.5px!important;color:var(--ff-text)!important;white-space:nowrap!important;
+ overflow:hidden!important;text-overflow:ellipsis!important}
+.ast-card-meta{margin-top:5px!important;font-size:11px!important;color:var(--ff-muted)!important}
+.ast-card-time{margin-top:2px!important;font-size:10px!important;color:var(--ff-muted)!important;opacity:.75!important}
+.ast-page-empty{padding:26px 8px!important;color:var(--ff-muted)!important;font-size:13px!important;line-height:1.8!important}
+body[data-ff-theme="light"] .asset-col .ast-item{background:#fff!important;border-color:#d7e2ea!important}
+body[data-ff-theme="light"] .ast-card{background:#fff!important;border-color:#d7e2ea!important}
+@media(max-width:980px){.asset-col{position:static!important}
+ .asset-col .ast-list{max-height:180px!important}}
+
+
+/* 2026-11-27 追加：产物库按钮排布 + 按钮文字不竖排 + 侧边栏折叠 */
+.asset-col .asset-actions{display:flex!important;flex-direction:row!important;gap:6px!important}
+.asset-col .asset-actions>button{flex:1 1 0!important;min-width:0!important;white-space:nowrap!important}
+.asset-col #asset_pick{width:100%!important}
+.reference-panel #btn_edit_submit{white-space:nowrap!important;min-width:96px!important;flex:0 0 auto!important}
+.reference-panel .input-row-upload{gap:8px!important;flex-wrap:nowrap!important}
+.reference-panel .input-row-upload> :first-child{flex:1 1 auto!important;min-width:0!important}
+.side-col details>summary{cursor:pointer!important;font-size:12px!important;color:var(--ff-muted)!important;
+ padding:4px 0!important;list-style:none!important}
+.side-col details>summary::-webkit-details-marker{display:none!important}
+.side-col details>summary:before{content:"▸ "!important;color:var(--ff-accent,#8b5cf6)!important}
+.side-col details[open]>summary:before{content:"▾ "!important}
+/* 左列窄屏时收到中间下方，避免三列挤压 */
+@media(max-width:1180px){
+ .main-wrap{flex-wrap:wrap!important}
+ .asset-col{order:2!important;flex:1 1 100%!important;max-width:100%!important}
+ .asset-col .ast-list{max-height:170px!important}
+}
