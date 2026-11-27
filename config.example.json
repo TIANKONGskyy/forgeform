@@ -5,12 +5,13 @@
   },
   "agent": {
     "enabled": true,
-    "provider": "strata",
+    "provider": "remote",
     "tuned_url": "http://127.0.0.1:8082",
     "prompt_style": "compact",
     "strata_url": "http://127.0.0.1:8091/v1",
     "strata_model": "qwen3.8-flash-next-iq3_s",
-    "_doc": "provider: strata=本地 OpenAI 兼容推理服务(agent.strata_url)；ollama=Ollama；off=纯规则模式不调 LLM"
+    "_doc": "provider: remote=OpenAI 兼容远程（models.llm.remote，推荐，不装本地模型）；ollama=本地 Ollama；strata=本地 Strata 服务；off=纯规则模式。没配 remote 会自动降级到规则模板，不会崩。",
+    "model": ""
   },
   "app": {
     "name": "铸想 ForgeForm",
@@ -50,7 +51,15 @@
         }
       },
       "_think": "low",
-      "_think_note": "默认推理档位。实测 gpt-oss-20b 在 low/medium/high 的判断命中都是 5/5；high/medium 会把预算烧在思考上导致首轮正文为空，故默认 low"
+      "_think_note": "默认推理档位。实测 gpt-oss-20b 在 low/medium/high 的判断命中都是 5/5；high/medium 会把预算烧在思考上导致首轮正文为空，故默认 low",
+      "remote": {
+        "base_url": "",
+        "model": "",
+        "api_key_env": "FORGEFORM_LLM_KEY",
+        "temperature": 0.4,
+        "max_tokens": 1200,
+        "timeout": 120
+      }
     },
     "image": {
       "flux": {

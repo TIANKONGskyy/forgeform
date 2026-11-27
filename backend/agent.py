@@ -362,6 +362,48 @@ def is_ready() -> bool:
     return describer.is_model_resident()
 
 
+def provider_available() -> bool:
+    """当前 provider 在这台机器上到底能不能用（零模型安装时用来快速跳过预热）。
+
+    ★ 2026-11-28 实测：全新安装（没 Ollama 也没 Strata）启动时会先花几秒
+      尝试"卸载 Ollama"再"启动 Strata"，日志里两行报错，用户以为装坏了。
+      provider=remote 且没配 base_url 时同理，应直接判定不可用。
+    """
+    prov = _provider()
+    if prov in ("off", "none"):
+        return False
+    if prov == "remote":
+        try:
+            from . import describer
+            return describer.remote_ready()
+        except Exception:
+            return False
+    if prov == "strata":
+        try:
+            import urllib.request as _u
+            url = (_agent_cfg().get("strata_url") or "").rstrip("/")
+            if not url:
+                return False
+            with _u.urlopen(url + "/models", timeout=3) as r:
+                return r.status == 200
+        except Exception:
+            return False
+    if prov == "tuned":
+        try:
+            import urllib.request as _u
+            with _u.urlopen(tuned_url() + "/health", timeout=3) as r:
+                return r.status == 200
+        except Exception:
+            return False
+    # 其余都当 Ollama
+    try:
+        import urllib.request as _u
+        with _u.urlopen("http://127.0.0.1:11434/api/tags", timeout=3) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
 def warm_up(timeout: int = 300) -> bool:
     """把 agent 要用的模型拉起来：tuned → 让微调服务懒加载（只加载、不生成）；否则预热 Ollama。
 
@@ -369,6 +411,9 @@ def warm_up(timeout: int = 300) -> bool:
       qwen3.8 27B 占 17-21GB，ComfyUI 常驻 14GB —— 32GB 卡装不下，
       不先让路的话 Ollama 会被挤到系统内存（表现是"模型加载了但奇慢"）。
     """
+    if not provider_available():
+        print(f"[agent] provider={_provider()} 本机不可用，跳过预热（这是正常的）", flush=True)
+        return False
     from . import gpu_state
     if gpu_state.is_generating():
         print("[agent] ComfyUI 正在出图/建模，跳过对话模型预热（避免抢显存）")

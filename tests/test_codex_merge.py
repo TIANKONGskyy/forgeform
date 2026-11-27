@@ -662,3 +662,34 @@ def test_app_layout_has_asset_column_and_no_cultural_lab():
     assert "render_cultural_lab" not in src, "文创工作台应已移出主界面"
     # 能力台仍然要在（只是挪到主区下方）
     assert "render_capabilities" in src
+
+# ────────────────── 2026-11-28 全新安装实测修的两处 ──────────────────
+
+def test_doctor_treats_placeholder_comfyui_as_unconfigured(tmp_path: Path, monkeypatch):
+    """config.example.json 里的 ${COMFYUI_DIR} 是占位符，不能报成"目录不存在"。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("ff_doc3", r"D:\ForgeForm-oss\tools\doctor.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    monkeypatch.setattr(mod, "ROOT", tmp_path)
+    (tmp_path / "config.json").write_text('{"paths": {"comfyui": "${COMFYUI_DIR}"}}',
+                                          encoding="utf-8")
+    r = mod.check_comfy()
+    assert r["ok"] is False
+    assert "还没配置" in r["detail"]
+    assert "bootstrap_models" in r["fix"]
+
+
+def test_agent_provider_available_false_without_services(monkeypatch):
+    """零模型机器上 provider 不可用时，warm_up 必须立刻返回 False（不尝试卸载/启动）。"""
+    from backend import agent
+
+    monkeypatch.setattr(agent, "_agent_cfg", lambda: {"provider": "remote"})
+    monkeypatch.setattr(agent, "_provider", lambda: "remote")
+    from backend import describer
+    monkeypatch.setattr(describer, "remote_ready", lambda: False)
+
+    assert agent.provider_available() is False
+    assert agent.warm_up() is False

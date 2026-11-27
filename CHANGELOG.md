@@ -52,6 +52,29 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.8.9 — 全新安装实测修的四处（2026-11-28）
+
+在本机（模型全删、无 ComfyUI/Ollama）按用户姿势真跑了一遍 `install.ps1`：
+
+**跑通的**：解析到 v3.8.8 → 镜像下载 3.96 MB → 解压 → pip 依赖 → doctor 自动建目录/补配置 → 9/10
+
+**修掉的**
+
+1. **install.ps1 死等 GitHub**：第一源是 github.com，直连超时要等 180 s 才回落。
+   现在镜像优先（gh-proxy → ghfast → github），每个源 30 s 超时。
+2. **install.ps1 版本写死 v3.8.4**：装完是旧版。现在先解析 `releases/latest` 的 tag，
+   解析不到才用 pin。
+3. **占位符被报成"目录不存在"**：`config.example.json` 里写 `${COMFYUI_DIR}`，
+   doctor 直接判它不存在，新手第一眼以为配错了。现在识别为"还没配置"并给出
+   `bootstrap_models.py --only core` 的具体命令。
+4. **零模型启动时白折腾**：会先"卸载 Ollama"再"启动 Strata"，两条报错吓人。
+   新增 `agent.provider_available()`，provider 用不了就一行日志跳过预热。
+
+另外 `config.example.json` 的默认 provider 从 `strata` 改成 `remote`
+（远程 OpenAI 兼容，没配就自动降级规则模板），不再假设装的人有本地大模型。
+
+**测试**：新增 2 个（占位符识别、provider 不可用快速返回），全量 pytest 通过。
+
 ## v3.8.8 — 视觉系统 v2 整体重建（2026-11-27）
 
 不再打补丁，重建一套设计系统 `ui/forgeform.css`（creative.css 只留结构基座）：

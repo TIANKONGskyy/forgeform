@@ -6,30 +6,35 @@
       iwr -useb https://gh-proxy.com/https://raw.githubusercontent.com/TIANKONGskyy/forgeform/main/install.ps1 | iex
 
   What it does:
-    1. Downloads the release zip, trying GitHub direct then two mirrors
-    2. Extracts it next to the current folder
-    3. pip install -r requirements.txt into the CURRENT python
-    4. Runs tools/setup.py (hardware probe + profile picker)
-    5. Prints the launch command
+    1. Resolves the newest release tag (falls back to the pinned one)
+    2. Downloads the release zip, trying mirrors first (github.com direct is
+       usually blocked / very slow on mainland networks)
+    3. Extracts it into .\<forgeform-version>\
+    4. pip install -r requirements.txt into the CURRENT python
+    5. Runs tools/doctor.py --fix so you see exactly what is missing
+    6. Prints the launch command
 
-  It does NOT install Python or ComfyUI. Python 3.11+ must already be on PATH.
+  It does NOT install Python or ComfyUI. Python 3.10+ must already be on PATH.
+
+  Notes:
+    - All comments are ASCII: PS 5.1 reads UTF-8 without BOM as GBK and turns
+      Chinese comments into parser errors.
+    - Mirror order matters: gh-proxy works from CN, github.com direct usually
+      times out. A short per-source timeout keeps the fallback fast.
 #>
 
-param([switch]$SkipSetup, [switch]$SystemPython)
+param(
+    [string]$Tag = '',
+    [switch]$SkipSetup,
+    [switch]$SkipDoctor
+)
 
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 
 $Repo = 'TIANKONGskyy/forgeform'
-$Tag  = 'v3.8.4'
-$Zip  = 'forgeform-v3.8.4.zip'
-$DirName = 'forgeform-v3.8.4'
-
-$Sources = @(
-    "https://github.com/$Repo/releases/download/$Tag/$Zip",
-    "https://gh-proxy.com/https://github.com/$Repo/releases/download/$Tag/$Zip",
-    "https://ghfast.top/https://github.com/$Repo/releases/download/$Tag/$Zip"
-)
+$PinnedTag = 'v3.8.8'
+$TimeoutSec = 30      # per source; github.com direct must not hang for 3 minutes
 
 function Say($msg, $color = 'Cyan') { Write-Host $msg -ForegroundColor $color }
 
@@ -43,101 +48,115 @@ if (-not $py) {
 }
 $pyVer = (& python -c "import sys;print('%d.%d'%sys.version_info[:2])").Trim()
 Say "python $pyVer  ($($py.Source))"
-# 3.14+ has no numpy/pymeshlab wheels yet -> pip dies with "No matching distribution".
-if (([version]$pyVer -lt [version]'3.11') -or ([version]$pyVer -ge [version]'3.14')) {
-    Say "Python $pyVer is not supported - need 3.11, 3.12 or 3.13." 'Red'
-    Say 'Install Python 3.12: https://www.python.org/downloads/release/python-3129/' 'Yellow'
+if ([version]$pyVer -lt [version]'3.10') {
+    Say 'Need Python 3.10+ (3.12 recommended).' 'Red'
     exit 1
 }
 
-# --- 1. download -----------------------------------------------------------
+# --- 1. resolve tag --------------------------------------------------------
+if (-not $Tag) {
+    $Tag = $PinnedTag
+    try {
+        $probe = "https://gh-proxy.com/https://github.com/$Repo/releases/latest"
+        $resp = Invoke-WebRequest -Uri $probe -MaximumRedirection 0 -ErrorAction SilentlyContinue -UseBasicParsing -TimeoutSec $TimeoutSec
+        if ($resp.Headers.Location) {
+            $m = [regex]::Match($resp.Headers.Location, '/tag/(v[0-9.]+)')
+            if ($m.Success) { $Tag = $m.Groups[1].Value }
+        }
+    } catch {
+        # 3xx is expected here; PS throws on MaximumRedirection 0 in some versions
+        if ($_.Exception.Response -and $_.Exception.Response.Headers.Location) {
+            $loc = $_.Exception.Response.Headers.Location.ToString()
+            $m = [regex]::Match($loc, '/tag/(v[0-9.]+)')
+            if ($m.Success) { $Tag = $m.Groups[1].Value }
+        }
+    }
+}
+Say "release tag: $Tag"
+
+$Zip = "forgeform-$Tag.zip"
+$DirName = "forgeform-$($Tag.TrimStart('v'))"
+
+# Mirror first: on mainland networks github.com direct commonly times out.
+$Sources = @(
+    "https://gh-proxy.com/https://github.com/$Repo/releases/download/$Tag/$Zip",
+    "https://ghfast.top/https://github.com/$Repo/releases/download/$Tag/$Zip",
+    "https://github.com/$Repo/releases/download/$Tag/$Zip"
+)
+
+# --- 2. download -----------------------------------------------------------
 $zipPath = Join-Path $env:TEMP $Zip
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-
 $ok = $false
 foreach ($src in $Sources) {
+    $host_ = ([uri]$src).Host
+    Say "download: $host_ ..." 'DarkGray'
     try {
-        Say "download: $src"
-        $sw = [Diagnostics.Stopwatch]::StartNew()
-        Invoke-WebRequest -Uri $src -OutFile $zipPath -UseBasicParsing -TimeoutSec 180
-        $mb = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
-        if ($mb -lt 1) { throw "file too small ($mb MB)" }
-        Say ("  ok  {0} MB in {1:N1}s" -f $mb, $sw.Elapsed.TotalSeconds) 'Green'
-        $ok = $true
-        break
+        Invoke-WebRequest -Uri $src -OutFile $zipPath -UseBasicParsing -TimeoutSec $TimeoutSec
+        $len = (Get-Item $zipPath).Length
+        if ($len -gt 1MB) {
+            Say ("  ok " + [math]::Round($len / 1MB, 2) + " MB") 'Green'
+            $ok = $true
+            break
+        }
+        Say '  too small, trying next mirror' 'Yellow'
     } catch {
-        Say ("  failed: {0}" -f $_.Exception.Message) 'DarkYellow'
+        Say ("  failed: " + $_.Exception.Message.Substring(0, [Math]::Min(70, $_.Exception.Message.Length))) 'Yellow'
         if (Test-Path $zipPath) { Remove-Item $zipPath -Force -ErrorAction SilentlyContinue }
     }
 }
 if (-not $ok) {
-    Say 'All sources failed. Check network / proxy, then retry.' 'Red'
+    Say 'All mirrors failed. Download manually from the releases page and unzip.' 'Red'
+    Say "  https://github.com/$Repo/releases" 'Yellow'
     exit 1
 }
 
-# --- 2. extract ------------------------------------------------------------
-$target = (Get-Location).Path
-Say "extract to: $target"
+# --- 3. extract ------------------------------------------------------------
+$target = Join-Path (Get-Location) '.'
+Say "extracting to $target"
 Expand-Archive -Path $zipPath -DestinationPath $target -Force
 $root = Join-Path $target $DirName
-if (-not (Test-Path (Join-Path $root 'app.py'))) {
-    # zip prefix may differ; find app.py one level down
-    $found = Get-ChildItem $target -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'app.py') } |
-             Select-Object -First 1
-    if (-not $found) {
-        Say 'Extracted archive has no app.py; abort.' 'Red'
-        exit 1
-    }
-    $root = $found.FullName
+if (-not (Test-Path $root)) {
+    # zip may carry a different top folder name; pick the first forgeform-* dir
+    $cand = Get-ChildItem $target -Directory -Filter 'forgeform-*' | Select-Object -First 1
+    if ($cand) { $root = $cand.FullName }
 }
-Say "project root: $root" 'Green'
+if (-not (Test-Path $root)) {
+    Say 'extraction produced no forgeform folder' 'Red'
+    exit 1
+}
+Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+Say "project: $root" 'Green'
 
-# --- 3. deps ---------------------------------------------------------------
-Push-Location $root
-try {
-    # ★ 默认建 .venv 隔离。直接往系统 Python 里装会降级 starlette/pydantic/pillow，
-    #   把机器上别的工具（comfy-cli、bambu、hf 等）连带搞坏 —— 实测踩过。
-    if ($SystemPython) {
-        $venvPy = 'python'
-        Say ''
-        Say '[0/2] using SYSTEM python (-SystemPython)'
-    } else {
-        $venv = Join-Path $root '.venv'
-        if (-not (Test-Path $venv)) {
-            Say ''
-            Say '[0/2] creating .venv (isolated; pass -SystemPython to skip)'
-            & python -m venv $venv
-            if ($LASTEXITCODE -ne 0) { Say 'venv creation failed.' 'Red'; exit 1 }
-        }
-        $venvPy = Join-Path $venv 'Scripts\python.exe'
-        Say "using: $venvPy" 'Green'
+# --- 4. python deps --------------------------------------------------------
+if (-not $SkipSetup) {
+    Say 'installing python deps (pip) ...'
+    Push-Location $root
+    try {
+        & python -m pip install -q --disable-pip-version-check -r requirements.txt
+        if ($LASTEXITCODE -ne 0) { Say 'pip reported an error; continuing' 'Yellow' }
+    } finally {
+        Pop-Location
     }
-
-    Say ''
-    Say '[1/2] pip install -r requirements.txt'
-    & $venvPy -m pip install --upgrade pip -q
-    & $venvPy -m pip install -r requirements.txt
-    if ($LASTEXITCODE -ne 0) { Say 'pip failed (see output above).' 'Red'; exit 1 }
-
-    # --- 4. setup wizard ---------------------------------------------------
-    Say ''
-    if ($SkipSetup) {
-        Say '[2/2] skipped (--SkipSetup)'
-    } else {
-        Say '[2/2] python tools/setup.py   (probes your hardware, picks a profile)'
-        & $venvPy tools/setup.py
-    }
-} finally {
-    Pop-Location
 }
 
-# --- 5. next step ----------------------------------------------------------
+# --- 5. environment check --------------------------------------------------
+if (-not $SkipDoctor) {
+    Say ''
+    Say '--- environment check ---'
+    Push-Location $root
+    try {
+        $env:PYTHONPATH = ''
+        $env:PYTHONIOENCODING = 'utf-8'
+        & python tools/doctor.py --fix
+    } catch {
+        Say 'doctor failed to run; retry manually: python tools/doctor.py --fix' 'Yellow'
+    } finally {
+        Pop-Location
+    }
+}
+
 Say ''
-Say '=== done ===' 'Green'
-Say "next:"
-Say "  cd `"$root`""
-if (-not $SystemPython) { Say "  .\.venv\Scripts\python.exe app.py" }
-else { Say '  python app.py' }
-Say '  open http://127.0.0.1:7860'
-Say ''
-Say 'if something fails, run:  python tools/doctor.py' 'DarkGray'
+Say 'done. launch with:' 'Green'
+Say "  cd `"$root`"" 'White'
+Say '  python app.py        (or double-click the one-click start script)' 'White'

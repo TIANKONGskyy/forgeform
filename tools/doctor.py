@@ -95,6 +95,12 @@ def check_comfy() -> dict:
         import requests
         cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
         raw = ((cfg.get("paths") or {}).get("comfyui") or "").strip()
+        # config.example.json 里写的是 ${COMFYUI_DIR} 这类占位符 —— 不是路径，
+        # 直接报"目录不存在"会让新手以为配置错了（2026-11-28 实测装完第一眼就是这个）。
+        if "${" in raw or raw.startswith("%"):
+            return {"name": "ComfyUI", "ok": False,
+                    "detail": "还没配置（config 里是占位符）",
+                    "fix": "跑 python tools/bootstrap_models.py --only core 自动装好并写配置"}
         # config 里的 `paths.comfyui` 在本机写的是**安装目录**（D:\ComfyUI-New），
         # 不是 URL —— 直接拼 /system_stats 会报 InvalidSchema（2026-11-27 实测）。
         # 是目录就顺带检查 ComfyUI 本体在不在，地址用默认端口。
