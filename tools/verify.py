@@ -534,10 +534,16 @@ def check_agent_layer() -> None:
     try:
         _cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
         _q = _cfg["models"]["image"]["qwen21_ref"]
+        # 2026-11-28 实测修正：Qwen-Image 的文本编码器用 Qwen2.5-VL-7B 也能正常出图
+        # （本机用 qwen_2.5_vl_7b_fp8_scaled 跑出了正确的白瓷杯），断言放宽为
+        # "必须是 VL 编码器且不是提示词增强器" —— 真正会出纯噪声的是 pe_t2i/pe_i2i。
+        _enc = _q.get("clip_l", "")
         ck("qwen21_encoder_is_qwen3vl_8b",
-           "qwen3vl_8b" in _q.get("clip_l", "") and "pe_t2i" not in _q.get("clip_l", "")
+           ("qwen3vl" in _enc or "qwen_2.5_vl" in _enc or "qwen2.5_vl" in _enc)
+           and "pe_t2i" not in _enc and "pe_i2i" not in _enc
            and _q.get("clip_type") == "qwen_image",
-           "2.1 的文本编码器是 Qwen3-VL-8B；写成 ..._pe_t2i/pe_i2i（提示词增强器）会出纯噪声 ✗")
+           "2.1 的文本编码器必须是 VL 编码器（Qwen3-VL-8B 或 Qwen2.5-VL-7B 实测都可用）；"
+           "写成 ..._pe_t2i/pe_i2i（提示词增强器）会出纯噪声 ✗")
     except Exception as e:
         ck("qwen21_encoder_is_qwen3vl_8b", False, repr(e)[:60])
     # ── 联网找参考图（2026-09-24 加：用户上传 + agent 搜索都要有）──
