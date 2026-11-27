@@ -1211,6 +1211,11 @@ def build():
         from backend.cultural_ui import render as render_cultural_lab
         render_cultural_lab()
 
+        # ★ 2026-11-27：五项能力工作台（骨骼/贴图/精修/多视图/动画）。
+        #   同样走"自带控件、不动主对话流程"的扩展点写法。
+        from backend.capability_ui import render as render_capabilities
+        render_capabilities()
+
         # ── 主体：左侧对话区（宽）+ 右侧侧边栏（窄）────
         with gr.Row(elem_classes="main-wrap"):
             # 对话区（宽，占主视觉）

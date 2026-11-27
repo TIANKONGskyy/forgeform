@@ -52,6 +52,39 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.8.3 — 五项能力接进界面 + 各路线成品总览（2026-11-27）
+
+**能力工作台（界面）**：`backend/capability_ui.py`，在 app 里挂一个「🛠 能力工作台」折叠面板，
+五个 Tab —— 骨骼绑定 / 贴图 PBR / 精修 / 多视图 / 动画。每页都有：输入 → 跑 → 3D 预览 → 下载 + 耗时日志。
+
+- 全部调用**同一套产品入口**（`backend.rigging` / `tools/paint_asset.py` /
+  `tools/asset_refine_rig.py` / `Pipeline.generate_3d_multiview` / `retarget_lib`），
+  所以 UI 跑通 = CLI 跑通，不存在"两套实现"。
+- 对外 API 名固定：`/cap_rig` `/cap_paint` `/cap_refine` `/cap_multiview` `/cap_motion`。
+
+**实测（全部走 gradio 客户端真调 UI 按钮）**
+
+| 能力 | 耗时 | 结果 |
+|---|---|---|
+| 骨骼·模板 | 45 s | 21 关节 |
+| 精修 4 步 | 53 s | 小壳 712 → 1 块，1,715,294 面 |
+| 多视图 | 6 s（缓存）/ 84 s 冷启 | 490,754 面，水密 |
+| 动画 | 14 s | 穿地 0.000 mm |
+| 贴图·快速档 | 471 s | 2 张贴图，峰值 9.65 GB |
+
+**关键修复：UI 里跑 GPU 能力会 OOM**
+
+预热把 Strata 125B（约 28 GB）驻进显存 → 只剩 1.8 GB，精修要 5 GB 直接 OOM。
+主对话流程本来会 `_release_chat_gpu()`，能力面板绕过了那条路。
+现在每个 GPU 重活入口先 `_free_gpu()`（chat 释放 + strata_stop + 卸载 tuned），模板档（CPU）不释放。
+
+**新工具 `tools/collect_gallery.py`**：把所有生成路线的代表产物收进一个文件夹
+（`D:\铸想模型总览`），统一命名 + 二进制体检（面数/水密/贴图/关节/动画）+ 三视角预览图 + `总览.md`。
+实测 12/12 收齐。
+
+**测试**：新增 3 个（面板五 Tab 与接口名 / 重活前释放显存 / 总览覆盖每条路线），
+全量 pytest 通过，`verify.py` 152/152。
+
 ## v3.8.1 — 贴图产品入口 + 精修自动过滤（2026-11-27）
 
 **新增 `tools/paint_asset.py`**：五项能力里最后缺的那个产品入口。

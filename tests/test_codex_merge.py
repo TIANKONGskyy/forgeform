@@ -341,3 +341,52 @@ def test_multiview_resolves_lazy_hybrid_comfy_client():
     src = inspect.getsource(Pipeline.generate_3d_multiview)
     assert "_get_comfy" in src, "必须处理 hybrid 的惰性客户端"
     assert "comfy.wait_for_completion" in src, "submit 与 wait 必须用同一个客户端对象"
+
+# ────────────────── 2026-11-27 能力面板接进 UI ──────────────────
+
+def test_capability_ui_renders_five_panels():
+    """能力面板必须在 app 里真渲染出五个 Tab（不是只有函数存在）。"""
+    import inspect
+
+    from backend import capability_ui
+
+    src = inspect.getsource(capability_ui.render)
+    for token in ("骨骼绑定", "贴图 PBR", "精修", "多视图重建", "动画"):
+        assert token in src, f"缺面板：{token}"
+    # 五个 api_name 是 UI 与外部调用（gradio_client）的契约，不能改名
+    for name in ("cap_rig", "cap_paint", "cap_refine", "cap_multiview", "cap_motion"):
+        assert f'api_name="{name}"' in src, f"缺接口名 {name}"
+
+
+def test_capability_ui_frees_gpu_before_heavy_work():
+    """GPU 重活前必须先让出对话模型。
+
+    ★ 2026-11-27 实测：UI 点「精修」直接 OOM —— 预热把 Strata 125B 驻进显存
+      （30.8 GB used / 1.8 GB free），Direct3D-V3 要 ~5 GB。
+      主对话流程本来会 `_release_chat_gpu()`，能力面板绕过了，所以每个重活入口都要补。
+    """
+    import inspect
+
+    from backend import capability_ui
+
+    for fn in (capability_ui.do_paint, capability_ui.do_refine,
+               capability_ui.do_multiview):
+        assert "_free_gpu()" in inspect.getsource(fn), f"{fn.__name__} 没释放显存"
+    # 模板档是 CPU，不该为了它停对话模型
+    rig_src = inspect.getsource(capability_ui.do_rig)
+    assert 'if str(tier) == "riganything"' in rig_src
+
+
+def test_gallery_collector_lists_every_generation_path():
+    """总览收集器要覆盖每条生成路线（少一条用户就看不到那种效果）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ff_gallery", r"D:\ForgeForm-oss\tools\collect_gallery.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    methods = [m[1] for m in mod.PICKS]
+    for need in ("单图", "多视图", "精修", "贴图", "骨骼", "动画"):
+        assert any(need in m for m in methods), f"缺生成路线：{need}"
+    assert len(mod.PICKS) >= 10
