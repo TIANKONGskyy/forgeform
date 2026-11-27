@@ -206,16 +206,28 @@ def do_motion(bvh_name, advance, progress=None):
     """动画：把 BVH 重定向到内置骨架上（纯 CPU）。"""
     import subprocess
 
-    # 2026-11-28：脚本收进 tools/backends，工程/blend 仍可能在本机 work/research
+    # 2026-11-28：脚本收进 tools/backends。动画有两条路：
+    #   ① 预烘焙动作包（work/research/motion/actions/<key>.blend，52 骨 + 具名 Action）——直接交付
+    #   ② 现场重定向（需要基础骨架工程 + BVH）——用户自己换动作时用
     from tools.backends import resolve as _resolve
-    lib = _resolve("motion/retarget_lib.py")
     motion_dir = ROOT / "work" / "research" / "motion"
+    lib = _resolve("motion/retarget_lib.py")
+    key = str(bvh_name).split("_")[0].lower()
+    baked = {"walk": "walk", "02": "walk", "08": "walk", "run": "run", "09": "run",
+             "bow": "bow", "111": "bow", "wave": "wave", "141": "wave",
+             "idle": "idle", "77": "idle"}.get(key)
+    baked_path = motion_dir / "actions" / f"{baked}.blend" if baked else None
+    if baked_path and baked_path.is_file():
+        out = _out_dir("motion") / f"motion_{baked}_{int(time.time())}.blend"
+        shutil.copy2(baked_path, out)
+        return str(out), f"✓ 交付预烘焙动作「{baked}」（52 骨 + 具名 Action，{baked_path.stat().st_size/1024/1024:.0f} MB）"
     blend = motion_dir / "人物_BVH步态_重定向.blend"
     bvh = motion_dir / "bvh" / str(bvh_name)
     if lib is None:
         return None, "缺动画后端脚本（tools/backends/motion/retarget_lib.py）"
     if not blend.is_file():
-        return None, "缺基础骨架工程（work/research/motion，约 17 MB，可重新生成）"
+        return None, "既没有预烘焙动作包（work/research/motion/actions/），也没有基础骨架工程；" \
+                     "先跑 python tools/bootstrap_models.py --only motion 或提供 .blend"
     if not bvh.is_file():
         return None, f"缺 BVH：{bvh_name}"
     out_blend = _out_dir("motion") / f"motion_{bvh.stem}_{int(time.time())}.blend"

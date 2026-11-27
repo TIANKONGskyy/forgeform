@@ -735,3 +735,30 @@ def test_refine_reports_missing_weights_clearly(tmp_path: Path):
     assert r["ok"] is False
     blob = (str(r.get("error", "")) + str(r.get("log", ""))).lower()
     assert "缺权重" in blob or "bootstrap_models" in blob or "weights" in blob
+
+# ────────────────── 2026-11-28 动画：预烘焙动作包 ──────────────────
+
+def test_motion_prefers_baked_action_pack(tmp_path: Path, monkeypatch):
+    """有预烘焙动作包时直接交付，不再要求现场重定向（干净装没有基础骨架工程）。"""
+    from backend import capability_ui
+
+    motion = tmp_path / "work" / "research" / "motion"
+    (motion / "actions").mkdir(parents=True)
+    baked = motion / "actions" / "walk.blend"
+    baked.write_bytes(b"BLENDER" + b"\0" * 100)
+    monkeypatch.setattr(capability_ui, "ROOT", tmp_path)
+
+    path, msg = capability_ui.do_motion("02_01.bvh", False)
+    assert path and "walk" in path
+    assert "预烘焙" in msg
+    assert Path(path).is_file()
+
+
+def test_motion_reports_missing_assets(tmp_path: Path, monkeypatch):
+    """既没有动作包也没有骨架工程时，提示要能指导用户下一步。"""
+    from backend import capability_ui
+
+    monkeypatch.setattr(capability_ui, "ROOT", tmp_path)
+    path, msg = capability_ui.do_motion("02_01.bvh", False)
+    assert path is None
+    assert "预烘焙" in msg or "骨架" in msg or "bootstrap" in msg
