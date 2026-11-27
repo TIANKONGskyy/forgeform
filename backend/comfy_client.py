@@ -610,18 +610,36 @@ class ComfyUIClient:
         workflow = {}
         nid = 1
         
-        # 1. UnetLoaderGGUF
-        workflow[str(nid)] = {
-            "class_type": "UnetLoaderGGUF",
-            "inputs": {"unet_name": checkpoint}
-        }
+        # ★ 2026-11-28：原来写死 GGUF 节点，但 GGUF 加载器要另装 ComfyUI-GGUF 扩展，
+        #   干净安装的机器没有 → Z-Image 直接跑不起来。现在按后缀选加载器：
+        #   .gguf 用 UnetLoaderGGUF/CLIPLoaderGGUF；.safetensors 用官方 UNETLoader/CLIPLoader。
+        _gguf = str(checkpoint).lower().endswith(".gguf")
+        if _gguf:
+            workflow[str(nid)] = {
+                "class_type": "UnetLoaderGGUF",
+                "inputs": {"unet_name": checkpoint}
+            }
+        else:
+            workflow[str(nid)] = {
+                "class_type": "UNETLoader",
+                "inputs": {"unet_name": checkpoint,
+                           "weight_dtype": "fp8_e4m3fn" if "fp8" in str(checkpoint).lower()
+                           else "default"}
+            }
         model_node = str(nid); nid += 1
-        
-        # 2. CLIPLoaderGGUF (type=lumina2)
-        workflow[str(nid)] = {
-            "class_type": "CLIPLoaderGGUF",
-            "inputs": {"clip_name": clip_name, "type": "lumina2"}
-        }
+
+        # 2. 文本编码器（Z-Image 用 Qwen3-4B；safetensors 走官方 CLIPLoader）
+        if str(clip_name).lower().endswith(".gguf"):
+            workflow[str(nid)] = {
+                "class_type": "CLIPLoaderGGUF",
+                "inputs": {"clip_name": clip_name, "type": "lumina2"}
+            }
+        else:
+            workflow[str(nid)] = {
+                "class_type": "CLIPLoader",
+                "inputs": {"clip_name": clip_name,
+                           "type": model.get("clip_type", "qwen_image")}
+            }
         clip_node = str(nid); nid += 1
         
         # 3. VAELoader
