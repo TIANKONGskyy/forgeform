@@ -159,6 +159,10 @@ class Studio:
         with self.lock:
             if self.job['status'] == 'running':
                 raise ValueError('已有任务运行，请等待完成或取消')
+            # 注意：这里必须无条件清掉上一步的取消标记 —— 用户"取消后再点检测/安装"
+            # 是正常操作，如果留着标记，新任务会被当成已取消而不执行
+            # （2026-11-27 实测：加了"取消先到就不启动"的守卫后，C 区「检测环境」
+            #   直接变成 job=cancelled 不干活，属于回归，已撤回）。
             self.cancelled.clear()
             self.job = {'status': 'running', 'label': label, 'step': 0, 'total': 0, 'logs': [],
                         'file': '', 'percent': 0.0, 'speed_mbps': 0.0,
@@ -186,6 +190,16 @@ class Studio:
                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             else:
                 child.terminate()
+        # ★ 2026-11-27 实测修：环境扫描 / 耗时校准这类**进程内**任务没有子进程，
+        #   原来 cancel() 只 set 了事件，job 状态一直卡在 running →
+        #   前端显示"还在跑"，后续 POST /api/config 也被
+        #   "请等待当前安装完成后再保存" 拦住（实测就是这个把 test_basic 的
+        #   取消任务 / 保存配置两项打红的）。这里直接翻状态，用户点了取消就该立刻看到。
+        with self.lock:
+            if self.job.get('status') == 'running':
+                self.job['status'] = 'cancelled'
+                self.job['label'] = '已取消'
+                self.log('用户取消了当前任务')
         return {'ok': True}
 
     def scan(self, model_root=''):

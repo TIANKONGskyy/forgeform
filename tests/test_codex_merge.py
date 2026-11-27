@@ -289,3 +289,55 @@ def test_refine_accepts_str_out_and_reports_debris(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(mod, "RESEARCH", tmp_path / "none")
     r = mod.refine(str(tmp_path / "i.png"), str(tmp_path / "m.obj"), str(tmp_path / "o.glb"))
     assert r["ok"] is False and "缺研究脚本" in r["error"]
+
+# ────────────────── 2026-11-27 全面测试中发现并修掉的问题 ──────────────────
+
+def test_bind_model_returns_ok_flag(tmp_path: Path, monkeypatch):
+    """bind_model 的返回值必须带 ok —— 调用方（含 verify_capabilities）都按 r["ok"] 判成败。"""
+    import inspect
+
+    from backend import rigging
+
+    src = inspect.getsource(rigging.bind_model)
+    assert '"ok": True' in src, "成功路径必须返回 ok=True"
+    # 失败路径也要有 ok=False 语义（用非法输入触发）
+    bad = tmp_path / "x.txt"
+    bad.write_text("x", encoding="utf-8")
+    try:
+        rigging.bind_model(str(bad), str(tmp_path / "o"))
+    except ValueError as e:
+        assert "模型" in str(e)
+    else:
+        raise AssertionError("非模型文件应该抛 ValueError")
+
+
+def test_studio_cancel_flips_inprocess_job_status():
+    """环境扫描/校准是进程内任务：取消后状态必须立刻变 cancelled。
+
+    原来 cancel() 只 set 事件，job 卡在 running → 前端一直转圈，
+    且 POST /api/config 被“请等待当前安装完成后再保存”拦住（2026-11-27 实测）。
+    """
+    import inspect
+    import re
+
+    from backend import studio as studio_mod
+
+    src = inspect.getsource(studio_mod.Studio.cancel)
+    # 取消后要把 running 翻成 cancelled（进程内任务没有子进程可 kill）
+    assert "cancelled" in src
+    assert re.search(r"job\[['\"]status['\"]\]\s*=\s*['\"]cancelled['\"]", src), \
+        "cancel() 必须直接把 job 状态置为 cancelled"
+
+
+def test_multiview_resolves_lazy_hybrid_comfy_client():
+    """HybridBackend 的 ComfyUIClient 是惰性的：多视图必须走 _get_comfy() 拿真实客户端。
+
+    否则 backend.mode=auto 时 generate_3d_multiview 直接报“不支持多视图”（2026-11-27 实测）。
+    """
+    import inspect
+
+    from backend.pipeline import Pipeline
+
+    src = inspect.getsource(Pipeline.generate_3d_multiview)
+    assert "_get_comfy" in src, "必须处理 hybrid 的惰性客户端"
+    assert "comfy.wait_for_completion" in src, "submit 与 wait 必须用同一个客户端对象"

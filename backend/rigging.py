@@ -143,7 +143,7 @@ def bind_model(input_path, output_dir, *, tier="template", template="auto",
         info = _validate_glb(produced[0])
         target = out_dir / f"rigged_{job[:12]}.glb"
         shutil.copy2(produced[0], target)
-        return {"path": str(target), "log": log[-2000:], "job": job,
+        return {"ok": True, "path": str(target), "log": log[-2000:], "job": job,
                 "joints": info["joints"], "skins": info["skins"],
                 "seconds": round(time.monotonic() - t0, 1), "tier": tier}
     finally:

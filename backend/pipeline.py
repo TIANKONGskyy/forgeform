@@ -1027,7 +1027,26 @@ class Pipeline:
         if missing:
             return StageResult(False, error=f"多视图输入缺图或路径不存在: {missing}")
 
-        if not hasattr(self.comfy, "_build_multiview_real_workflow"):
+        # ★ 2026-11-27 实测修：config 里 backend.mode=auto 时 self.comfy 是 HybridBackend
+        #   包装器，`_build_multiview_real_workflow` 在它内部的 ComfyUIClient 上
+        #   → 原来 hasattr 判断直接判"不支持多视图"，功能等于没接。
+        #   这里顺着包装器找真正的 ComfyUI 客户端。
+        comfy = self.comfy
+        if not hasattr(comfy, "_build_multiview_real_workflow"):
+            # HybridBackend 的 ComfyUIClient 是惰性创建的（`_get_comfy()`），
+            # 直接读 `_comfy` 会拿到 None → 必须走它自己的 getter。
+            getter = getattr(comfy, "_get_comfy", None)
+            inner = None
+            if callable(getter):
+                try:
+                    inner = getter()
+                except Exception:
+                    inner = None
+            if inner is None:
+                inner = getattr(comfy, "_comfy", None) or getattr(comfy, "comfy", None)
+            if inner is not None:
+                comfy = inner
+        if not hasattr(comfy, "_build_multiview_real_workflow"):
             return StageResult(
                 False, error="当前后端不支持多视图（需要 ComfyUI 后端，"
                              "且 comfy_client 带 _build_multiview_real_workflow）")
@@ -1084,8 +1103,8 @@ class Pipeline:
 
         try:
             t_start = time.time()
-            prompt_id = self.comfy.submit_workflow(
-                self.comfy._build_multiview_real_workflow(params), stage="3d")
+            prompt_id = comfy.submit_workflow(
+                comfy._build_multiview_real_workflow(params), stage="3d")
             self._log(f"3D 任务已提交（多视图）: {prompt_id[:8]}...")
             _t3 = 2400
             try:
@@ -1093,7 +1112,7 @@ class Pipeline:
                           .get("timeout_s") or 2400)
             except Exception:
                 pass
-            result = self.comfy.wait_for_completion(prompt_id, timeout=_t3, thermal_guard=True)
+            result = comfy.wait_for_completion(prompt_id, timeout=_t3, thermal_guard=True)
             if result.get("status") == "error":
                 return StageResult(False, error=str(result.get("error") or "多视图建模失败"))
 

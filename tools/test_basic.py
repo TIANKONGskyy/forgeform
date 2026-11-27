@@ -30,9 +30,13 @@ sys.path.insert(0, str(ROOT))
 OUT = ROOT / "outputs" / "probe"
 OUT.mkdir(parents=True, exist_ok=True)
 
-APP = "http://127.0.0.1:7860"
-STUDIO = "http://127.0.0.1:7861"
-API = "http://127.0.0.1:7863"
+# 允许用环境变量改地址：这台机器上 7860 可能跑着**另一份安装**（会 403 拦测试），
+# 此时把 FF_APP_URL 指到本仓库自己起的端口即可（2026-11-27 加）。
+import os as _os
+
+APP = _os.environ.get("FF_APP_URL", "http://127.0.0.1:7860")
+STUDIO = _os.environ.get("FF_STUDIO_URL", "http://127.0.0.1:7861")
+API = _os.environ.get("FF_API_URL", "http://127.0.0.1:7863")
 T = []          # 结果
 
 
