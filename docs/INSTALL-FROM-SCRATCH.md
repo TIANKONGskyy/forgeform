@@ -192,3 +192,12 @@ python tools/report.py                      # 出问题生成脱敏诊断包
 | 建模 OOM | 显存被对话模型占着 | 用远程模型，或说「先释放显存」 |
 | 对话第一次要 60 s | 27B 级模型冷启动 | 换 `qwen2.5:3b` 或远程 API |
 | 生成完 STL 是空壳 | 没走「导出 STL」 | 别自己转，走按钮（会补洞） |
+
+## 9. 安装脚本自己踩过的坑（2026-11-28 实测）
+
+| 现象 | 根因 | 修法 |
+|---|---|---|
+| 装完是旧版本（v3.8.8） | `install.ps1` 用 `/releases/latest` 解析版本，gh-proxy 把这个响应**缓存住了** | 改用 `releases?per_page=5` 列表 API，取第一条非 draft/pre-release |
+| 下载卡 3 分钟 | 第一源是 github.com，直连超时 | 镜像优先，单源 30 s |
+| 输出中文花屏 | PS 5.1 按 GBK 读 UTF-8 无 BOM 脚本 | 脚本内只用 ASCII 输出 |
+| 解压后目录名对不上 | 发布包内层是 `forgeform-v3.9.1`，脚本按 `forgeform-3.9.1` 找 | 用 fallback 找第一个 `forgeform-*` |
