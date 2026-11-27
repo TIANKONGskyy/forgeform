@@ -35,6 +35,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from tools.backends import resolve as _resolve  # noqa: E402  仓库内后端脚本优先
 RESEARCH = ROOT / "work" / "research"
 PY = os.environ.get("FORGEFORM_PYTHON", r"D:\miniconda3\python.exe")
 BLENDER = os.environ.get(
@@ -54,15 +56,15 @@ def refine(image: Path, mesh: Path, out: Path, *, steps: int = 4,
     - 0.5 s 显存/温度采样 + 84°C 保护
     直接复用它比自己重写一份稳（那套依赖踩过的坑都在里面）。
     """
-    script = RESEARCH / "precision" / "smoke_direct3d.py"
+    script = _resolve("precision/smoke_direct3d.py")
     out = Path(out)                     # 允许调用方传 str（CLI 与脚本都会这么传）
-    if not script.exists():
+    if script is None:
         return {"ok": False, "error": f"缺研究脚本 {script}（先跑过六方向攻坚）"}
     if not Path(image).exists() or not Path(mesh).exists():
         return {"ok": False, "error": "输入图或粗网格不存在"}
 
     env = dict(os.environ)
-    env["PYTHONPATH"] = str(RESEARCH / "precision")
+    env["PYTHONPATH"] = str(script.parent)  # 仓库副本与旧路径都适用
     env["PYTHONIOENCODING"] = "utf-8"
     cmd = [PY, "-u", str(script),
            "--image", str(image), "--coarse-mesh", str(mesh),
@@ -73,7 +75,7 @@ def refine(image: Path, mesh: Path, out: Path, *, steps: int = 4,
           (proc.stderr or b"").decode("utf-8", "replace")
 
     # 研究脚本把产物写在 output/smoke_r*_s*_mt*.glb
-    produced = sorted((RESEARCH / "precision" / "output").glob("smoke_r*_s*.glb"),
+    produced = sorted((script.parent / "output").glob("smoke_r*_s*.glb"),
                       key=lambda p: p.stat().st_mtime, reverse=True)
     ok = proc.returncode == 0 and bool(produced) and "watertight=True" in log
     if ok:
@@ -111,8 +113,8 @@ def _run_riganything(mesh: Path, out_dir: Path, result: dict) -> dict:
     实测（V100 32G，human_body.stl 50k 顶点）：52 骨 / 52.3 s / 峰值 5,669 MiB / 撕裂 0.061%。
     顶点数 > 8k 面时必须简化，否则 PyTorch 吃到 27.5 GB 会 OOM —— 这里按面数自动加 --simplify。
     """
-    script = RESEARCH / "rig" / "run_riganything.py"
-    if not script.exists():
+    script = _resolve("rig/run_riganything.py")
+    if script is None:
         return {**result, "error": f"缺 {script}（RigAnything 研究环境未部署）"}
     import trimesh
     faces = 0
@@ -129,7 +131,7 @@ def _run_riganything(mesh: Path, out_dir: Path, result: dict) -> dict:
     cmd = [interp, str(script), "--mesh", str(mesh), "--out", str(out_dir)]
     if faces > 20_000:
         cmd += ["--simplify", "8192"]
-    proc = subprocess.run(cmd, capture_output=True, env=env, cwd=str(RESEARCH / "rig"),
+    proc = subprocess.run(cmd, capture_output=True, env=env, cwd=str(script.parent),
                           timeout=1800)
     log = (proc.stdout or b"").decode("utf-8", "replace") + \
           (proc.stderr or b"").decode("utf-8", "replace")
@@ -157,8 +159,8 @@ def rig(mesh: Path, out_dir: Path, *, tier: str = "auto",
     if tier == "riganything":
         return _run_riganything(mesh, out_dir, result)
 
-    tmpl_script = RESEARCH / "rig" / "auto_rig.py"
-    if not tmpl_script.exists():
+    tmpl_script = _resolve("rig/auto_rig.py")
+    if tmpl_script is None:
         return {"ok": False, "error": f"缺 {tmpl_script}"}
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"

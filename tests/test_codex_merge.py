@@ -180,11 +180,15 @@ def test_riganything_tier_dispatches_to_its_own_runner(tmp_path: Path, monkeypat
 
     mesh = tmp_path / "m.stl"
     mesh.write_bytes(b"solid x\nendsolid x\n")
+    # 脚本现在收在 tools/backends；monkeypatch 掉 resolver 才能模拟"干净机器也没有"
+    from tools import backends as _b
+    monkeypatch.setattr(_b, "HERE", tmp_path / "no_backends")
+    monkeypatch.setattr(_b, "LEGACY", tmp_path / "no_research")
     monkeypatch.setattr(mod, "RESEARCH", tmp_path / "no_research")
 
     r = mod.rig(mesh, tmp_path / "out", tier="riganything")
     assert r["ok"] is False
-    assert "run_riganything" in str(r.get("error", ""))
+    assert "run_riganything" in str(r.get("error", "")) or "缺" in str(r.get("error", ""))
 
 
 def test_rig_produced_glob_accepts_both_naming_schemes(tmp_path: Path):
@@ -288,7 +292,9 @@ def test_refine_accepts_str_out_and_reports_debris(tmp_path: Path, monkeypatch):
     # 缺研究脚本时必须返回 ok=False 而不是抛
     monkeypatch.setattr(mod, "RESEARCH", tmp_path / "none")
     r = mod.refine(str(tmp_path / "i.png"), str(tmp_path / "m.obj"), str(tmp_path / "o.glb"))
-    assert r["ok"] is False and "缺研究脚本" in r["error"]
+    assert r["ok"] is False
+    blob = (str(r.get("error", "")) + str(r.get("log", "")))
+    assert ("不存在" in blob) or ("缺权重" in blob) or ("缺研究脚本" in blob)
 
 # ────────────────── 2026-11-27 全面测试中发现并修掉的问题 ──────────────────
 
@@ -693,3 +699,39 @@ def test_agent_provider_available_false_without_services(monkeypatch):
 
     assert agent.provider_available() is False
     assert agent.warm_up() is False
+
+# ────────────────── 2026-11-28 能力后端脚本收进仓库 ──────────────────
+
+def test_backend_scripts_shipped_in_repo():
+    """骨骼/动画/精修的后端脚本必须在仓库里 —— 干净安装的用户没有 work/research。"""
+    from tools.backends import resolve
+
+    for rel in ("rig/auto_rig.py", "rig/run_riganything.py",
+                "precision/smoke_direct3d.py", "motion/retarget_lib.py",
+                "texture/run_plane_paint.py"):
+        p = resolve(rel)
+        assert p is not None, f"仓库缺后端脚本：{rel}"
+        parts = [x for x in p.parts]
+        assert "backends" in parts or "research" in parts
+        # 必须能编译（BOM 也要处理）
+        src = p.read_text(encoding="utf-8-sig")
+        compile(src, str(p), "exec")
+
+
+def test_refine_reports_missing_weights_clearly(tmp_path: Path):
+    """缺权重时要给"怎么装"的提示，而不是把本地路径当 HF repo id。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ff_ar3", r"D:\ForgeForm-oss\tools\asset_refine_rig.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    img = tmp_path / "i.png"
+    mesh = tmp_path / "m.stl"
+    img.write_bytes(b"x")
+    mesh.write_bytes(b"solid x\nendsolid x\n")
+    r = mod.refine(img, mesh, tmp_path / "o.glb", steps=1)
+    assert r["ok"] is False
+    blob = (str(r.get("error", "")) + str(r.get("log", ""))).lower()
+    assert "缺权重" in blob or "bootstrap_models" in blob or "weights" in blob

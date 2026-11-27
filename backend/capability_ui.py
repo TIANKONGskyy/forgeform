@@ -206,11 +206,16 @@ def do_motion(bvh_name, advance, progress=None):
     """动画：把 BVH 重定向到内置骨架上（纯 CPU）。"""
     import subprocess
 
+    # 2026-11-28：脚本收进 tools/backends，工程/blend 仍可能在本机 work/research
+    from tools.backends import resolve as _resolve
+    lib = _resolve("motion/retarget_lib.py")
     motion_dir = ROOT / "work" / "research" / "motion"
     blend = motion_dir / "人物_BVH步态_重定向.blend"
     bvh = motion_dir / "bvh" / str(bvh_name)
+    if lib is None:
+        return None, "缺动画后端脚本（tools/backends/motion/retarget_lib.py）"
     if not blend.is_file():
-        return None, "缺基础骨架工程（work/research/motion）"
+        return None, "缺基础骨架工程（work/research/motion，约 17 MB，可重新生成）"
     if not bvh.is_file():
         return None, f"缺 BVH：{bvh_name}"
     out_blend = _out_dir("motion") / f"motion_{bvh.stem}_{int(time.time())}.blend"

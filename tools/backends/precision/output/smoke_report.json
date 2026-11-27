@@ -1,0 +1,14 @@
+{
+  "torch": "2.14.1+cu126",
+  "gpu": "Tesla PG500-216",
+  "gpu_capability": [
+    7,
+    0
+  ],
+  "sdpa_backend": "EFFICIENT_ATTENTION (flash/cuDNN kernels do not exist for sm_70)",
+  "image": "D:\\tmp\\feiji_png\\mmexport1795611910065.png",
+  "coarse_mesh": "D:\\\u94f8\u60f3\u6a21\u578b\u603b\u89c8\\02_\u5355\u56fe-2.1-512.stl",
+  "attempts": [],
+  "load_error": "HFValidationError: Repo id must use alphanumeric chars, '-', '_' or '.'. The name cannot start or end with '-' or '.' and the maximum length is 96: 'D:\\ForgeForm-oss\\work\\research\\precision\\weights\\Direct3D-V3'.",
+  "load_traceback": "Traceback (most recent call last):\n  File \"D:\\ForgeForm-oss\\tools\\backends\\precision\\smoke_direct3d.py\", line 222, in main\n    pipe = make_pipeline()\n           ^^^^^^^^^^^^^^^\n  File \"D:\\ForgeForm-oss\\tools\\backends\\precision\\smoke_direct3d.py\", line 121, in make_pipeline\n    pipe = Direct3DV3Pipeline(\n           ^^^^^^^^^^^^^^^^^^^\n  File \"D:\\AI-Workshop\\work\\feiji_precision_vh\\Direct3D-V3\\direct3d\\pipeline.py\", line 48, in __init__\n    config = self._read_config(\"config.json\")\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\AI-Workshop\\work\\feiji_precision_vh\\Direct3D-V3\\direct3d\\pipeline.py\", line 125, in _read_config\n    return json.loads(self._model_file(filename).read_text(encoding=\"utf-8\"))\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\AI-Workshop\\work\\feiji_precision_vh\\Direct3D-V3\\direct3d\\pipeline.py\", line 121, in _model_file\n    hf_hub_download(self.repo, filename, revision=self.revision, local_files_only=self.local_files_only)\n  File \"D:\\miniconda3\\Lib\\site-packages\\huggingface_hub\\utils\\_validators.py\", line 84, in _inner_fn\n    validate_repo_id(arg_value)\n  File \"D:\\miniconda3\\Lib\\site-packages\\huggingface_hub\\utils\\_validators.py\", line 138, in validate_repo_id\n    raise HFValidationError(\nhuggingface_hub.errors.HFValidationError: Repo id must use alphanumeric chars, '-', '_' or '.'. The name cannot start or end with '-' or '.' and the maximum length is 96: 'D:\\ForgeForm-oss\\work\\research\\precision\\weights\\Direct3D-V3'.\n"
+}
