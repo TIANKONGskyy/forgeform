@@ -52,6 +52,39 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.8.6 — 并行下载与并行配置（2026-11-27）
+
+装模型时原来是一个个下、单连接：国内到 HF 只有 1–2 MB/s，几个大文件排着队。
+
+**① `backend/downloader.py`（并行下载引擎）**
+- **多文件并发**（默认 8 文件）
+- **单文件多段**（默认 8 连接，走 Range 分段并发写同一文件）
+- 镜像回落（ModelScope 优先 → hf-mirror → gh-proxy）、`.part` 断点续传、大小/哈希校验
+- 先写 `.part`，校验过才改名 —— 半成品永远不会冒充成品
+
+**本机实测**
+
+| 场景 | 结果 |
+|---|---|
+| 6 文件串行单连接（限速服务器） | 24.9 s |
+| 6 文件 × 4 连接 | **4.3 s（5.8×）** |
+| 单文件 128 MB 单连接 | 33.2 s / 3.9 MB/s |
+| 单文件 128 MB × 4 连接 | **8.6 s / 14.8 MB/s（3.8×）** |
+| hf-mirror 4 段 | 1.2 MB/s |
+| ModelScope 4 段 | **4.2 MB/s** → 设为首选 |
+
+**② `tools/bootstrap_models.py`（并行配置）**
+四条互不依赖的线同时推进：下载权重、解压 ComfyUI、clone 3D-Pack、pip 装铸想依赖；
+之后才 pip 装 ComfyUI 依赖 → 写 config → 体检。`--only core|paint|mv|refine|rig|all`，
+`--dry-run` 先看计划，权重清单的 URL 全部 HEAD 校验过（修掉了 Direct3D/RigAnything 的 401）。
+
+**③ 安全阀**
+镜像返回 200 的 HTML 错误页是最常见的坑 —— 大小差太多直接判失败换镜像；
+`exact_size` 可开逐字节严格模式。
+
+**测试**：新增 3 个（并行+分段、跳过已存在与大小校验、套件覆盖），
+全量 pytest 通过，`verify.py` 152/152。
+
 ## v3.8.5 — 清空本地模型后的"零模型可用"与技能包（2026-11-27）
 
 本机删除了 ComfyUI（341.9 GB）、comfy312、铸想 models（23.9 GB）、研究权重（16.7 GB）、

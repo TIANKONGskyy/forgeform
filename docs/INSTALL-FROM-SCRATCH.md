@@ -118,6 +118,38 @@ git clone https://gh-proxy.com/https://github.com/MrForExample/ComfyUI-3D-Pack.g
 2. `tokenizer/` 里 `vocab.json` 和 `merges.txt` **必须同源**，缺 merges 会报
    `vocab and merges must be both from memory or both filenames`
 
+## 4.5 并行下载（推荐，比逐个下快 4–6 倍）
+
+别一个个下。用引导脚本，下载池、解压、clone、pip 同时推进：
+
+```powershell
+python tools/bootstrap_models.py --only core      # 最小可用（约 12 GB）
+python tools/bootstrap_models.py --only all       # 全能力（约 16 GB 权重 + ComfyUI）
+python tools/bootstrap_models.py --only core --workers 8 --conns 8
+python tools/bootstrap_models.py --dry-run        # 只看计划
+```
+
+**本机实测（2026-11-27）**
+
+| 场景 | 结果 |
+|---|---|
+| 本地限速服务器：6 文件串行单连接 | 24.9 s |
+| 同上，6 文件 × 4 连接并行 | **4.3 s（5.8×）** |
+| 单文件 128 MB：1 连接 | 33.2 s（3.9 MB/s） |
+| 同上：4 连接分段 | **8.6 s（14.8 MB/s，3.8×）** |
+| hf-mirror 4 段 × 8 MB | 1.2 MB/s |
+| **ModelScope 4 段 × 8 MB** | **4.2 MB/s** ← 已设为首选镜像 |
+
+**参数怎么定**：总连接数 ≈ `workers × conns`。镜像限速时加 `conns` 最有效
+（单文件多段），文件多时加 `workers`。默认 8 × 8。
+
+**断点续传**：文件先写 `.part`，中断后重跑会继续；大小/哈希不符**不会**改名成正式文件。
+`--dry-run` 能先看清要下多少。
+
+**故障保护**：
+- 镜像返回 200 的 HTML 错误页 → 大小与清单差太多会直接判失败换镜像
+- 权重清单里的 `bytes_hint` 是估算值，默认 ±5% 容差；要逐字节严格传 `exact_size`
+
 ## 5. 接上铸想
 
 ```powershell

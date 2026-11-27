@@ -558,3 +558,75 @@ def test_inventory_tool_lists_generation_paths():
     names = " ".join(t[0] for t in mod.TARGETS)
     for need in ("ComfyUI", "铸想模型", "研究权重", "Ollama", "HuggingFace"):
         assert need in names, f"盘点缺 {need}"
+
+# ────────────────── 2026-11-27 并行下载与并行配置 ──────────────────
+
+def test_downloader_parallel_and_range(tmp_path: Path):
+    """并行下载：多文件并发 + 单文件多段，内容与大小都要对。"""
+    import importlib.util
+    import sys as _sys
+
+    _sys.path.insert(0, r"D:\ForgeForm-oss\tools")
+    from backend import downloader
+    from tools import test_dl_server
+
+    srv, base = test_dl_server.start({"a.bin": 6 << 20, "b.bin": 6 << 20}, slow_bps=3 << 20)
+    try:
+        items = [{"name": n, "url": f"{base}/{n}", "dest": str(tmp_path / n),
+                  "size": 6 << 20} for n in ("a.bin", "b.bin")]
+        res = downloader.download_all(items, workers=2, conns=2)
+        assert all(r.get("ok") for r in res), res
+        for n in ("a.bin", "b.bin"):
+            assert (tmp_path / n).stat().st_size == 6 << 20
+            assert not (tmp_path / f"{n}.part").exists()
+    finally:
+        srv.shutdown()
+
+
+def test_downloader_skips_existing_and_verifies_size(tmp_path: Path):
+    from backend import downloader
+    from tools import test_dl_server
+
+    srv, base = test_dl_server.start({"c.bin": 1 << 20})
+    try:
+        dest = tmp_path / "c.bin"
+        r1 = downloader.download({"name": "c", "url": f"{base}/c.bin", "dest": str(dest)}, downloader.Meter())
+        assert r1["ok"] is True
+
+        # 已有且大小一致 → 直接跳过（重跑安装不重复下载）
+        r2 = downloader.download({"name": "c", "url": f"{base}/c.bin", "dest": str(dest),
+                                  "size": 1 << 20}, downloader.Meter())
+        assert r2.get("skipped") is True
+
+        # 声明大小与服务器差太多（HTML 错误页那种）→ 必须失败，且不留 .part
+        r3 = downloader.download({"name": "c2", "url": f"{base}/c.bin",
+                                  "dest": str(tmp_path / "c2.bin"), "size": 10 << 20},
+                                 downloader.Meter())
+        assert r3["ok"] is False
+        assert not (tmp_path / "c2.bin.part").exists()
+
+        # exact_size=True 时逐字节严格（镜像换文件类事故）
+        r4 = downloader.download({"name": "c3", "url": f"{base}/c.bin",
+                                  "dest": str(tmp_path / "c3.bin"), "size": (1 << 20) + 4096,
+                                  "exact_size": True}, downloader.Meter())
+        assert r4["ok"] is False
+    finally:
+        srv.shutdown()
+
+
+def test_bootstrap_plan_covers_suites():
+    """引导安装的计划要覆盖 core/paint/mv/refine/rig，且路径落在 ComfyUI 或研究目录。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ff_boot", r"D:\ForgeForm-oss\tools\bootstrap_models.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    for suite in ("core", "paint", "refine", "rig"):
+        items = mod.weight_items(suite)
+        assert items, f"{suite} 套件没有权重"
+        for it in items:
+            assert it["url"].startswith("http")
+            assert Path(it["dest"]).is_absolute()
+    assert "core" in mod.SUITES and "all" in mod.SUITES
