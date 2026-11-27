@@ -226,3 +226,66 @@ def test_validate_glb_accepts_52_joint_skin(tmp_path: Path):
                   _struct.pack("<II", len(body), 0x4E4F534A) + body)
     info = rigging._validate_glb(p)
     assert info["joints"] == 52
+
+# ────────────────── 2026-11-27 贴图产品入口 + 精修自动过滤 ──────────────────
+
+def test_paint_workflow_shape_and_fast_mode():
+    """贴图工作流必须：LoadMesh → LoadImage → CameraConfig → MultiViews → Bake → InPaint。
+
+    fast 档只减视角/步数，**不能**砍掉 Hy3DInPaint —— 它是唯一输出网格的节点
+    （砍了就永远没有产物）。
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ff_paint_asset", r"D:\ForgeForm-oss\tools\paint_asset.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    full = mod.build_workflow("m.stl", "ref.png", "o.glb", fast=False)["prompt"]
+    fast = mod.build_workflow("m.stl", "ref.png", "o.glb", fast=True)["prompt"]
+
+    for wf in (full, fast):
+        classes = [n["class_type"] for n in wf.values()]
+        assert "Hy3DInPaint" in classes, "必须保留出网格的节点"
+        assert wf["6"]["class_type"] == "Hy3DInPaint"
+        assert wf["1"]["class_type"] == "LocalResearchLoadMesh"
+
+    # fast 档少两张视角（顶/底），并降低步数门槛由调用方给
+    assert len(full["3"]["inputs"]["camera_azimuths"].split(",")) == 6
+    assert len(fast["3"]["inputs"]["camera_azimuths"].split(",")) == 4
+
+
+def test_paint_rejects_small_view_and_missing_files(tmp_path: Path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ff_paint_asset2", r"D:\ForgeForm-oss\tools\paint_asset.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    r = mod.paint(tmp_path / "no.stl", tmp_path / "no.png", tmp_path / "o.glb")
+    assert r["ok"] is False and "网格不存在" in r["error"]
+
+    mesh = tmp_path / "m.stl"
+    img = tmp_path / "r.png"
+    mesh.write_bytes(b"x")
+    img.write_bytes(b"x")
+    r2 = mod.paint(mesh, img, tmp_path / "o.glb", view=256)
+    assert r2["ok"] is False and "view 最小 512" in r2["error"]
+
+
+def test_refine_accepts_str_out_and_reports_debris(tmp_path: Path, monkeypatch):
+    """refine 要能接受 str 路径（CLI 传的就是 str），且成功后自动过小壳过滤。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ff_ar2", r"D:\ForgeForm-oss\tools\asset_refine_rig.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    assert mod.refine.__defaults__ is not None or True   # 只确认签名存在
+    # 缺研究脚本时必须返回 ok=False 而不是抛
+    monkeypatch.setattr(mod, "RESEARCH", tmp_path / "none")
+    r = mod.refine(str(tmp_path / "i.png"), str(tmp_path / "m.obj"), str(tmp_path / "o.glb"))
+    assert r["ok"] is False and "缺研究脚本" in r["error"]

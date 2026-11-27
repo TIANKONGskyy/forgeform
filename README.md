@@ -25,7 +25,7 @@
 | 对话 | 需求解析、参数补齐、多轮修改 | 本地 LLM（OpenAI 兼容端点 / Ollama） |
 | 出图 | 文生图，1–4 张候选，参考图 i2i、局部重绘 | ComfyUI 或 diffusers 直连 |
 | 建模 | 单图生 3D；**多视图（四张真实照片）生 3D** | ComfyUI（Hunyuan3D 2.1 / V2 2mv）或 hy3dgen 直连 |
-| 贴图 | PBR 上色（albedo + metallicRoughness） | ComfyUI（Hunyuan3D Paint PBR 2.1） |
+| 贴图 | PBR 上色（albedo + metallicRoughness），`tools/paint_asset.py` | ComfyUI（Hunyuan3D Paint PBR 2.1） |
 | 骨骼 | 自动绑定（模板骨架 / RigAnything） | Blender headless + 可选 RigAnything |
 | 动作 | BVH mocap 重定向（走 / 挥 / 鞠 / 待机） | Blender headless（纯 CPU） |
 | 精修 | 粗网格 + 参考图 → 更细网格（可选档） | Direct3D-V3 |

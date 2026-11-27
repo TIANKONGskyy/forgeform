@@ -55,6 +55,7 @@ def refine(image: Path, mesh: Path, out: Path, *, steps: int = 4,
     直接复用它比自己重写一份稳（那套依赖踩过的坑都在里面）。
     """
     script = RESEARCH / "precision" / "smoke_direct3d.py"
+    out = Path(out)                     # 允许调用方传 str（CLI 与脚本都会这么传）
     if not script.exists():
         return {"ok": False, "error": f"缺研究脚本 {script}（先跑过六方向攻坚）"}
     if not Path(image).exists() or not Path(mesh).exists():
@@ -78,6 +79,26 @@ def refine(image: Path, mesh: Path, out: Path, *, steps: int = 4,
     if ok:
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(produced[0].read_bytes())
+        # ★ 2026-11-27：精修产物天然带一堆碎壳（实测 plane_21: 713 个连通块，
+        #   712 个是 <100 面的碎块）。不过滤直接进切片器就是一堆浮尘，
+        #   所以这里自动过一遍小壳过滤 —— 与 Pipeline._drop_debris 同一套判据。
+        debris = {}
+        try:
+            sys.path.insert(0, str(ROOT))
+            from backend.pipeline import Pipeline
+
+            class _Bare(Pipeline):        # 只要 _drop_debris，不建配置/不连服务
+                def __init__(self):
+                    pass
+
+                def _log(self, *a, **k):
+                    pass
+
+            debris = _Bare()._drop_debris(str(out))
+        except Exception as e:
+            debris = {"error": f"{type(e).__name__}: {e}"}
+        return {"ok": True, "out": str(out), "debris": debris,
+                "source": str(produced[0]) if produced else "", "log": log[-2000:]}
     return {"ok": ok, "out": str(out) if ok else "",
             "source": str(produced[0]) if produced else "", "log": log[-4000:]}
 
