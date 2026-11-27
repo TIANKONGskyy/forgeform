@@ -39,6 +39,9 @@
 每页都有 3D 预览、下载、耗时日志；对外接口名固定为 `/cap_rig` `/cap_paint` `/cap_refine`
 `/cap_multiview` `/cap_motion`（和命令行走同一套产品入口）。
 
+**实测状态（2026-11-28，V100）**：出图 z_image 21 s / klein 28 s / flux 61 s / qwen 464 s；3D 2mini 69 s / 2.1@512 676 s；骨骼模板 53 s。
+贴图 PBR、精修、多视图、动画依赖额外扩展与权重，见 `docs/E2E-FULL-REPORT-2026-11-28.md`。
+
 **一键开始**：双击 `一键开始.ps1`（先体检再启动）；只想要环境诊断就跑 `python tools/doctor.py`。
 出问题跑 `python tools/report.py` 生成**已脱敏**诊断包，直接贴 issue。
 

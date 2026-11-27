@@ -52,6 +52,44 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.9.0 — 端到端实测后的安装级修复（2026-11-28）
+
+在本机从"零模型"完整装了一遍、逐个模型跑通、做了一次模型修改，最后删干净。
+实测记录见 `docs/E2E-FULL-REPORT-2026-11-28.md`（5 个图像模型 + 3 条 3D 路线 + 骨骼 + 修改测试）。
+
+**最关键的一条：能力后端脚本进仓库**
+
+骨骼 / 动画 / 精修 / 贴图的执行脚本原先只在被 `.gitignore` 排除的 `work/research/`，
+干净安装的用户点「绑骨骼」只会看到「缺研究脚本」。现在源码收进 `tools/backends/`
+（权重仍不进仓库），`resolve()` 优先用仓库副本、权重路径可配、缺权重给安装命令。
+
+- `tools/backends/rig/auto_rig.py`（模板骨架，实测 53 s / 14 关节）
+- `tools/backends/rig/run_riganything.py`（语义骨架）
+- `tools/backends/precision/smoke_direct3d.py` + `flash_attn_compat.py`（V100 的 SDPA 兼容层）
+- `tools/backends/motion/retarget_lib.py`（BVH 重定向）
+- `tools/backends/texture/run_plane_paint.py`
+
+**模型侧的三个坑**
+
+1. Z-Image 工作流写死 GGUF 节点，干净装没有 GGUF 扩展 → 按后缀选 `UNETLoader`/`CLIPLoader`，`clip_type` 可配
+2. `_build_flux2_workflow` 的 LoRA 字段指向不存在的文件 → 400；现在缺 LoRA 自动跳过
+3. ComfyUI-GGUF 扩展缺 `gguf` 包 → 整个扩展 import 失败（只在启动日志里能看到）
+
+**安装脚本**
+
+- 镜像优先 + 单源 30 s 超时（github.com 直连现在会超时）
+- 自动解析 `releases/latest`，不再写死版本
+- 输出改 ASCII（PS 5.1 按 GBK 读 UTF-8 会花屏）
+
+**下载器**
+
+- 去掉稀疏预分配（它让"没下完也像下完了"），改按实际写入字节数校验
+- 每 10 s 进度心跳
+- 清单大小按 ±5% 容差判，HTML 错误页会被识别成失败
+
+实测网络：同一镜像同一小时，21.7 GB 的 Qwen-Image 跑到 81 MB/s，19.2 GB 的 FLUX.2 只有 29 MB/s——
+用户报"下不动"先换时间点重试，别急着判死刑。
+
 ## v3.8.9 — 全新安装实测修的四处（2026-11-28）
 
 在本机（模型全删、无 ComfyUI/Ollama）按用户姿势真跑了一遍 `install.ps1`：
