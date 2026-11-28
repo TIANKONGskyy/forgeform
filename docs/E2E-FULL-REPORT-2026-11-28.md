@@ -170,3 +170,26 @@ python app.py
 这一轮同时修掉干净安装里的两个新问题：
 `_ensure_comfy_env` 未定义（image 套件必崩）、以及权重已下完时"下载 job"空列表导致的假失败。
 
+
+## 补充：显存实测（2026-11-28 12:1x–12:3x，V100 32G）
+
+用 `tools/measure_vram.py` 每 1.5 s 采一次 `nvidia-smi`，记录峰值与基线。
+
+| 任务 | 耗时 | 基线 | 峰值 | 实际占用 |
+|---|---|---|---|---|
+| z_image 出图 1024²/4 步（ComfyUI） | 28 s | 781 MiB | **17,670 MiB** | **≈16.5 GB** |
+| 2mini 图→3D（direct，12 万面） | 71 s | 498 MiB | **5,247 MiB** | **≈4.6 GB** |
+
+早前几轮在同一台机器上观察到的峰值（`nvidia-smi` 直接读数，未用采样器）：
+
+| 任务 | 观察到 |
+|---|---|
+| flux（FLUX.1-dev fp8）出图 | ≈17.8 GB |
+| flux2_dev（Q4 GGUF + Mistral fp4）出图 | ≈23.9 GB |
+| qwen21_ref（Qwen-Image fp8 + qwen_vl fp8）出图 | ≈23.9 GB |
+
+**结论**：32 GB 卡上，出图最吃显存的是 Qwen / FLUX.2 这一档（≈24 GB），
+z_image 只吃 16.5 GB；3D 直连反而很省（4.6 GB）。
+出图和建模不能同时占着——铸想在 3D 前会主动释放 ComfyUI 的模型，这一机制实测有效
+（清空后基线从 12,730 MiB 回落到 498 MiB）。
+

@@ -811,3 +811,19 @@ def test_friendly_errors_passthrough_unknown():
     msg = "某个只有我们知道的奇怪错误"
     assert friendly(msg) == msg
     assert friendly("") == ""
+
+def test_measure_vram_sampler_reports():
+    """显存采样器：即便没有 GPU 也要能跑完并给出数字（不能崩）。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ff_vram", r"D:\ForgeForm-oss\tools\measure_vram.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    with mod.Sampler(interval=0.1) as s:
+        import time
+        time.sleep(0.35)
+    line = s.report("测试", 0.4)
+    assert "峰值" in line and "MiB" in line
+    assert s.peak >= s.base
