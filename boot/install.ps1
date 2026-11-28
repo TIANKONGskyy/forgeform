@@ -2,7 +2,8 @@
     [string]$Dest = (Join-Path $env:USERPROFILE 'ForgeForm'),
     [string]$LocalPkg = '',
     [switch]$NoDeps,
-    [switch]$NoDoctor
+    [switch]$NoDoctor,
+    [string]$ShortcutDir = ''
 )
 # ============================================================
 #  铸想 ForgeForm 一键安装（Windows，双击运行）
@@ -179,10 +180,64 @@ elseif (Test-Path $req) {
 $doctor = Join-Path $Dest 'tools\doctor.py'
 if ((Test-Path $doctor) -and (-not $NoDoctor)) { Say ''; Say '  自检：' 'White'; & $script:PyExe $doctor --fix }
 
+# ---------------------------------------------------------------- 启动器 + 桌面图标
+function New-Launcher([string]$dir) {
+    $bat = Join-Path $dir '启动铸想.bat'
+    if (-not (Test-Path $bat)) {
+        $body = @'
+@echo off
+chcp 65001 >nul
+title ForgeForm
+cd /d "%~dp0"
+rem start server, wait for port, then open browser
+start "" /b python app.py
+for /l %%i in (1,1,40) do (
+  powershell -NoProfile -Command "if((Test-NetConnection 127.0.0.1 -Port 7860 -InformationLevel Quiet)){exit 0}else{exit 1}" >nul 2>&1
+  if not errorlevel 1 goto ready
+  timeout /t 1 >nul
+)
+:ready
+start "" http://127.0.0.1:7860
+pause
+'@
+        Set-Content -Path $bat -Value $body -Encoding ASCII
+    }
+    return $bat
+}
+
+function New-Shortcut([string]$target, [string]$lnkDir, [string]$name, [string]$workDir) {
+    try {
+        if (-not (Test-Path $lnkDir)) { New-Item -ItemType Directory -Force -Path $lnkDir | Out-Null }
+        $lnk = Join-Path $lnkDir ($name + '.lnk')
+        $ws = New-Object -ComObject WScript.Shell
+        $sc = $ws.CreateShortcut($lnk)
+        $sc.TargetPath = $target
+        $sc.WorkingDirectory = $workDir
+        $sc.IconLocation = "$env:SystemRoot\System32\shell32.dll,137"
+        $sc.Description = '铸想 ForgeForm - 本地出图/建模/可打印 STL'
+        $sc.Save()
+        return $lnk
+    } catch {
+        return $null
+    }
+}
+
+try {
+    $launcher = New-Launcher $Dest
+    $desktop = if ($ShortcutDir) { $ShortcutDir } else { [Environment]::GetFolderPath('Desktop') }
+    $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+    $l1 = New-Shortcut $launcher $desktop '铸想 ForgeForm' $Dest
+    $l2 = New-Shortcut $launcher $startMenu '铸想 ForgeForm' $Dest
+    if ($l1) { Ok "桌面图标：$l1" } else { Warn "桌面图标没建成（可手动把 启动铸想.bat 拖到桌面）" }
+    if ($l2) { Ok "开始菜单：$l2" }
+} catch {
+    Warn "创建快捷方式失败：$($_.Exception.Message)"
+}
+
 Say ''
 Say '  安装完成！' 'Green'
 Say "  目录：$Dest"
-Say '  启动：双击目录里的 一键开始.bat，或执行 python app.py'
+Say '  启动：双击桌面「铸想 ForgeForm」图标（或目录里的 启动铸想.bat）'
 Say '  浏览器打开：http://127.0.0.1:7860'
 Say ''
 Say '  下一步（可选）：装出图/建模权重' 'White'
