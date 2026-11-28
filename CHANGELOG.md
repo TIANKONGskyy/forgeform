@@ -52,6 +52,31 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.12.3 — 意图命中修两个真 bug（2026-11-28）
+
+真机跑 10 句典型输入，命中率原来是**灾难级**：
+
+| 输入 | 阶段 | 修复前 | 修复后 |
+|---|---|---|---|
+| 做个手机支架 | idle | UNKNOWN | DESCRIBE_OBJECT |
+| 把把手加粗一点 | 3d | **EXPORT_STL** | REFINE |
+| 换个颜色，蓝色 | 3d | **EXPORT_STL** | REFINE |
+| 加个圆柱底座 | 3d | **EXPORT_STL** | REFINE |
+| 再做一个笔筒 | 3d | UNKNOWN | DESCRIBE_OBJECT |
+| 重来 | 3d | UNKNOWN | REGENERATE |
+| 这个打印要多久 | 3d | **OPEN_BAMBU** | UNKNOWN（当提问） |
+| 多少钱 | idle | DESCRIBE_OBJECT | UNKNOWN（当提问） |
+
+两个根因：
+1. 阶段名 `idle` / `editing` 没被识别（代码里真实存在），所有输入落 UNKNOWN
+2. `3d` 阶段对任何不认识的话都 `return EXPORT_STL` —— 用户想改模型，系统却在导出
+
+修法：阶段名归一（idle→empty、editing→selecting）；3d 阶段按
+「提问 → 换新东西 → 重来 → 确认 → 修改 → 重建 → 导出 → 打印」排序，
+兜底改成 UNKNOWN 交给上层，不再默认导出。
+
+对话侧同时补了回归：同组记忆、换东西自动开新组、切回续聊（`tests/test_conversation_memory.py`）。
+
 ## v3.12.2 — 产物操作：删除 / 引用 / 改一版（2026-11-28）
 
 之前产物库只有"刷新 + 打开"。现在左列加了三个按钮（`backend/asset_ops.py`）：

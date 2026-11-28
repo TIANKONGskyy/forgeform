@@ -58,9 +58,23 @@ def classify(text: str, current_phase: str) -> tuple[Intent, str]:
     t = _clean(text)
     original = text.strip()
 
+    # 阶段名归一（2026-11-28 实测）：代码里出现过 idle / editing，
+    # 但下面只认 empty/selecting，导致这两类输入全部落到 UNKNOWN。
+    current_phase = {
+        "idle": "empty",
+        "editing": "selecting",
+        "generated": "selecting",
+        "review": "selecting",
+    }.get(str(current_phase or ""), current_phase)
+
     # 全局关键词（任何阶段都优先匹配）
     if any(k in t for k in ["新建项目", "新对话", "新对话组", "重新开始", "下一个", "开个新的"]):
         return Intent.NEW_PROJECT, ""
+
+    # 纯提问（"多少钱"「能做吗」「这个要多久」）→ 交给对话，不要当成新需求
+    if text.strip().endswith(("？", "?")) or any(
+            k in t for k in ["多少钱", "要多久", "多久能", "能不能做", "可以做吗", "怎么用", "为什么"]):
+        return Intent.UNKNOWN, original
 
     # 阶段 0 - 需求确认阶段（含细化中）
     if current_phase in ("empty", "confirm", "refining"):
@@ -155,13 +169,37 @@ def classify(text: str, current_phase: str) -> tuple[Intent, str]:
 
     # 阶段 3 - 3D建模阶段
     if current_phase == "3d":
+        # 疑问句先排掉：「这个打印要多久」「多少钱」不是要打印
+        if text.strip().endswith(("？", "?")) or any(
+                k in t for k in ["多久", "多少钱", "多少", "怎么", "为什么", "能不能", "可以吗"]):
+            return Intent.UNKNOWN, original
+        # 换一个新东西做（不是改现有的）
+        if any(k in t for k in ["再做一个", "再做一个", "再来一个", "再画一个", "做个新的", "新做一个",
+                                "另一个", "换成别", "换个别"]):
+            return Intent.DESCRIBE_OBJECT, original
+        # 重来
+        if any(k in t for k in ["重来", "重做", "再来一次", "再试一次", "重新来"]):
+            return Intent.REGENERATE, ""
+        # 明确表示"这样就行"
+        if any(k in t for k in ["可以了", "就这样", "这个就行", "好了", "没问题", "导出吧"]):
+            return Intent.EXPORT_STL, ""
+        # 顺序：明确指令 → 修改 → 重建 → 导出 → 打印
+        # 2026-11-28 实测：原实现在 3d 阶段对所有不认识的话都返回 EXPORT_STL，
+        # 于是「把把手加粗」= 导出 STL、「换个颜色」= 导出 STL，用户怎么改都改不动。
+        if any(k in t for k in ["重新建模", "重新生成", "重新做", "重做", "再来一版", "换一个模型"]):
+            return Intent.REGENERATE, ""
+        if any(k in t for k in [
+            "改", "换", "加", "去掉", "删", "调", "修改", "优化",
+            "大一点", "小一点", "大点", "小点", "高一点", "矮一点", "粗一点", "细一点",
+            "颜色", "材质", "把手", "底座", "孔", "壁厚", "圆角", "倒角", "尺寸", "mm", "毫米",
+        ]):
+            return Intent.REFINE, original
         if any(k in t for k in ["导出stl", "转stl", "导出", "出stl", "要stl", "stl"]):
             return Intent.EXPORT_STL, ""
         if any(k in t for k in ["打开bambu", "bambu", "打印", "开始打印"]):
             return Intent.OPEN_BAMBU, ""
-        if any(k in t for k in ["重新建模", "重新生成", "再来", "换一个"]):
-            return Intent.REGENERATE, ""
-        return Intent.EXPORT_STL, ""
+        # 兜底：交给上层（agent/对话）判断，绝不默认"导出 STL"
+        return Intent.UNKNOWN, original
 
     # 阶段 4 - STL/打印阶段
     if current_phase == "stl":
