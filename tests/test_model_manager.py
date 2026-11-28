@@ -90,3 +90,27 @@ def test_weight_files_uses_checkpoint_field(tmp_path, monkeypatch):
     r = mm.delete("image", "mine")
     assert r["ok"] is True
     assert not f.exists()
+
+
+def test_partial_files_not_counted_as_installed(tmp_path, monkeypatch):
+    """只有 .part / .incomplete 时不能算已装（子 agent 实测：半成品被当成品）。"""
+    from backend import model_manager as mm
+    import json
+
+    comfy = tmp_path / "comfy"
+    (comfy / "models" / "diffusion_models").mkdir(parents=True)
+    (comfy / "models" / "diffusion_models" / "z.safetensors.part").write_bytes(b"x" * 1024)
+    cfg = {"paths": {"comfyui": str(comfy)},
+           "models": {"image": {"z_image": {"name": "Z", "checkpoint": "z.safetensors"}}}}
+    (tmp_path / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    monkeypatch.setattr(mm, "ROOT", tmp_path)
+    monkeypatch.setattr(mm, "COMFY", comfy)
+
+    rows = {r["key"]: r for r in mm.list_models()}
+    assert rows["z_image"]["installed"] is False
+    # 切到没装好的模型要报错，而不是静默写配置
+    try:
+        mm.switch("image", "z_image")
+        raise AssertionError("未装好的模型不应允许切换")
+    except RuntimeError:
+        pass

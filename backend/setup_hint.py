@@ -32,18 +32,23 @@ def _hy3dgen_ok(cfg: dict) -> bool:
 
 
 def _image_ok(cfg: dict) -> bool:
-    """图像模型权重是否落地（只看配置里写的 checkpoint 是否在 ComfyUI models 下）。"""
+    """任一图像模型的 checkpoint 落地就算"有出图"（原来只认 z_image）。"""
     paths = (cfg.get("paths") or {})
     comfy = str(paths.get("comfyui") or "")
     if not comfy or "${" in comfy:
         return False
     base = Path(comfy) / "models"
     img = ((cfg.get("models") or {}).get("image") or {})
-    z = img.get("z_image") or {}
-    ckpt = z.get("checkpoint") or ""
-    if not ckpt:
-        return False
-    return (base / "diffusion_models" / ckpt).is_file() or (base / "unet" / ckpt).is_file()
+    for _key, slot in img.items():
+        if not isinstance(slot, dict):
+            continue
+        ckpt = str(slot.get("checkpoint") or "").strip()
+        if not ckpt:
+            continue
+        for sub in ("diffusion_models", "unet", "checkpoints", "clip"):
+            if (base / sub / ckpt).is_file():
+                return True
+    return False
 
 
 def status() -> dict:

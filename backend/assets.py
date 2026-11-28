@@ -68,11 +68,18 @@ def _sha256(path: Path, chunk: int = 1 << 20, limit: int = 512 << 20) -> str:
     return h.hexdigest()
 
 
-def _read_index() -> list:
+def _read_index() -> list:  # noqa: C901
     try:
         data = json.loads(INDEX.read_text(encoding="utf-8"))
         return data if isinstance(data, list) else []
-    except Exception:
+    except Exception as e:
+        # 2026-11-28：损坏时先备份，别静默当空库（下次写入会把全库覆盖）
+        try:
+            bak = INDEX.with_suffix(f'.corrupt-{int(time.time())}.json')
+            INDEX.replace(bak)
+            print(f'[assets] 索引损坏，已备份到 {bak.name}（{e}）', flush=True)
+        except Exception:
+            pass
         return []
 
 

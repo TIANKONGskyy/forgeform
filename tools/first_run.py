@@ -72,9 +72,15 @@ def main() -> int:
         plan.append("direct")
     if not image and ns.with_image:
         plan.append("image")
+    elif not image and not ns.yes:
+        print("       （提示：加 --with-image 可以一起装出图模型）")
 
     if not plan:
-        print("\n已经装好了，直接启动：python app.py")
+        if not image:
+            print("\n建模能用了，但还没有出图模型（只能拿现成图片建模）。")
+            print("要出图请再跑：python tools/first_run.py --with-image")
+        else:
+            print("\n已经装好了，直接启动：python app.py")
         return 0
 
     size = {"direct": "12 GB（约 3 分钟）", "image": "11 GB + ComfyUI 环境（约 9 分钟）"}

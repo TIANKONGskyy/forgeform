@@ -53,6 +53,29 @@ def _slot(cfg: dict, kind: str, key: str) -> dict:
     return (((cfg.get("models") or {}).get(kind) or {}).get(key) or {})
 
 
+_INCOMPLETE_SUFFIX = (".part", ".incomplete", ".part.json")
+
+
+def _complete_files(paths: list[Path]) -> tuple[list[Path], bool]:
+    """区分"完整文件"和"半成品"。返回 (完整文件, 是否有半成品)。"""
+    good: list[Path] = []
+    partial = False
+    for p in paths:
+        if p.is_file():
+            if p.name.endswith(_INCOMPLETE_SUFFIX):
+                partial = True
+            else:
+                good.append(p)
+        elif p.is_dir():
+            kids = list(p.rglob("*"))
+            if any(k.is_file() and k.name.endswith((".part", ".incomplete")) for k in kids):
+                partial = True
+            real = [k for k in kids if k.is_file() and not k.name.endswith((".part", ".incomplete"))]
+            if real:
+                good.append(p)
+    return good, partial
+
+
 def _gb(p: Path) -> float:
     try:
         return round(p.stat().st_size / 1024 ** 3, 2)
@@ -116,12 +139,15 @@ def list_models() -> list[dict]:
             if not isinstance(slot, dict):
                 continue
             files = _weight_files(cfg, kind, key)
+            good, partial = _complete_files(files)
+            files = good
             rows.append({
                 "key": key,
                 "kind": kind,
                 "name": slot.get("name") or key,
                 "backend": slot.get("backend") or "",
-                "installed": bool(files),
+                "installed": bool(files) and not partial,
+                "incomplete": bool(partial),
                 "size_gb": _size_of(files) if files else float(slot.get("size_gb") or 0),
                 "paths": [str(p) for p in files],
                 "active": (self_active(kind) == key),
@@ -146,6 +172,10 @@ def switch(kind: str, key: str) -> dict:
     cfg = _cfg()
     if not isinstance((((cfg.get("models") or {}).get(kind)) or {}).get(key), dict):
         raise KeyError(f"没有这个模型：{kind}/{key}")
+    good, partial = _complete_files(_weight_files(cfg, kind, key))
+    if not good:
+        raise RuntimeError(
+            f"{kind}/{key} 还没装好" + ("（有半成品文件，重新下载即可）" if partial else "（先下载）"))
     models = cfg.setdefault("models", {})
     models.setdefault("active", {})[kind] = key
     _save(cfg)

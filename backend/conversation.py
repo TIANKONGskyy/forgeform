@@ -259,6 +259,17 @@ def _numbers_preserved(user_text: str, rewritten: str) -> bool:
     return need.issubset(_norm(rewritten)) if need else True
 
 
+def _merge_requirement(base: str, extra: str) -> str:
+    """把补充要求并进原需求，去掉重复词，避免越写越长。"""
+    base = (base or "").strip()
+    extra = (extra or "").strip()
+    if not base:
+        return extra
+    if not extra or extra in base:
+        return base
+    return f"{base}，{extra}"
+
+
 def _extract_size_mm(text: str) -> Optional[float]:
     """从文本中提取打印尺寸（mm）。
 
@@ -1043,14 +1054,36 @@ class ConversationManager:
                 return self._do_export_stl(state)
             elif intent == ic.Intent.OPEN_BAMBU:
                 return self._do_open_bambu(state)
+            elif intent == ic.Intent.NEW_PROJECT:
+                return self._do_new_project()
+            elif intent == ic.Intent.DESCRIBE_OBJECT:
+                # 「再做一个笔筒」= 新需求，交给需求确认（不导出、不覆盖旧模型）
+                state["user_prompt"] = arg or text
+                state["phase"] = new_phase = "confirm"
+                reply = (f"好，换一个：{arg or text}。\n"
+                         "确认尺寸和风格后说「生成图片」，我就开始。")
             elif intent == ic.Intent.REGENERATE:
                 return self._do_generate_3d(state)
             elif intent == ic.Intent.REFINE:
-                reply = "请描述你想怎么调整这个 3D 模型..."
-            elif intent == ic.Intent.NEW_PROJECT:
-                return self._do_new_project()
+                # 把修改要求记进需求，再真的重走一遍（出图→建模），而不是只回一句话
+                req = (arg or text).strip()
+                merged = _merge_requirement(state.get("base_prompt", ""), req)
+                state["base_prompt"] = merged
+                state.setdefault("refinements", []).append(req)
+                pm.save_project(state)
+                reply = (f"收到，按「{req}」重做一版（重新出图 + 建模）。\n"
+                         "完成后会把新旧两版都留在产物库里。")
+                try:
+                    return self._do_generate_3d(state)
+                except Exception as e:
+                    reply += f"\n（自动重做没起来：{type(e).__name__}，可以手动点「生成 3D」）"
+            elif intent == ic.Intent.UNKNOWN:
+                # 提问/闲聊：不导出，不要动模型
+                reply = ("模型已经建好了。要导出就说「导出 STL」，"
+                         "要改就说「把把手加粗」这类要求，我重做一版。")
             else:
-                return self._do_export_stl(state)
+                reply = "要导出就说「导出 STL」，要改就说具体怎么改。"
+
 
         # ── 阶段4：STL ─────────────────────────────────
         elif phase == "stl":
