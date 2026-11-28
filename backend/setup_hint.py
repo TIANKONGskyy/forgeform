@@ -69,7 +69,7 @@ def banner_html() -> str:
     if not st["image"]:
         cmds.append("python tools/bootstrap_models.py --only image")
 
-    cmd_line = " ｜ ".join(cmds)
+    cmd_line = "python tools/first_run.py  " + ("（连出图一起装：--with-image）" if not st["image"] else "")
     return (
         '<div class="ff-setup-hint">'
         '<div class="ff-setup-hint-title">还差：' + "、".join(missing) + "</div>"

@@ -52,6 +52,21 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.11.0 — 一条命令装完（2026-11-28）
+
+用户最常问的是「我该跑哪条命令」。之前要跑三条，还得知道顺序。现在：
+
+```powershell
+python tools/first_run.py                 # 体检 → 装最小集（12 GB）→ 复检 → 告诉你启动命令
+python tools/first_run.py --with-image    # 连出图栈一起装（+11 GB）
+python tools/first_run.py --dry-run       # 只看会做什么
+```
+
+- 幂等：已经装了就跳过，直接告诉你怎么启动
+- `--yes` 免交互（CI / 脚本用）
+- 装完自动跑 `capability_doctor`，哪几项能用一眼看到
+- 首屏提示条与 README 都改成推荐这一条命令
+
 ## v3.10.1 — 首次用户验收记录（2026-11-28）
 
 按"用户第一次打开"的顺序把 v3.10.0 完整走了一遍，全部真数字（写进

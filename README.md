@@ -91,7 +91,18 @@ r = pipe.generate_3d_multiview({
 四个作品的真跑记录（每件含耗时、面数、水密、STL 四视角渲染）：
 `docs/showcase/`
 
-## 快速开始（实测路径：三条命令）
+## 快速开始（最省事：一条命令）
+
+```powershell
+python tools\first_run.py            # 体检 → 装最小集（12 GB）→ 复检 → 告诉你怎么启动
+python tools\first_run.py --with-image   # 连出图栈一起装（+11 GB）
+```
+
+装完 `python app.py`，浏览器打开 `127.0.0.1:7860`，直接说「做个白色陶瓷马克杯」。
+
+<details><summary>想自己一步步来（实测路径）</summary>
+
+## 分步安装（每步都有实测耗时）
 
 ```powershell
 # 1. 解压发布包（4 MB）
@@ -121,6 +132,8 @@ python app.py            # 浏览器开 127.0.0.1:7860
 | `paint` / `mv` / `refine` / `rig` | 贴图 / 多视图 / 精修 / 语义骨骼权重 | 4–10 GB | — |
 
 也可以双击 `启动.bat` 走图形向导（会探硬件、给方案）。
+
+</details>
 
 ## 能力就绪状态（2026-11-28 实测）
 

@@ -37,8 +37,8 @@ def test_setup_hint_lists_missing_and_commands(tmp_path, monkeypatch):
     assert setup_hint.is_ready() is False
     html = setup_hint.banner_html()
     assert "还差" in html
-    assert "bootstrap_models.py --only direct" in html
-    assert "bootstrap_models.py --only image" in html
+    assert "first_run.py" in html
+    assert "--with-image" in html
     assert "doctor.py --fix" in html
 
 
@@ -54,5 +54,23 @@ def test_setup_hint_mesh_only(tmp_path, monkeypatch):
     monkeypatch.setattr(setup_hint, "ROOT", tmp_path)
 
     html = setup_hint.banner_html()
-    assert "--only image" in html
-    assert "--only direct" not in html
+    assert "first_run.py" in html
+    assert "--with-image" in html
+
+def test_first_run_dry_run_is_safe(tmp_path, monkeypatch):
+    """--dry-run 只体检，不下载、不改配置。"""
+    import subprocess
+    import sys
+
+    from backend import setup_hint
+
+    (tmp_path / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(setup_hint, "ROOT", tmp_path)
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    p = subprocess.run([sys.executable, str(root / "tools" / "first_run.py"), "--dry-run"],
+                       cwd=str(root), capture_output=True, timeout=300)
+    out = (p.stdout or b"").decode("utf-8", "replace")
+    assert p.returncode == 0
+    assert "dry-run" in out
+    assert "bootstrap" in out or "direct" in out
