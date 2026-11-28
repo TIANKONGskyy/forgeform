@@ -1398,6 +1398,12 @@ def build():
                     asset_refresh = gr.Button("刷新", size="sm", elem_id="asset_refresh")
                     asset_open = gr.Button("打开选中", size="sm", variant="secondary",
                                            elem_id="asset_open")
+                # 产物操作（2026-11-28）：删除 / 引用 / 改一版
+                with gr.Row(elem_classes="asset-actions"):
+                    asset_del = gr.Button("删除", size="sm", variant="stop", elem_id="asset_del")
+                    asset_ref = gr.Button("引用", size="sm", variant="secondary", elem_id="asset_ref")
+                    asset_rev = gr.Button("改一版", size="sm", variant="secondary", elem_id="asset_rev")
+                asset_msg = gr.Markdown("", elem_id="asset_msg")
             with gr.Column(scale=7, min_width=300, elem_classes="chat-col"):
                 # 首屏环境提示（缺模型/缺 ComfyUI 时把"该跑哪条命令"直接写在页面上）
                 try:
@@ -2011,6 +2017,63 @@ if __name__ == "__main__":
                           (model_mgmt_del, _mu.do_delete)):
             _btn.click(_fn, inputs=[model_mgmt_dd], outputs=[model_mgmt_msg]).then(
                 lambda c: _mu.panel_html(c), inputs=[model_mgmt_dd], outputs=[model_mgmt_html])
+    except Exception:
+        pass
+
+    # 产物操作（2026-11-28）：删除 / 引用 / 改一版
+    try:
+        from backend import asset_ops as _aops
+
+        def _asset_selected(choice):
+            """下拉值可能是 '标题 (id)'，也可能是产物路径（asset_ui.choices 给的是路径）。"""
+            s = str(choice or "").strip()
+            if not s:
+                return ""
+            if "(" in s and s.rstrip().endswith(")"):
+                cand = s[s.rfind("(") + 1: -1].strip()
+                if cand:
+                    return cand
+            # 路径 → 用资产库反查 id
+            try:
+                from backend import assets as _A
+                from pathlib import Path as _P
+                target = _P(s)
+                for row in _A.list_assets(limit=500):
+                    try:
+                        if _A.absolute(row) == target:
+                            return row["id"]
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+            return ""
+
+        def _on_del(choice):
+            aid = _asset_selected(choice)
+            if not aid:
+                return "先在上面选一个产物"
+            ok, msg = _aops.delete(aid)
+            return ("✓ " if ok else "✗ ") + msg
+
+        def _on_ref(choice):
+            aid = _asset_selected(choice)
+            if not aid:
+                return "先在上面选一个产物"
+            ok, msg = _aops.reference(aid)
+            return ("✓ 已引用：" if ok else "✗ ") + str(msg)
+
+        def _on_rev(choice):
+            aid = _asset_selected(choice)
+            if not aid:
+                return "先在上面选一个产物"
+            d = _aops.describe(aid)
+            if not d.get("ok"):
+                return "✗ " + str(d.get("error"))
+            return f"已选中「{d['title']}」，在对话框说一句要怎么改（例如「把手加粗」），我再出一版"
+
+        asset_del.click(_on_del, inputs=[asset_pick], outputs=[asset_msg])
+        asset_ref.click(_on_ref, inputs=[asset_pick], outputs=[asset_msg])
+        asset_rev.click(_on_rev, inputs=[asset_pick], outputs=[asset_msg])
     except Exception:
         pass
 
