@@ -41,7 +41,32 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 COMFY = Path(os.environ.get("FORGEFORM_COMFY_DIR", r"D:\ComfyUI-New"))
+# 3D-Pack / Paint 节点包需要的**纯 Python** 依赖（编译型 CUDA 包另列，Windows 上难装）
+PACK_PIP = [
+    "pyhocon", "trimesh", "einops", "omegaconf", "diffusers", "transformers",
+    "accelerate", "safetensors", "scipy", "opencv-python", "kornia",
+    "open_clip_torch", "xatlas", "pymeshlab", "pymeshfix", "pygltflib", "timm",
+    "jaxtyping", "torchtyping", "rembg", "onnxruntime", "imageio",
+    "imageio-ffmpeg", "matplotlib", "easydict", "iopath", "mmgp", "PyMCubes",
+    "plyfile", "gguf", "sentencepiece", "pytorch_msssim", "lightning",
+    "torchmetrics", "open3d", "scikit-image", "fast-simplification",
+]
+
 COMFY_ENV = Path(os.environ.get("FORGEFORM_COMFY_ENV", r"D:\comfy312"))
+
+
+def _comfy_python() -> str:
+    """装 ComfyUI 侧依赖该用哪个解释器。
+
+    2026-11-28 实测踩到：bootstrap 用 sys.executable 装 3D-Pack 依赖，
+    但 ComfyUI 实际跑在 `tools/install_comfy.py` 建的 venv 里 →
+    "依赖装好了，ComfyUI 还是 import 失败"。有 venv 就必须装进 venv。
+    """
+    for cand in (COMFY_ENV / "Scripts" / "python.exe", COMFY / "python_embeded" / "python.exe"):
+        if cand.is_file():
+            return str(cand)
+    return sys.executable
+
 CKPT = COMFY / "custom_nodes" / "ComfyUI-3D-Pack-main" / "Checkpoints" / "Diffusers" / "tencent" / "Hunyuan3D-2_1"
 
 # HF 直连在国内基本不通；镜像优先
@@ -50,6 +75,7 @@ MS = "https://modelscope.cn/models"
 
 SUITES = {
     "core": "ComfyUI + 3D-Pack + Hunyuan3D 2.1（能单图建模）",
+    "direct": "hy3dgen 直连权重（2mini，约 12 GB）——不依赖 ComfyUI 节点，本机实测最稳",
     "paint": "贴图权重（PBR 2.1）",
     "mv": "多视图权重（Hunyuan3D 2mv）",
     "refine": "精修权重（Direct3D-V3 512 + DINOv3）",
@@ -237,79 +263,59 @@ def _pip_comfy(log) -> str:
 
 
 def _install_comfy_source(log) -> str:
-    """源码装 ComfyUI：git clone（gh-proxy）+ pip 依赖。
+    """源码装 ComfyUI：**zip 下载** + pip 依赖（不要 git clone）。
 
-    ★ 2026-11-28 实测：便携版 1.99 GB，走镜像只有 0.3–1.3 MB/s（要 1 小时以上）；
-      而源码只有几十 MB，本机已有 torch，pip 依赖也能走国内源。
-      所以默认走源码，便携版留作 --comfy portable 的回退。
+    ★ 2026-11-28 实测两件事：
+      1. 便携版 1.99 GB，走镜像只有 0.3–1.3 MB/s（实测 0.95 MB/s，要 35 分钟以上）
+      2. `git clone` 走 gh-proxy 会卡在 0 字节（10 分钟无进展），zip 只要 2 秒（13 MB）
+    所以这里一律用 codeload zip。
     """
+    import io
+    import zipfile
+
+    import requests
+
     if (COMFY / "main.py").is_file():
         return "已存在"
-    urls = ["https://gh-proxy.com/https://github.com/comfyanonymous/ComfyUI.git",
-            "https://ghfast.top/https://github.com/comfyanonymous/ComfyUI.git",
-            "https://github.com/comfyanonymous/ComfyUI.git"]
-    # 目标目录可能已经存在（先跑过 3D-Pack clone / 下过权重）→ 先 clone 到临时目录再合并，
-    # 直接 clone 会因为 "not an empty directory" 退出码 128（2026-11-28 实测）
-    COMFY.mkdir(parents=True, exist_ok=True)
-    tmp = COMFY / "_comfy_clone"
-    if tmp.exists():
-        shutil.rmtree(tmp, ignore_errors=True)
+
+    urls = [
+        "https://gh-proxy.com/https://codeload.github.com/comfyanonymous/ComfyUI/zip/refs/heads/master",
+        "https://ghfast.top/https://codeload.github.com/comfyanonymous/ComfyUI/zip/refs/heads/master",
+    ]
+    body = None
     err = ""
     for u in urls:
         try:
-            log(f"    clone {u.split('/')[2]} ...")
-            _sh(["git", "clone", "--depth", "1", u, str(tmp)], timeout=1200)
-            break
+            log(f"    下载 ComfyUI 源码 zip（{u.split('/')[2]}）...")
+            r = requests.get(u, timeout=300, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code == 200 and len(r.content) > 1024 * 1024:
+                body = r.content
+                break
+            err = f"HTTP {r.status_code} / {len(r.content)} B"
         except Exception as e:
-            err = str(e)
-    else:
-        raise RuntimeError(err)
-    for item in tmp.iterdir():
-        dest = COMFY / item.name
-        if dest.exists():
-            continue
-        shutil.move(str(item), str(dest))
-    shutil.rmtree(tmp, ignore_errors=True)
-    req = COMFY / "requirements.txt"
-    if req.is_file():
-        el = os.environ.get("PIP_INDEX_URL") or "https://pypi.tuna.tsinghua.edu.cn/simple"
-        # ★ 2026-11-28 实测：ComfyUI 新版依赖要求 Python >=3.12
-        #   （comfyui-workflow-templates-* Requires-Python >=3.12），
-        #   用 3.11 的解释器装会直接失败。优先挑一个 ≥3.12 的解释器。
-        interp = os.environ.get("FORGEFORM_COMFY_PY") or ""
-        if not interp:
-            cands = []
-            for name in ("python", "python3"):
-                q = shutil.which(name)
-                if q:
-                    cands.append(q)
-            cands.append(sys.executable)
-            for c in cands:
-                try:
-                    v = subprocess.check_output([c, "-c", "import sys;print('%d.%d'%sys.version_info[:2])"],
-                                                text=True, timeout=15).strip()
-                    if tuple(int(x) for x in v.split(".")) >= (3, 12):
-                        interp = c
-                        break
-                except Exception:
-                    continue
-            interp = interp or sys.executable
-        log(f"    pip 用解释器：{interp}")
-        _sh([interp, "-m", "pip", "install", "-q", "-i", el, "-r", str(req)],
-            timeout=3600)
-    return "源码安装完成"
+            err = f"{type(e).__name__}: {e}"
+    if body is None:
+        raise RuntimeError(f"ComfyUI 源码下载失败：{err}")
 
-# 3D-Pack 需要的纯 Python 依赖；编译型 CUDA 包（spconv/cumm/slangtorch/nerfacc）
-# 在 Windows + 新版 torch 上极易失败，单独探测并提示
-PACK_PIP = [
-    "cmake", "ninja", "pccm", "PyGithub", "requests", "numpy", "einops", "scipy",
-    "kornia", "opencv-python", "pillow", "diffusers", "transformers", "safetensors",
-    "open_clip_torch", "torchmetrics", "pytorch_msssim", "pytorch-lightning", "peft",
-    "rembg", "onnxruntime", "imageio", "imageio-ffmpeg", "matplotlib", "trimesh",
-    "fast-simplification", "plyfile", "pygltflib", "xatlas", "pymeshlab", "gpytoolbox",
-    "PyMCubes", "pyvista", "pymeshfix", "igraph", "open3d", "torchtyping", "tqdm",
-    "jaxtyping", "packaging", "OmegaConf", "pyhocon", "iopath", "easydict", "mmgp",
-]
+    COMFY.mkdir(parents=True, exist_ok=True)
+    tmp = Path(os.environ.get("TEMP", ".")) / "ff_comfy_src_zip"
+    shutil.rmtree(tmp, ignore_errors=True)
+    zipfile.ZipFile(io.BytesIO(body)).extractall(tmp)
+    src = next(tmp.iterdir())
+    n = 0
+    for item in src.iterdir():
+        target = COMFY / item.name
+        # 绝不覆盖 models/：实测覆盖会清空已下载的权重
+        if item.is_dir():
+            if target.exists():
+                continue
+            shutil.copytree(item, target)
+        else:
+            shutil.copy2(item, target)
+        n += 1
+    shutil.rmtree(tmp, ignore_errors=True)
+    log(f"    ✓ 源码解压 {n} 项（models/ 未覆盖）")
+    return "zip"
 
 
 def _install_pack_deps(log) -> str:
@@ -325,7 +331,7 @@ def _install_pack_deps(log) -> str:
     from backend import downloader as dl
 
     el = os.environ.get("PIP_INDEX_URL") or "https://pypi.tuna.tsinghua.edu.cn/simple"
-    _sh([sys.executable, "-m", "pip", "install", "-q", "-i", el] + PACK_PIP, timeout=3600)
+    _sh([_comfy_python(), "-m", "pip", "install", "-q", "-i", el] + PACK_PIP, timeout=3600)
 
     # kiui / utils3d 只有 GitHub，走 zip
     deps = Path(os.environ.get("TEMP", ".")) / "ff_pack_deps"
@@ -391,8 +397,57 @@ def _extract_archive(log) -> str:
     return "zip"
 
 
+def _install_hy3dgen_direct(log) -> str:
+    """下 hy3dgen 直连权重（tencent/Hunyuan3D-2mini）并写进 config。
+
+    为什么单独一条：本机实测 ComfyUI+3D-Pack 被 pytorch3d 卡死，
+    而 hy3dgen 直连（backend.mode=direct）能稳定出模。
+    """
+    target = Path(os.environ.get("FORGEFORM_HY3DGEN_DIR", r"D:\models\hy3dgen")) / "hunyuan3d-2mini"
+    if (target / "model.fp16.safetensors").is_file() or (target / "config.json").is_file():
+        return "已存在"
+
+    os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+    from huggingface_hub import snapshot_download
+
+    log(f"    下 hy3dgen 2mini → {target}（约 12 GB）")
+    target.mkdir(parents=True, exist_ok=True)
+    snapshot_download(
+        "tencent/Hunyuan3D-2mini",
+        local_dir=str(target),
+        allow_patterns=["*.json", "*.safetensors", "*.txt", "*.yaml"],
+        max_workers=8,
+    )
+    return "ok"
+
+
+def patch_hy3dgen_config(log) -> str:
+    """把直连权重写进 config（models.3d.hunyuan_mini.path）。"""
+    p = ROOT / "config.json"
+    if not p.is_file():
+        return "没有 config.json"
+    cfg = json.loads(p.read_text(encoding="utf-8-sig"))
+    path = Path(os.environ.get("FORGEFORM_HY3DGEN_DIR", r"D:\models\hy3dgen")) / "hunyuan3d-2mini"
+    slot = ((cfg.get("models") or {}).get("3d") or {}).get("hunyuan_mini")
+    if isinstance(slot, dict):
+        slot["path"] = str(path)
+        slot["backend"] = "hy3dgen"
+    else:
+        cfg.setdefault("models", {}).setdefault("3d", {})["hunyuan_mini"] = {
+            "path": str(path), "backend": "hy3dgen"}
+    p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(path)
+
+
 def patch_config(comfy_dir: Path, log) -> str:
     p = ROOT / "config.json"
+    if not p.is_file():
+        example = ROOT / "config.example.json"
+        if example.is_file():
+            shutil.copy2(example, p)
+            log("    （干净安装：先由 config.example.json 生成 config.json）")
+        else:
+            raise FileNotFoundError("既没有 config.json 也没有 config.example.json")
     cfg = json.loads(p.read_text(encoding="utf-8-sig"))
     cfg.setdefault("paths", {})["comfyui"] = str(comfy_dir)
     cfg.setdefault("backend", {})["mode"] = "auto"
@@ -455,7 +510,7 @@ def main(argv=None) -> int:
         req = ROOT / "requirements.txt"
         if not req.is_file():
             return "没有 requirements.txt"
-        _sh([sys.executable, "-m", "pip", "install", "-q", "-r", str(req)], timeout=3600)
+        _sh([_comfy_python(), "-m", "pip", "install", "-q", "-r", str(req)], timeout=3600)
         return "ok"
 
     # 三条互不依赖的线同时推进：下载（内部再并行）、解压、clone；
@@ -463,13 +518,20 @@ def main(argv=None) -> int:
     comfy_job = (("安装 ComfyUI(源码)", lambda: _install_comfy_source(log), [])
                  if ns.comfy == "source"
                  else ("解压 ComfyUI", lambda: _extract_archive(log), []))
-    jobs = [
-        ("下载权重", download_task, []),
+    if ns.only == "direct":
+        items = []
+
+    jobs = []
+    if items:
+        jobs.append(("下载权重", download_task, []))
+    jobs += [
         comfy_job,
         ("3D-Pack 仓库", lambda: _clone_pack(log), ["安装 ComfyUI(源码)"]),
         ("3D-Pack 依赖", lambda: _install_pack_deps(log), ["3D-Pack 仓库"]),
         ("铸想依赖(pip)", _pip_main, []),
     ]
+    if ns.only in ("direct", "core", "all"):
+        jobs.append(("hy3dgen 直连权重", lambda: _install_hy3dgen_direct(log), []))
     out = runner.run(jobs)
     # 依赖阶段：pip 要在解压 + clone 之后
     if "解压 ComfyUI" in out["done"] and "3D-Pack 仓库" in out["done"]:
@@ -479,13 +541,15 @@ def main(argv=None) -> int:
         except Exception as e:
             log(f"  ✗ pip 失败：{e}")
     try:
+        if ns.only in ("direct", "core", "all"):
+            log("  → 直连权重写进配置：" + patch_hy3dgen_config(log))
         log("  → 写配置：" + patch_config(COMFY, log))
     except Exception as e:
         log(f"  ✗ 写配置失败：{e}")
 
     try:
-        log("  → 体检")
-        _sh([sys.executable, str(ROOT / "tools" / "doctor.py")], timeout=600)
+        log("  → 体检（--fix 会补建 outputs/logs/projects/temp 与 config.json）")
+        _sh([sys.executable, str(ROOT / "tools" / "doctor.py"), "--fix"], timeout=600)
         log("    doctor 通过")
     except Exception as e:
         log(f"    doctor 有问题：{str(e)[:200]}")

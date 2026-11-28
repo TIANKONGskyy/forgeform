@@ -52,6 +52,30 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.9.6 — 干净安装实测修掉 bootstrap 四个问题（2026-11-28）
+
+在**全新解压的发布包**上真跑 `bootstrap_models.py --only core`，暴露出四个问题：
+
+1. **`PACK_PIP` 未定义** → `NameError`，3D-Pack 依赖整段失败（发布包里真实存在）
+2. **干净安装没有 config.json**（只有 config.example.json）→ 写配置必失败
+3. **体检用 `doctor.py` 而不是 `--fix`** → 缺 outputs/logs/projects/temp 报错
+4. **依赖装错解释器**：bootstrap 用 `sys.executable` 装 3D-Pack 依赖，
+   而 ComfyUI 实际跑在 `install_comfy.py` 建的 venv 里 → "依赖装好了 ComfyUI 还是 import 失败"
+
+修完实测（干净解压包）：
+
+```
+bootstrap --only core     86s  → ComfyUI 源码 + 3D-Pack + 4.6GB 权重 + 依赖 + 配置 + doctor 通过
+bootstrap --only core     13s  （幂等复跑）
+bootstrap --only direct  147s  → hy3dgen 2mini 12GB 权重
+图→3D（direct 2mini）      75s  → 100,000 面 / 1 连通块 / 质量闸通过 / 1.7MB GLB
+骨骼（模板）               28s  → 14 关节
+UI（7868）                 起得来，首页 374 KB
+```
+
+新增 `--only direct` 套件：只下 hy3dgen 直连权重（不依赖 ComfyUI 节点），
+这是本机实测最稳的图生 3D 路径。
+
 ## v3.9.5 — install_comfy 收尾与自检（2026-11-28）
 
 - `--verify-only`：不重装，只验证现有 ComfyUI 的节点与能力状态（13 秒出结果）
