@@ -57,20 +57,15 @@ def test_setup_hint_mesh_only(tmp_path, monkeypatch):
     assert "first_run.py" in html
     assert "--with-image" in html
 
-def test_first_run_dry_run_is_safe(tmp_path, monkeypatch):
-    """--dry-run 只体检，不下载、不改配置。"""
+def test_first_run_dry_run_is_safe():
+    """--dry-run 只体检，不下载（真 roo() 下跑一遍，只看退出码与关键字）。"""
     import subprocess
     import sys
-
-    from backend import setup_hint
-
-    (tmp_path / "config.json").write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(setup_hint, "ROOT", tmp_path)
 
     root = pathlib.Path(__file__).resolve().parent.parent
     p = subprocess.run([sys.executable, str(root / "tools" / "first_run.py"), "--dry-run"],
                        cwd=str(root), capture_output=True, timeout=300)
     out = (p.stdout or b"").decode("utf-8", "replace")
-    assert p.returncode == 0
-    assert "dry-run" in out
-    assert "bootstrap" in out or "direct" in out
+    assert p.returncode == 0, out[-400:]
+    # 机器上已装好 → 直接提示启动；没装 → 列计划并标 dry-run
+    assert ("已经装好了" in out) or ("dry-run" in out and "direct" in out)

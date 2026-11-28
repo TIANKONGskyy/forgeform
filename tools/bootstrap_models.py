@@ -27,6 +27,8 @@
 from __future__ import annotations
 
 import argparse
+
+from pip_mirror import install as pip_install
 import json
 import os
 import shutil
@@ -381,8 +383,8 @@ def _install_pack_deps(log) -> str:
 
     from backend import downloader as dl
 
-    el = os.environ.get("PIP_INDEX_URL") or "https://pypi.tuna.tsinghua.edu.cn/simple"
-    _sh([_comfy_python(), "-m", "pip", "install", "-q", "-i", el] + PACK_PIP, timeout=3600)
+    if not pip_install(PACK_PIP, log=log, python=_comfy_python()):
+        raise RuntimeError("3D-Pack 依赖装不上")
 
     # kiui / utils3d 只有 GitHub，走 zip
     deps = Path(os.environ.get("TEMP", ".")) / "ff_pack_deps"

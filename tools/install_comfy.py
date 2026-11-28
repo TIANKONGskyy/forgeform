@@ -144,7 +144,10 @@ def step_requirements() -> None:
     filtered = COMFY / "requirements.ff.txt"
     filtered.write_text("\n".join(lines) + "\n", encoding="utf-8")
     log("  装 ComfyUI requirements（已过滤模板包）")
-    _sh([str(_venv_py()), "-m", "pip", "install", "-q", "-r", str(filtered)])
+    sys.path.insert(0, str(ROOT / "tools"))
+    from pip_mirror import install as pip_install
+    if not pip_install(["-r", str(filtered)], log=log, python=str(_venv_py())):
+        raise RuntimeError("ComfyUI requirements 装不上")
 
 
 def step_node_packs() -> None:
@@ -167,7 +170,10 @@ def step_node_packs() -> None:
 
 def step_extra_deps() -> None:
     log(f"  装实测缺失依赖（{len(EXTRA_DEPS)} 个）")
-    _sh([str(_venv_py()), "-m", "pip", "install", "-q"] + EXTRA_DEPS)
+    sys.path.insert(0, str(ROOT / "tools"))
+    from pip_mirror import install as pip_install
+    if not pip_install(EXTRA_DEPS, log=log, python=str(_venv_py())):
+        raise RuntimeError("依赖装不上")
 
 
 def step_kiui() -> None:

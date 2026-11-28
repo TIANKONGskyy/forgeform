@@ -52,6 +52,23 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.11.1 — pip 静默挂死修复（2026-11-28）
+
+真跑 `first_run.py --yes --with-image` 时卡了 17 分钟：日志停在"hy3dgen 权重完成"，
+进程还在、CPU 不动。根因是 `bootstrap_models.py` 内部 pip 用**默认源 pypi.org**，
+在国内会静默挂住。
+
+修法：新增 `tools/pip_mirror.py` 统一入口——先看用户配的 `PIP_INDEX_URL`，
+再依次试清华 → 阿里云 → 官方源，每个源带超时，全失败才报错并列出试过的源。
+`bootstrap_models.py` 与 `install_comfy.py` 的所有 pip 调用都改走它。
+
+修完实测（干净解压 v3.11.0 + 这两个补丁）：
+
+```
+first_run.py --yes --with-image   → 装完输出"装好了。启动：python app.py"
+文→图 19 s · 图→3D 71 s · STL 90 mm 水密 3.8 MB（实测 90.0×90.0×62.9 mm）
+```
+
 ## v3.11.0 — 一条命令装完（2026-11-28）
 
 用户最常问的是「我该跑哪条命令」。之前要跑三条，还得知道顺序。现在：
