@@ -236,17 +236,22 @@ def download(item: dict, meter: Meter, *, conns: int = DEFAULT_CONNS,
             # 不预分配：truncate 出来的稀疏文件 st_size 立刻等于目标值，
             # 校验就失效了（实测 1.99 GB 的包在没下完时就报"大小正确"）。
             # 但也不能清空已有 .part —— 断点续传就靠它（2026-11-28 修）
-            # 2026-11-28：.part 已经满了就别再重下（sidecar 落后会导致永远收不了尾）
+            # 2026-11-28：.part 已满 → 只有在 sidecar 也证明"每块都写完"时才能直接收尾。
+            # 只看文件大小不安全：多连接 seek+write 可能留下空洞（实测出图全是噪点）。
             if part.exists() and size > 0 and part.stat().st_size == size:
-                log(f"[{name}] .part 已完整（{size:,} 字节），直接校验")
-                _safe_replace(part, dest)
-                try:
-                    _sidecar_path(part).unlink()
-                except Exception:
-                    pass
-                return {"ok": True, "path": str(dest), "bytes": size,
-                        "seconds": round(time.time() - t0, 1), "mbps": 0.0,
-                        "source": host, "name": name}
+                spans_saved = _load_spans(part, size)
+                side_ok = (not spans_saved) or all(pos > e for (s, e), pos in spans_saved.items())
+                if side_ok:
+                    log(f"[{name}] .part 已完整（{size:,} 字节，分块记录一致），直接校验")
+                    _safe_replace(part, dest)
+                    try:
+                        _sidecar_path(part).unlink()
+                    except Exception:
+                        pass
+                    return {"ok": True, "path": str(dest), "bytes": size,
+                            "seconds": round(time.time() - t0, 1), "mbps": 0.0,
+                            "source": host, "name": name}
+                log(f"[{name}] .part 大小对但分块记录不全（可能有空洞）→ 重新补齐")
 
             if not part.exists():
                 part.write_bytes(b"")
