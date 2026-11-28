@@ -671,3 +671,24 @@ body[data-ff-theme="light"]::after {
  font-size:var(--ff-fs-xs)!important;letter-spacing:.1em!important}
 #asset_pick{background:transparent!important;border:0!important}
 #asset_pick .wrap-inner,#asset_pick .wrap{background:var(--ff-panel-2)!important}
+
+/* 首屏环境提示条（2026-11-28）：缺模型时把该跑的命令写在页面上 */
+.ff-setup-hint {
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 176, 59, 0.38);
+  background: linear-gradient(180deg, rgba(255, 176, 59, 0.14), rgba(255, 176, 59, 0.05));
+  color: var(--ff-text, #e8ecf3);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ff-setup-hint-title { font-weight: 700; margin-bottom: 4px; color: #ffb03b; }
+.ff-setup-hint code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  word-break: break-all;
+}
+.ff-setup-hint-foot { margin-top: 6px; opacity: 0.72; font-size: 12px; }

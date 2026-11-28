@@ -1399,6 +1399,14 @@ def build():
                     asset_open = gr.Button("打开选中", size="sm", variant="secondary",
                                            elem_id="asset_open")
             with gr.Column(scale=7, min_width=300, elem_classes="chat-col"):
+                # 首屏环境提示（缺模型/缺 ComfyUI 时把"该跑哪条命令"直接写在页面上）
+                try:
+                    from backend import setup_hint as _setup_hint
+                    _hint = _setup_hint.banner_html()
+                except Exception:
+                    _hint = ""
+                setup_bar = gr.HTML(_hint, elem_id="setup_hint", visible=bool(_hint))
+
                 # 欢迎页（空对话时显示）
                 hero = gr.HTML(HERO_HTML, visible=False,
                                elem_classes="hero-block")
