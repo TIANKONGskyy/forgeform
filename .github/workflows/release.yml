@@ -71,30 +71,56 @@ jobs:
           ls -lh "$NAME"
           echo "ASSET=$NAME" >> "$GITHUB_ENV"
 
+        - name: Package tar (for streaming install)
+          # tar 是顺序格式，安装器可边下边解；zip 必须下完才能解
+          run: |
+            TAR="forgeform-${{ steps.ver.outputs.tag }}.tar"
+            PREFIX="forgeform-${{ steps.ver.outputs.tag }}"
+            git archive --format=tar --prefix="$PREFIX/" HEAD -o "$TAR"
+            tar -rf "$TAR" --transform "s,^VERSION,$PREFIX/VERSION," VERSION
+            ls -lh "$TAR"
+            echo "ASSET_TAR=$TAR" >> "$GITHUB_ENV"
+
+        - name: Package bootstrapper
+          # 只有 boot/ 目录：几十 KB，网站只挂这一个入口
+          run: |
+            BOOT="forgeform-boot.zip"
+            (cd boot && zip -q -r "../$BOOT" .)
+            ls -lh "$BOOT"
+            echo "ASSET_BOOT=$BOOT" >> "$GITHUB_ENV"
+
       - name: Create or update release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: 铸想 ForgeForm ${{ steps.ver.outputs.tag }}
-          files: ${{ env.ASSET }}
+          files: |
+            ${{ env.ASSET }}
+            ${{ env.ASSET_TAR }}
+            ${{ env.ASSET_BOOT }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           body: |
             一句话生成可打印的 STL。
 
-            ## 怎么用
+            ## 怎么用（推荐）
 
-            下载下面的 `${{ env.ASSET }}`，**解压后双击 `启动.bat`**。
+            下载 **`forgeform-boot.zip`**（几十 KB）→ 解压 → **双击 `铸想安装.bat`**。
 
-            已经装过旧版的话，把压缩包解压到**现有安装目录**、双击 **`更新.bat`**，
-            它会只覆盖源码，`config.json` / `outputs` / `models` / `.venv` 全部保留。
+            它会自动：检查环境 → 需要时装便携 Python → GitHub 加速下载主包
+            （tar 支持**边下边解**）→ 装依赖 → 跑自检。不需要管理员权限。
+
+            ## 也可以手动装
+
+            下载 `forgeform-<版本>.zip`，解压后双击 `启动.bat`。
+            已装旧版：解压到现有目录、双击 `更新.bat`（只覆盖源码，配置/产物保留）。
 
             ## 要求
 
-            - Windows 10/11
-            - Python 3.11 / 3.12 / 3.13（没有会自动装 3.12.9）
-            - NVIDIA GPU，8 GB 显存起
-            - 内存 32 GB 建议
+            - Windows 10/11 x64
+            - Python 3.11/3.12/3.13（没有会由安装器自动装便携版）
+            - NVIDIA GPU，8 GB 显存起（24 GB 可跑更大模型）
+            - 磁盘 ≥ 30 GB
 
             国内下载慢就在链接前加 `https://gh-proxy.com/`。
 
