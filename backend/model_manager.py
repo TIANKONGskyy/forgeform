@@ -67,6 +67,16 @@ def _weight_files(cfg: dict, kind: str, key: str) -> list[Path]:
         p = COMFY / "models" / rel
         if p.is_file():
             out.append(p)
+
+    # 配置里自带 checkpoint（用户自己加的模型、或换过文件名）也要认，
+    # 否则「列表里显示已装、删除却说找不到文件」（2026-11-28 实测）
+    slot0 = ((cfg.get("models") or {}).get(kind) or {}).get(key) or {}
+    ckpt = str(slot0.get("checkpoint") or "").strip() if isinstance(slot0, dict) else ""
+    if ckpt:
+        for sub in ("diffusion_models", "unet", "checkpoints"):
+            cand = COMFY / "models" / sub / ckpt
+            if cand.is_file() and cand not in out:
+                out.append(cand)
     if kind == "3d":
         # hy3dgen 直连权重：整个模型目录都算它的
         slot = _slot(cfg, kind, key)

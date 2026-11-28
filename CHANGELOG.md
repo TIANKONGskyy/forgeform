@@ -52,6 +52,24 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.13.1 — 模型接口实测（2026-11-28）
+
+把新增的 HTTP 接口真跑了一遍（带/不带 token）：
+
+| 接口 | 结果 |
+|---|---|
+| `GET /models` | 200，返回 10 个模型 + 用量（已装 0/10、剩 473.9 GB） |
+| `POST /models/switch` 无 token | **403**（需要 X-Ops-Token） |
+| `POST /models/switch` 带 token | 200，active 写入 |
+| `DELETE /models/{kind}/{key}` 无 token | **403** |
+| `DELETE /models/{kind}/{key}` 带 token | 200，文件被删 |
+
+过程中发现一个真问题：**配置里自带 `checkpoint` 的模型（用户自己加的、或改过文件名）
+列表显示"已装"、删除却说"找不到权重文件"**。
+
+修法：`_weight_files()` 除了内置路径表，再按 `checkpoint` 字段在
+`models/{diffusion_models,unet,checkpoints}/<name>` 里找。补了对应测试。
+
 ## v3.13.0 — 七项能力全面核查完成（2026-11-28）
 
 用户点名的七项，逐项实测并修完：

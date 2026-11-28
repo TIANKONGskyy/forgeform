@@ -69,3 +69,24 @@ def test_usage_reports(tmp_path, monkeypatch):
     mm = _setup(tmp_path, monkeypatch)
     u = mm.usage()
     assert u["total"] >= 2 and u["installed"] >= 1 and u["free_gb"] > 0
+
+def test_weight_files_uses_checkpoint_field(tmp_path, monkeypatch):
+    """配置里自带 checkpoint（用户自己的模型）也要能被列出/删除。"""
+    from backend import model_manager as mm
+    import json
+
+    comfy = tmp_path / "comfy"
+    (comfy / "models" / "diffusion_models").mkdir(parents=True)
+    f = comfy / "models" / "diffusion_models" / "my_own.safetensors"
+    f.write_bytes(b"x" * 512)
+    cfg = {"paths": {"comfyui": str(comfy)},
+           "models": {"image": {"mine": {"name": "我的模型", "checkpoint": "my_own.safetensors"}}}}
+    (tmp_path / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    monkeypatch.setattr(mm, "ROOT", tmp_path)
+    monkeypatch.setattr(mm, "COMFY", comfy)
+
+    rows = {r["key"]: r for r in mm.list_models()}
+    assert rows["mine"]["installed"] is True
+    r = mm.delete("image", "mine")
+    assert r["ok"] is True
+    assert not f.exists()
