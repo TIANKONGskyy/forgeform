@@ -201,3 +201,22 @@ python tools/report.py                      # 出问题生成脱敏诊断包
 | 下载卡 3 分钟 | 第一源是 github.com，直连超时 | 镜像优先，单源 30 s |
 | 输出中文花屏 | PS 5.1 按 GBK 读 UTF-8 无 BOM 脚本 | 脚本内只用 ASCII 输出 |
 | 解压后目录名对不上 | 发布包内层是 `forgeform-v3.9.1`，脚本按 `forgeform-3.9.1` 找 | 用 fallback 找第一个 `forgeform-*` |
+
+## 10. 发布包实测（v3.9.7，2026-11-28 10:00）
+
+用**线上发布包**（不是开发目录）在空目录里从零装一遍，全程真数字：
+
+| 步骤 | 命令 | 耗时 |
+|---|---|---|
+| 下载解压 | gh-proxy 拿 v3.9.7（4.0 MB） | 25 s |
+| ① 环境自检 | `python tools/doctor.py --fix` | 14 s（9/10） |
+| ② 直连建模 | `python tools/bootstrap_models.py --only direct` | 197 s（12 GB） |
+| ③ 出图栈 | `python tools/bootstrap_models.py --only image` | 485 s（11 GB + ComfyUI 环境） |
+| 实测出图 | z_image 1024²/4 步 | 18 s |
+| 实测建模 | 2mini 图→3D（10 万面） | 72 s |
+| **文→图→3D** | 一次跑完 | **90 s** |
+
+产物：610 KB PNG + 1.7 MB GLB（5 连通块，质量闸通过）。
+
+结论：发布包可以独立工作，不含开发目录里的任何本地补丁。
+
