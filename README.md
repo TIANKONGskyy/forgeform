@@ -186,6 +186,8 @@ python tools\capability_doctor.py
 
 ## 文档
 
+- `docs/VERIFICATION-SUMMARY-2026-11-28.md` —— **每条结论 + 怎么测的 + 数字**（可逐条复核）
+
 | 文件 | 内容 |
 |---|---|
 | `docs/HARDWARE.md` | 实测显存/内存占用、各档配置对照 |

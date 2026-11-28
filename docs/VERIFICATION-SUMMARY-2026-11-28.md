@@ -1,0 +1,82 @@
+# 铸想验证结论汇总（2026-11-28）
+
+> 每一条结论都写了**怎么测的**和**产物在哪**，可以逐条复核。
+> 环境：Gooxi SR201 / Tesla V100 32G（sm_70）/ Windows / 从零安装。
+
+## 一、安装
+
+| 结论 | 怎么测的 | 数字 |
+|---|---|---|
+| 发布包能独立装好 | 下载线上 zip 解压到空目录 | 4.0 MB / 24 s |
+| 一条命令能装到可用 | `python tools/first_run.py --yes --with-image` | 装完输出启动指引 |
+| 最小建模集 | `bootstrap_models.py --only direct` | 12 GB / 142–233 s |
+| 出图最小集 | `bootstrap_models.py --only image` | 11 GB / 112–243 s（+ ComfyUI 环境 554 s） |
+| 重复执行安全 | 同一命令再跑 | 12–14 s（幂等） |
+| 首屏会提示缺什么 | 零模型启动 app | 页面出现「还差：建模权重、出图模型」 |
+| 装完提示自动消失 | 装完重启 app | 页面已无「还差」字样 |
+
+## 二、出图（1024²，同一句提示词）
+
+| 模型 | 权重 | 档位 | 耗时 | 显存峰值 |
+|---|---|---|---|---|
+| z_image | 5.8 GB | 4 步 | **18–28 s** | 17,670 MiB |
+| flux_klein | 7.2 GB | 4 步 | **28 s** | — |
+| flux2_dev | 18.7 + 11.4 GB | 4 步 | **58 s** | ≈23.9 GB¹ |
+| flux | 16.4 GB | 14 步 | **61 s** | ≈17.8 GB¹ |
+| qwen21_ref | 21.2 + 8.7 GB | 20 步 | **464 s** | ≈23.9 GB¹ |
+
+¹ 早前几轮直接读 `nvidia-smi` 的观察值；z_image / 2mini 用 `tools/measure_vram.py` 采样实测。
+
+## 三、建模（hy3dgen 直连）
+
+| 档位 | 耗时 | 面数 | 水密 | 连通块 | 显存 |
+|---|---|---|---|---|---|
+| 2mini 256 | **69–72 s** | 147,840 | 否 | 2 | 5,247 MiB |
+| 2.1 256 | **105 s** | 151,488 | 是 | 2 | — |
+| 2.1 512 | **676 s** | 400,000（上限） | 是 | 1 | — |
+
+## 四、用模型修改产物
+
+| 指标 | 结果 |
+|---|---|
+| 面数 | 151,488 → 400,000（×2.64） |
+| 体积变化 | −8.06 % |
+| 碎块 | 2 → 1 |
+| 手段 | 同一张输入图，256 档 → 512 档重跑 |
+
+## 五、后处理
+
+| 能力 | 耗时 | 产物 |
+|---|---|---|
+| STL 导出（90 mm） | 12.1 s | 3.8 MB / 8 万面 / 水密 / 实测 90.0×90.0×69.5 mm |
+| 骨骼（模板） | 28–53 s | 14 关节 GLB |
+| 动画（预烘焙） | 即时交付 | 52 骨 + 具名 Action（walk/run/bow/wave/idle，Blender 验证过帧范围） |
+
+## 六、装不起来的（已写进 README 与 `capability_doctor`）
+
+| 能力 | 卡点 | 性质 |
+|---|---|---|
+| 贴图 PBR | `custom_rasterizer_kernel` DLL 与 torch 2.7 不匹配 | 需按同版本 torch 重编 |
+| 精修 Direct3D | 缺 Direct3D 源码 + third_party CUDA 扩展 | 需源码 + 编译 |
+| 多视图 2mv | 3D-Pack 在 import 阶段真实调用 pytorch3d | Windows 无预编译轮子 |
+
+## 七、这一轮实测修掉的产品问题（19+ 条）
+
+安装脚本 4 条、下载器 6 条、ComfyUI/节点包 5 条、工作流 3 条、错误提示 1 类、
+bootstrap 4 条、pip 源 1 条。完整清单见 `CHANGELOG.md`（v3.8.9 → v3.11.2）。
+
+## 八、复核方式
+
+```powershell
+# 环境体检（含五项能力状态）
+python tools/doctor.py
+
+# 一条命令装到可用
+python tools/first_run.py --with-image
+
+# 复现某次耗时/显存
+python tools/measure_vram.py image z_image
+python tools/measure_vram.py 3d 2mini
+```
+
+产物与截图：`D:\铸想模型总览\`（含本次首次安装实测的马克杯 GLB + 90 mm STL）。
