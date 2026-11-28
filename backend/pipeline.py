@@ -1601,3 +1601,47 @@ def _ff_install_guard():
 
 _ff_guard_installed = True
 _ff_install_guard()
+
+
+# ── 生成的 3D 模型自动进产物库（2026-11-28）──
+# 之前只有后处理产物（贴图/骨骼/精修）会登记，生成的模型本身不进库，
+# 左列看不到它，也就没法"引用/改一版"。
+def _ff_asset_hook():
+    import functools
+
+    orig = Pipeline.generate_3d
+    if getattr(orig, "_ff_asset_hooked", False):
+        return
+
+    @functools.wraps(orig)
+    def wrapper(self, *a, **k):
+        r = orig(self, *a, **k)
+        try:
+            model_key = a[0] if len(a) > 0 else k.get("model_key", "")
+            quality = a[1] if len(a) > 1 else k.get("quality_name", "")
+            image_path = a[2] if len(a) > 2 else k.get("image_path", "")
+            path = getattr(r, "output_path", "") or ""
+            if getattr(r, "success", False) and path and Path(path).is_file():
+                from . import assets as _assets
+                import trimesh as _tm
+                m = _tm.load(path, force="mesh")
+                _assets.register(
+                    path, "mesh",
+                    title=Path(path).stem,
+                    params={"model": str(model_key), "quality": str(quality),
+                            "source_image": str(image_path or ""),
+                            "max_facenum": int(k.get("max_facenum") or 0)},
+                    metrics={"faces": int(len(m.faces)),
+                             "watertight": bool(m.is_watertight),
+                             "components": int(len(m.split(only_watertight=False)))},
+                    source="generate_3d",
+                )
+        except Exception:
+            pass
+        return r
+
+    wrapper._ff_asset_hooked = True
+    Pipeline.generate_3d = wrapper
+
+
+_ff_asset_hook()

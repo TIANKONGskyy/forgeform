@@ -102,19 +102,37 @@ def revise(asset_id: str, instruction: str, *, model: str = "", quality: str = "
     if not ins:
         return False, "要说清楚改什么（例如「把手加粗」「换成方形」）"
 
-    from .pipeline import Pipeline
-
-    pipe = Pipeline(str(ROOT / "config.json"))
     kind = row.get("kind") or ""
+    _pipe = {}
+
+    def pipe():
+        if "p" not in _pipe:
+            from .pipeline import Pipeline
+            _pipe["p"] = Pipeline(str(ROOT / "config.json"))
+        return _pipe["p"]
     if progress:
         progress(0, desc="重新生成中…")
 
     if kind in ("mesh", "multiview", "refined", "painted", "rigged"):
-        # 3D 修改：用关联图（或产物自身渲染）重出；这里优先用产物目录里的预览图
-        img = row.get("source_image") or (row.get("params") or {}).get("source_image")
-        if not img or not Path(img).is_file():
-            return False, "这个模型没有关联参考图，无法按新要求重出（可先用「引用」拿路径）"
-        r = pipe.generate_3d(model or "hunyuan_mini", quality, str(img),
+        src = row.get("source_image") or (row.get("params") or {}).get("source_image")
+        if not src or not Path(src).is_file():
+            return False, ("这个模型没有记录来源图，没法按新要求重出。"
+                           "先「引用」拿到路径，或直接重新描述一遍需求。")
+
+        # 2026-11-28：真的"改一版"——按新要求重新出图，再拿新图建模。
+        # （原来只拿旧图重跑一遍 3D，结构完全不变，等于什么都没改）
+        new_src = str(src)
+        try:
+            imgs = pipe().generate_images(
+                ins, count=1, model_key="z_image", quality_name="快速",
+                resolution="1024×1024")
+            cand = getattr(imgs[0], "success", False) and getattr(imgs[0], "output_path", "")
+            if cand and Path(cand).is_file():
+                new_src = cand
+        except Exception:
+            pass
+
+        r = pipe().generate_3d(model or "hunyuan_mini", quality, new_src,
                              max_facenum=int((row.get("params") or {}).get("max_facenum") or 150000))
         if getattr(r, "success", False):
             return True, getattr(r, "output_path", "")
