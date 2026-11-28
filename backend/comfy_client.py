@@ -138,6 +138,9 @@ class ComfyUIClient:
             seed = random.randint(0, 2**32 - 1)
         
         checkpoint = model.get("checkpoint", "")
+        # SDXL / 全量 checkpoint 分支（2026-11-28 新增）：一次加载整个 checkpoint
+        if str(model.get("family") or "").lower() in ("sdxl", "checkpoint", "sd15"):
+            return self._build_sdxl_workflow(params)
         # Z-Image 分支（2026-08-17）：阿里 6B，AuraFlow 采样 + lumina2 clip + SD3 latent
         if "z-image" in checkpoint.lower() or "z_image" in checkpoint.lower() or "zimage" in checkpoint.lower():
             return self._build_zimage_workflow(params)
@@ -583,6 +586,46 @@ class ComfyUIClient:
         add("SaveImage", {"images": [dec, 0], "filename_prefix": "qwen21_ref"})
         # 必须和其它构建器一样带外层（submit_workflow 读 workflow_data["prompt"]，
         # 返回裸图会 KeyError: 'prompt' —— E2E 跑出来的 ✗）
+        return {"prompt": wf, "negative_prompt": negative}
+
+    def _build_sdxl_workflow(self, params: Dict) -> Dict:
+        """SDXL / 传统 checkpoint 工作流（2026-11-28 新增）。
+
+        节点链：CheckpointLoaderSimple → CLIPTextEncode(正/负) → EmptyLatentImage
+                 → KSampler(dpmpp_2m/karras) → VAEDecode → SaveImage
+        这类模型把 UNet/CLIP/VAE 打在一个文件里，不能用 UNETLoader 分开加载。
+        """
+        model = params.get("model_config", {})
+        prompt_text = params.get("prompt", "")
+        negative = params.get("negative_prompt", "") or model.get("negative", "")
+        width = params.get("width", 1024)
+        height = params.get("height", 1024)
+        steps = int(params.get("steps") or model.get("steps") or 25)
+        cfg = float(params.get("cfg") or model.get("cfg") or 7.0)
+        seed = params.get("seed", -1)
+        if seed == -1:
+            import random
+            seed = random.randint(0, 2**32 - 1)
+
+        wf: Dict = {}
+        wf["1"] = {"class_type": "CheckpointLoaderSimple",
+                   "inputs": {"ckpt_name": model.get("checkpoint", "")}}
+        wf["2"] = {"class_type": "CLIPTextEncode",
+                   "inputs": {"text": prompt_text, "clip": ["1", 1]}}
+        wf["3"] = {"class_type": "CLIPTextEncode",
+                   "inputs": {"text": negative or "low quality, blurry, watermark, text",
+                              "clip": ["1", 1]}}
+        wf["4"] = {"class_type": "EmptyLatentImage",
+                   "inputs": {"width": width, "height": height, "batch_size": 1}}
+        wf["5"] = {"class_type": "KSampler",
+                   "inputs": {"model": ["1", 0], "positive": ["2", 0], "negative": ["3", 0],
+                              "latent_image": ["4", 0], "seed": seed, "steps": steps,
+                              "cfg": cfg, "sampler_name": model.get("sampler", "dpmpp_2m"),
+                              "scheduler": model.get("scheduler", "karras"), "denoise": 1.0}}
+        wf["6"] = {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}}
+        wf["7"] = {"class_type": "SaveImage",
+                   "inputs": {"images": ["6", 0], "filename_prefix": "ff_sdxl"}}
+        # 与其它构建器一致：submit_workflow 读的是 workflow_data["prompt"]
         return {"prompt": wf, "negative_prompt": negative}
 
     def _build_zimage_workflow(self, params: Dict) -> Dict:

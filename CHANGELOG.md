@@ -52,6 +52,26 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.14.0 — 新增 SDXL / FLUX-schnell / Hunyuan3D-2.0 / Qwen2.5（2026-11-28）
+
+按"试试别的生图建模和语言模型"实测，跑了四个新模型：
+
+**生图**
+- **SDXL Base 1.0**：10 s / 1024²（新增 checkpoint 工作流分支，
+  原来只能跑 UNETLoader 型模型，SDXL 这类打包 checkpoint 跑不了）
+- **FLUX.1-schnell FP8**：25 s / 4 步（复用现有 flux 工作流）
+
+**建模**
+- **Hunyuan3D-2.0**：加载 47 s + 推理 34 s / 32 万面 / 5.6 MB
+
+**语言**
+- Qwen2.5-1.5B：1.4–2.1 s，但输出质量不稳（中文、自相矛盾）
+- **Qwen2.5-7B：2.1–2.7 s，英文 IMAGE + 中文 3D 两段格式稳定** ← 推荐
+
+顺手修：`friendly_errors` 把 `400 Bad Request ...:8188/prompt` 误判成"ComfyUI 没在运行"。
+
+详见 `docs/NEW-MODELS-2026-11-28.md`。
+
 ## v3.13.3 — 生成的模型自动进产物库 + 改一版真的会改（2026-11-28）
 
 真机测出来两个问题：

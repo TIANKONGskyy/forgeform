@@ -827,3 +827,11 @@ def test_measure_vram_sampler_reports():
     line = s.report("测试", 0.4)
     assert "峰值" in line and "MiB" in line
     assert s.peak >= s.base
+
+def test_friendly_errors_does_not_misread_400_as_offline():
+    """400 Bad Request 里带 8188（URL）时，不能被翻译成"ComfyUI 没在运行"。"""
+    from backend.friendly_errors import friendly
+
+    msg = "400 Client Error: Bad Request for url: http://127.0.0.1:8188/prompt"
+    out = friendly(msg)
+    assert "没在运行" not in out

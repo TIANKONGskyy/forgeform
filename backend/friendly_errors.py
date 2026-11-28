@@ -17,7 +17,7 @@ import re
 
 _HINTS = [
     # (正则, 一句话结论, 该跑什么)
-    (r"Max retries exceeded|NewConnectionError|Connection refused|8188",
+    (r"Max retries exceeded|NewConnectionError|Connection refused|Errno 10061|Errno 111",
      "ComfyUI 没在运行（出图/贴图/多视图都要它）",
      "python tools/install_comfy.py   然后重开一次铸想"),
     (r"Repo id must use|is not a valid model identifier|doesn't exist.*models",
