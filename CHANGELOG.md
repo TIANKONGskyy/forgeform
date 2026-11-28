@@ -52,6 +52,26 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.9.9 — 错误提示翻译成人话（2026-11-28）
+
+零模型 / 没起 ComfyUI 时，用户原来看到的是：
+
+```
+HTTPConnectionPool(host='127.0.0.1', port=8188): Max retries exceeded ...
+Repo id must use alphanumeric chars, '-' or '.': 'D:\models\hy3dgen\hunyuan3d-2mini'
+```
+
+现在统一翻译成「一句结论 + 一条命令 + 原始信息」：
+
+```
+ComfyUI 没在运行（出图/贴图/多视图都要它）。
+→ python tools/install_comfy.py   然后重开一次铸想
+（原始信息：HTTPConnectionPool(...)）
+```
+
+覆盖 7 类高频失败：ComfyUI 未运行、权重缺失、缺依赖、编译型 CUDA 扩展、
+显存不足、API key、超时。未知错误原样透传，不吞信息。
+
 ## v3.9.8 — README 换成实测过的路径（2026-11-28）
 
 README 之前还写着 v3.8.0 的旧流程（setup 向导、8.2 GB 方案表），和现在的实测路径对不上。

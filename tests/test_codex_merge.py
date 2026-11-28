@@ -785,3 +785,29 @@ def test_capability_doctor_reports_all_five():
             assert r.get("fix"), f"{name} 缺修复指引"
     # 动画在本机有预烘焙动作包，应判 ready
     assert rows["动画"]["state"] == "ready"
+
+# ────────────────── 2026-11-28 错误文案翻译 ──────────────────
+
+def test_friendly_errors_give_actionable_hint():
+    """零模型/没起 ComfyUI 时，用户看到的必须是一句人话 + 一条命令。"""
+    from backend.friendly_errors import friendly
+
+    cases = {
+        "HTTPConnectionPool(host='127.0.0.1', port=8188): Max retries exceeded": "install_comfy",
+        "Repo id must use alphanumeric chars: 'D:/models/hy3dgen/hunyuan3d-2mini'": "bootstrap_models",
+        "No module named 'cv2'": "install_comfy",
+        "DLL load failed while importing custom_rasterizer_kernel": "capability_doctor",
+        "CUDA out of memory. Tried to allocate 2.00 GiB": "显存",
+    }
+    for raw, expect in cases.items():
+        out = friendly(raw)
+        assert expect in out, f"{raw!r} → {out!r}"
+        assert "原始信息" in out
+
+
+def test_friendly_errors_passthrough_unknown():
+    from backend.friendly_errors import friendly
+
+    msg = "某个只有我们知道的奇怪错误"
+    assert friendly(msg) == msg
+    assert friendly("") == ""

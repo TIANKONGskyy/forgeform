@@ -7,6 +7,7 @@ import requests
 import re
 from pathlib import Path
 from typing import Optional, Callable, List
+from .friendly_errors import friendly as _friendly
 from .logger import get_logger
 from .env import normalize_config_paths
 from .prompt_enhancer import enhance_local as llm_enhance, split_sections, is_ollama_running
@@ -482,7 +483,7 @@ class Pipeline:
 
             except Exception as e:
                 self._log(f"❌ 图片生成失败: {e}")
-                results.append(StageResult(False, error=str(e)))
+                results.append(StageResult(False, error=_friendly(e)))
 
         return results
     
@@ -1390,7 +1391,7 @@ class Pipeline:
             
         except Exception as e:
             self._log(f"❌ 3D 生成失败: {e}")
-            return StageResult(False, error=str(e))
+            return StageResult(False, error=_friendly(e))
     
     # ─── VRAM 管理 ────────────────────────────────────────
     
