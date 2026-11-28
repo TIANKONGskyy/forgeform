@@ -52,6 +52,13 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.9.5 — install_comfy 收尾与自检（2026-11-28）
+
+- `--verify-only`：不重装，只验证现有 ComfyUI 的节点与能力状态（13 秒出结果）
+- `--stubs`：可选装 pytorch3d/nvdiffrast 占位包（排查 import 失败用）
+- 收尾打印能力就绪情况（之前被吞掉），并给出下一步命令
+- 在**全新解压的发布包**上实测：479 秒装完、ComfyUI 1097 节点、GGUF 可用
+
 ## v3.9.4 — ComfyUI 一键安装脚本（2026-11-28）
 
 新增 `tools/install_comfy.py`：把端到端实测里踩过的 ComfyUI 安装步骤固化成一条命令。

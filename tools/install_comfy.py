@@ -243,10 +243,18 @@ def step_start_and_verify() -> None:
         log(f"   {'✓' if node in oi else '✗'} {label}")
 
 
+def step_stubs() -> None:
+    log("  装 pytorch3d/nvdiffrast 占位包")
+    _sh([sys.executable, str(ROOT / "tools" / "make_cuda_stubs.py"),
+         "--python", str(_venv_py())], timeout=300)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="把 ComfyUI 装成铸想能用的样子")
     ap.add_argument("--skip-torch", action="store_true")
     ap.add_argument("--verify-only", action="store_true")
+    ap.add_argument("--stubs", action="store_true",
+                    help="给 pytorch3d/nvdiffrast 装占位包（能绕过 import，但 3D-Pack 仍会失败）")
     ns = ap.parse_args()
 
     steps = [
@@ -257,6 +265,7 @@ def main() -> int:
         ("节点包", step_node_packs),
         ("额外依赖", step_extra_deps),
         ("kiui/utils3d", step_kiui),
+        ("占位包", step_stubs if ns.stubs else None),
         ("启动与验证", step_start_and_verify),
     ]
     if ns.verify_only:
@@ -276,9 +285,14 @@ def main() -> int:
     # 最后跑能力检查
     try:
         log("[能力就绪]")
-        _sh([sys.executable, str(ROOT / "tools" / "capability_doctor.py")], timeout=300)
+        cap_py = str(ROOT / "tools" / "capability_doctor.py")
+        log(_sh([sys.executable, cap_py], timeout=300))
     except Exception as e:
         log(f"  能力检查失败：{e}")
+
+    log("\n  完成。下一步：")
+    log("    python tools/bootstrap_models.py --only core    # 下 3D 权重（约 12 GB）")
+    log("    然后 python app.py                              # 或双击 一键开始.ps1")
     return 0
 
 
