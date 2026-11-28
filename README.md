@@ -63,76 +63,83 @@ r = pipe.generate_3d_multiview({
 （管线自己按 bbox 归一化，实测尺度差 2.2 倍反而分数更高）。
 **不要预先抠图**——送透明底/黑底进去会被再抠一遍，实测 0.4872 → 0.3112。
 
-## 实测（Tesla V100 32G，单卡）
+## 实测（Tesla V100 32G，单卡，2026-11-28 从零装一遍）
 
-| 动作 | 耗时 |
-|---|---|
-| 出图 1024²，Qwen-Image-2.1，20 步 | ≈ 56 s |
-| 出图 1024²，30 步（含中→英翻译） | ≈ 140–170 s |
-| 建模 Hunyuan3D 2.1，256 octree | ≈ 160 s |
-| 建模 Hunyuan3D 2.1，512 octree | ≈ 8–10 min |
-| **建模 多视图 2mv@512（四张真实照片）** | **≈ 84 s，49 万面，水密** |
-| 建模 Hunyuan3D 2mini 直连，256 octree | 加载 42 s + 推理 13 s |
-| 贴图 Paint PBR 2.1（120k 面，2048² atlas） | ≈ 216 s，峰值 13.7 GB |
-| 精修 Direct3D-V3，512 档 4 步 | ≈ 33 s，峰值 5.8 GiB |
-| 绑定 模板骨架（任意水密网格） | 8–68 s，零显存 |
-| 绑定 RigAnything（角色，52 骨含手指） | ≈ 52 s，峰值 4.7 GB |
-| 动作 BVH 重定向（24 帧循环） | ≈ 3 s，纯 CPU |
-| 导出 STL（20 万面 → 8 万面） | ≈ 3–6 s |
+**出图**（1024²，同一句提示词）
 
+| 模型 | 档位 | 耗时 |
+|---|---|---|
+| Z-Image Turbo 6B int8（5.8 GB） | 4 步 | **18–21 s** |
+| FLUX.2 Klein 4B（7.2 GB） | 4 步 | **28 s** |
+| FLUX.2 Dev Q4 GGUF（18.7 GB + 编码器 11.4 GB） | 4 步 | **58 s** |
+| FLUX.1-dev fp8（16.4 GB） | 14 步 | **61 s** |
+| Qwen-Image fp8（21.2 GB + 编码器 8.7 GB） | 20 步 | **464 s** |
+
+**建模**（hy3dgen 直连）
+
+| 档位 | 耗时 | 面数 | 水密 |
+|---|---|---|---|
+| 2mini 256 快速 | **69 s** | 147,840 | 否 |
+| 2.1 256 快速 | **105 s** | 151,488 | 是 |
+| 2.1 512 高质量 | **676 s** | 400,000（上限） | 是 |
+
+**全链路**：一句话 → 出图 18 s → 建模 72 s = **90 s 出 GLB**
+（实测产物：610 KB PNG + 1.7 MB GLB，质量闸通过）
+
+**后处理**：骨骼模板 28–53 s / 14 关节（纯 CPU）· 动作包交付即时
 
 四个作品的真跑记录（每件含耗时、面数、水密、STL 四视角渲染）：
 `docs/showcase/`
 
-## 快速开始
+## 快速开始（实测路径：三条命令）
 
-### 方式一：解压后双击
+```powershell
+# 1. 解压发布包（4 MB）
+Expand-Archive forgeform-v3.9.7.zip -DestinationPath D:\ff
+cd D:\ff\forgeform-v3.9.7
 
-1. 下载 [`forgeform-v3.8.0.zip`](https://github.com/TIANKONGskyy/forgeform/releases/latest) 并解压
-2. 双击 **`启动.bat`**
+# 2. 环境自检（补目录、生成 config，14 秒）
+python tools\doctor.py --fix
 
-它会依次做：检查 Python → 建 `.venv` 并装依赖（3–5 分钟，只一次）→ 首次运行跑配置向导
-（探硬件、选方案、装模型）在独立的 **铸想桌面窗口**中完成。首次启动会准备桌面窗口所需的 Python 依赖，Windows 需要 WebView2 运行时。
+# 3. 装权重（按需选，可只装一个）
+python tools\bootstrap_models.py --only direct   # 12 GB / 197 s → 能图生 3D
+python tools\bootstrap_models.py --only image    # 11 GB / 485 s → 能文生图
 
-之后每次双击直接进界面（约 10 秒）。窗口就是服务端，关掉窗口即停止。
+# 4. 启动
+python app.py            # 浏览器开 127.0.0.1:7860
+```
 
-首次运行向导：
+装完直接说「做个白色陶瓷马克杯」，90 秒出可打印模型。
 
-> 硬件：Tesla V100 32G（可用 30） · 内存 128 GB · 磁盘剩 166 GB
-> 已有：ComfyUI(含3D)、本地 diffusers 模型 2 个、hy3dgen、对话服务
->
->  ★ [1] 复用现有 ComfyUI（零下载）        0.0 GB · auto
->    [2] 最小可用（SD1.5 + 3D 2mini）       8.2 GB · direct
->    [3] 标准（Z-Image Turbo + 3D 2mini）  30.6 GB · auto
+### 套件一览
 
-### 方式二：命令行
+| `--only` | 内容 | 体积 | 实测耗时 |
+|---|---|---|---|
+| `direct` | hy3dgen 2mini（直连建模，最稳） | 12 GB | 197 s |
+| `image` | Z-Image Turbo int8 + Qwen3-4B + VAE（含 ComfyUI 环境） | 11 GB | 485 s |
+| `core` | ComfyUI 源码 + 3D-Pack + Hunyuan3D 2.1 | 5 GB | 86 s |
+| `paint` / `mv` / `refine` / `rig` | 贴图 / 多视图 / 精修 / 语义骨骼权重 | 4–10 GB | — |
 
-适合想自己控制环境的人。四步：
+也可以双击 `启动.bat` 走图形向导（会探硬件、给方案）。
 
-| 步骤 | 做什么 |
-|---|---|
-| 1 | 把仓库 clone 或下载解压到本地 |
-| 2 | 装运行依赖（`requirements.txt`，约 2–3 GB） |
-| 3 | 跑配置向导，它会探硬件、列方案、下模型 |
-| 4 | 启动，浏览器打开 `127.0.0.1:7860` |
+## 能力就绪状态（2026-11-28 实测）
 
-依赖和模型都不在仓库里 —— 仓库只有源码，模型要单独下（见下面「模型」一节）。
+| 能力 | 状态 | 说明 |
+|---|---|---|
+| 文生图 / 图生图 | ✅ | 5 个模型全部跑通 |
+| 图生 3D（单图 / 直连） | ✅ | 2mini 69 s、2.1 105 s |
+| 图生 3D（512 高精度） | ✅ | 676 s、40 万面、水密 |
+| 骨骼绑定（模板） | ✅ | 28–53 s、14 关节、纯 CPU |
+| 动作 / 动画 | ✅ | 5 个预烘焙动作包（52 骨） |
+| 贴图 PBR | ⛔ | 光栅化内核需与 torch 版本匹配（需重编） |
+| 精修 Direct3D | ⛔ | 需 Direct3D 源码 + third_party CUDA 扩展 |
+| 多视图 2mv | ⛔ | 3D-Pack 需要编译 pytorch3d（Windows 无轮子） |
 
-`tools/setup.py` 会先识别显存、内存、磁盘，以及机器上已有的 ComfyUI / Ollama / llama.cpp /
-vLLM / 本地 diffusers 模型，然后给出可选方案：
+一条命令看自己机器上的状态：
 
-> 硬件：Tesla V100 32G（可用 30） · 内存 128 GB · 磁盘剩 166 GB
-> 已有：ComfyUI(含3D)、本地 diffusers 模型 2 个、hy3dgen、对话服务
->
->  ★ [1] 复用现有 ComfyUI（零下载）        0.0 GB · auto
->    [2] 最小可用（SD1.5 + 3D 2mini）       8.2 GB · direct
->    [3] 标准（Z-Image Turbo + 3D 2mini）  30.6 GB · auto
-
-也可以 `--dry-run`（只看方案）、`--custom`（自己选模型）、`--profile <名字> --yes`（直接装）。
-
-装完自检：
-
-`tools/doctor.py` 会检查环境缺什么、该装什么，出问题时先跑它。
+```powershell
+python tools\capability_doctor.py
+```
 
 ## 硬件要求
 
