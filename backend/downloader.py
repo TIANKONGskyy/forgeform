@@ -11,7 +11,8 @@
 这个引擎做三件事：
 1. **多文件并发**：同时下 N 个文件（默认 6）
 2. **单文件多连接**：支持 Range 的服务器上，一个文件切成 M 段并发（默认 4）
-3. **镜像回落 + 断点续传**：每个文件可给多个镜像；`.part` 分块状态存 sidecar，中断可续
+3. **镜像回落 + 整块续传**：每个文件可给多个镜像；`.part` 已完成块记在 sidecar，
+   中断重跑只补未完成的块（2026-11-28 实测：之前是假续传，每次都从 0 下）
 
 设计取舍
 --------
@@ -106,9 +107,40 @@ def _head(url: str, timeout: float = 20) -> tuple[int, bool, str]:
         return -1, False, ""
 
 
+def _sidecar_path(part: Path) -> Path:
+    return part.with_suffix(part.suffix + ".json")
+
+
+def _load_spans(part: Path, size: int) -> dict[tuple[int, int], int]:
+    """读回 {块: 已写到的绝对偏移}；size 不一致（换了文件）就作废。"""
+    try:
+        d = json.loads(_sidecar_path(part).read_text(encoding="utf-8"))
+        if int(d.get("size", -1)) != size:
+            return {}
+        out = {}
+        for s, e, pos in d.get("spans") or []:
+            out[(int(s), int(e))] = int(pos)
+        return out
+    except Exception:
+        return {}
+
+
+def _save_spans(part: Path, size: int, state: dict) -> None:
+    try:
+        _sidecar_path(part).write_text(
+            json.dumps({"size": size, "spans": [[s, e, pos] for (s, e), pos in sorted(state.items())]}),
+            encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _range_worker(url: str, dest: Path, start: int, end: int, meter: Meter,
-                  stop: threading.Event, progress: dict) -> int:
-    """下载 [start, end] 区间，写进 dest 的同一偏移。返回写入字节数。"""
+                  stop: threading.Event, progress: dict,
+                  state: dict | None = None, key: tuple[int, int] | None = None) -> int:
+    """下载 [start, end] 区间，写进 dest 的同一偏移。返回写入字节数。
+
+    state/key 用于"秒级续传"：每写一块就把当前绝对偏移记进 state，后台线程负责落盘。
+    """
     written = 0
     for attempt in range(1, RETRIES + 1):
         if stop.is_set():
@@ -134,8 +166,9 @@ def _range_worker(url: str, dest: Path, start: int, end: int, meter: Meter,
                         pos += n
                         written += n
                         meter.add(n)
-                        with threading.Lock():
-                            progress["done"] = progress.get("done", 0) + n
+                        progress["done"] = progress.get("done", 0) + n
+                        if state is not None and key is not None:
+                            state[key] = pos  # 绝对偏移，落盘后用于续传
                         if end > 0 and pos > end:
                             break
             return written
@@ -189,7 +222,9 @@ def download(item: dict, meter: Meter, *, conns: int = DEFAULT_CONNS,
             log(f"[{name}] {host} size={size/1024/1024:.0f}MB ranges={ranges}")
             # 不预分配：truncate 出来的稀疏文件 st_size 立刻等于目标值，
             # 校验就失效了（实测 1.99 GB 的包在没下完时就报"大小正确"）。
-            part.write_bytes(b"")
+            # 但也不能清空已有 .part —— 断点续传就靠它（2026-11-28 修）
+            if not part.exists():
+                part.write_bytes(b"")
             progress = {"done": 0, "total": size}
             if ranges and size > 32 * 1024 * 1024 and conns > 1:
                 step = size // conns
@@ -198,16 +233,63 @@ def download(item: dict, meter: Meter, *, conns: int = DEFAULT_CONNS,
                     s = i * step
                     e = size - 1 if i == conns - 1 else (s + step - 1)
                     spans.append((s, e))
-                written_total = 0
-                with ThreadPoolExecutor(max_workers=len(spans)) as ex:
-                    futs = [ex.submit(_range_worker, url, part, s, e, meter, stop, progress)
-                            for s, e in spans]
-                    for f in as_completed(futs):
-                        written_total += int(f.result() or 0)
-                if written_total < size:
-                    raise RuntimeError(f"分段没下完：{written_total:,} / {size:,} 字节")
+                saved = _load_spans(part, size)
+                state: dict[tuple[int, int], int] = {}
+                todo: list[tuple[int, int, int, int]] = []  # (start, end, span_s, span_e)
+                already = 0
+                for s, e in spans:
+                    pos = saved.get((s, e), s)
+                    if pos > e:          # 这块已完整
+                        already += e - s + 1
+                        continue
+                    state[(s, e)] = pos
+                    todo.append((pos, e, s, e))
+                if already:
+                    log(f"[{name}] 续传：已有 {already/1024/1024:.0f} MB，"
+                        f"剩 {(size-already)/1024/1024:.0f} MB")
+
+                stop_flush = threading.Event()
+
+                def _flusher():
+                    while not stop_flush.wait(2.0):
+                        _save_spans(part, size, state)
+
+                flusher = threading.Thread(target=_flusher, daemon=True)
+                flusher.start()
+                written_total = already
+                if todo:
+                    with ThreadPoolExecutor(max_workers=len(todo)) as ex:
+                        futs = [ex.submit(_range_worker, url, part, st, en, meter, stop,
+                                          progress, state, (ss, se))
+                                for st, en, ss, se in todo]
+                        for f in as_completed(futs):
+                            written_total += int(f.result() or 0)
+                stop_flush.set()
+                _save_spans(part, size, state)
+                # 用"绝对偏移"重算总量：续传时已写的前缀也算进去（之前漏算导致误报没下完）
+                total_now = sum(max(0, min(pos, e + 1) - s) for (s, e), pos in state.items())
+                for s, e in spans:
+                    if (s, e) not in state:
+                        total_now += e - s + 1
+                if total_now < size:
+                    raise RuntimeError(f"分段没下完：{total_now:,} / {size:,} 字节（已存 sidecar，重跑会续）")
+                written_total = total_now
             else:
-                _range_worker(url, part, 0, -1, meter, stop, progress)
+                saved0 = _load_spans(part, size)
+                pos0 = next(iter(saved0.values()), 0) if saved0 else 0
+                if pos0:
+                    log(f"[{name}] 续传：从 {pos0/1024/1024:.0f} MB 继续")
+                st0 = {(0, -1): pos0}
+                stop_flush0 = threading.Event()
+
+                def _flush0():
+                    while not stop_flush0.wait(2.0):
+                        _save_spans(part, size, st0)
+
+                threading.Thread(target=_flush0, daemon=True).start()
+                _range_worker(url, part, pos0, -1, meter, stop, progress, st0, (0, -1))
+                stop_flush0.set()
+                _save_spans(part, size, st0)
 
             got = part.stat().st_size
             if size > 0 and got != size:
@@ -220,6 +302,10 @@ def download(item: dict, meter: Meter, *, conns: int = DEFAULT_CONNS,
                 if h.hexdigest().lower() != str(item["sha256"]).lower():
                     raise RuntimeError("sha256 不符")
             os.replace(part, dest)
+            try:
+                _sidecar_path(part).unlink()
+            except Exception:
+                pass
             el = time.time() - t0
             return {"ok": True, "path": str(dest), "bytes": got,
                     "seconds": round(el, 1), "mbps": round(got / el / 1024 / 1024, 2),

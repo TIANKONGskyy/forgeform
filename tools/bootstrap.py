@@ -33,6 +33,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 REPO = "TIANKONGskyy/forgeform"
+# 2026-11-28：GitHub 访问统一走内置镜像（用户不用再装 Steam++）
+try:
+    from backend.mirrors import gh_url as _gh_url
+except Exception:  # 独立运行时的兜底
+    def _gh_url(u, m=None):
+        return u
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
 API_CN = f"https://gh-proxy.com/https://api.github.com/repos/{REPO}/releases/latest"
 
@@ -215,7 +221,7 @@ def auto_update(quiet: bool = False) -> dict:
     # 下载 zip：先试 gh-proxy（国内快），再直连
     import tempfile
     url_name = f"forgeform-{tag}.zip"
-    base = f"https://github.com/{REPO}/releases/download/{tag}/{url_name}"
+    base = _gh_url(f"https://github.com/{REPO}/releases/download/{tag}/{url_name}")
     urls = [f"https://gh-proxy.com/{base}", base]
     tmp = Path(tempfile.mkdtemp()) / url_name
     got = False

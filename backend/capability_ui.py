@@ -415,3 +415,16 @@ def render():
 
                 asset_refresh.click(_refresh, outputs=[asset_html], api_name="cap_assets")
                 report_btn.click(_report, outputs=[report_file, report_note], api_name="cap_report")
+
+
+# ── 并发防护（2026-11-28）──
+def _ff_cap_guard():
+    from . import gpu_guard
+    for name, kind in (("do_rig", "rig"), ("do_paint", "paint"), ("do_refine", "refine"),
+                       ("do_multiview", "multiview"), ("do_motion", "motion")):
+        fn = globals().get(name)
+        if fn and not getattr(fn, "_ff_guarded", False):
+            globals()[name] = gpu_guard.guarded(kind)(fn)
+
+
+_ff_cap_guard()

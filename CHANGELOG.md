@@ -52,6 +52,28 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.12.0 — 并发防护 + 内置 GitHub 加速（2026-11-28）
+
+### 1. 出图/建模/能力台互斥，避免"两个模型同时占显存"
+
+新增 `backend/gpu_guard.py`：全局"重活槽位"。
+- `generate_images` / `generate_3d` / `generate_3d_multiview` / 五个能力函数全部包上
+- 新任务进来时先调用注册的 releaser（`pipeline._free_vram`）把上一个模型的显存让出来
+- `gpu_guard.status()` 能看到当前占用者与已占时长；`busy_message()` 给一句人话提示
+
+实测单元覆盖：串行化、让出回调、状态与提示、两类入口都被包上（`tests/test_guard_and_mirrors.py`）。
+
+### 2. GitHub 加速内置，不再需要 Steam++
+
+新增 `backend/mirrors.py`：
+- `gh_url()` / `gh_urls()`：任何 github.com / raw.githubusercontent.com 链接自动加镜像前缀
+- 顺序：`gh-proxy.com → ghfast.top → 直连`，可在 `config.json → network.github_mirrors` 覆盖，
+  或环境变量 `FORGEFORM_GH_MIRROR` 单独指定
+- `clone()`：git clone 也走镜像（实测直连会 0 字节卡死）
+- `pip_args()`：与 `tools/pip_mirror.py` 同一套国内源
+
+已接入 `tools/bootstrap.py`（原来的下载脚本直接用 github API/直链）。
+
 ## v3.11.2 — 显存实测（2026-11-28）
 
 新增 `tools/measure_vram.py`：跑单个任务时每 1.5 s 采一次 `nvidia-smi`，报峰值/基线/增量。

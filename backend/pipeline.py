@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Optional, Callable, List
 from .friendly_errors import friendly as _friendly
+from . import gpu_guard
 from .logger import get_logger
 from .env import normalize_config_paths
 from .prompt_enhancer import enhance_local as llm_enhance, split_sections, is_ollama_running
@@ -1553,3 +1554,37 @@ class Pipeline:
         self.state.reset()
         self._log_lines = []
         self._log("🔄 Pipeline 已重置")
+
+
+# ── 并发防护（2026-11-28）：出图/建模/多视图互斥，先把别的重活让出显存 ──
+def _ff_install_guard():
+    import functools
+
+    def wrap(cls, name: str, kind: str):
+        orig = getattr(cls, name)
+        if getattr(orig, "_ff_guarded", False):
+            return
+
+        @functools.wraps(orig)
+        def wrapper(self, *a, **k):
+            # 把自己注册成"能让出显存的人"，再占用槽位
+            try:
+                gpu_guard.register_releaser("comfyui", self._free_vram)
+            except Exception:
+                pass
+            with gpu_guard.hold(kind, wait_s=0.0):
+                return orig(self, *a, **k)
+
+        wrapper._ff_guarded = True
+        setattr(cls, name, wrapper)
+
+    try:
+        wrap(Pipeline, "generate_images", "image")
+        wrap(Pipeline, "generate_3d", "mesh")
+        wrap(Pipeline, "generate_3d_multiview", "multiview")
+    except Exception:
+        pass
+
+
+_ff_guard_installed = True
+_ff_install_guard()
