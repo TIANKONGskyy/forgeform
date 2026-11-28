@@ -107,6 +107,19 @@ def _head(url: str, timeout: float = 20) -> tuple[int, bool, str]:
         return -1, False, ""
 
 
+def _safe_replace(src: Path, dst: Path, tries: int = 6, wait: float = 0.8) -> None:
+    """Windows 下 .part → 正式名可能被杀软/残留句柄短暂占用，重试几次。"""
+    last = None
+    for i in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as e:
+            last = e
+            time.sleep(wait * (i + 1))
+    raise PermissionError(f"改名失败（{tries} 次）：{last}")
+
+
 def _sidecar_path(part: Path) -> Path:
     return part.with_suffix(part.suffix + ".json")
 
@@ -223,6 +236,18 @@ def download(item: dict, meter: Meter, *, conns: int = DEFAULT_CONNS,
             # 不预分配：truncate 出来的稀疏文件 st_size 立刻等于目标值，
             # 校验就失效了（实测 1.99 GB 的包在没下完时就报"大小正确"）。
             # 但也不能清空已有 .part —— 断点续传就靠它（2026-11-28 修）
+            # 2026-11-28：.part 已经满了就别再重下（sidecar 落后会导致永远收不了尾）
+            if part.exists() and size > 0 and part.stat().st_size == size:
+                log(f"[{name}] .part 已完整（{size:,} 字节），直接校验")
+                _safe_replace(part, dest)
+                try:
+                    _sidecar_path(part).unlink()
+                except Exception:
+                    pass
+                return {"ok": True, "path": str(dest), "bytes": size,
+                        "seconds": round(time.time() - t0, 1), "mbps": 0.0,
+                        "source": host, "name": name}
+
             if not part.exists():
                 part.write_bytes(b"")
             progress = {"done": 0, "total": size}
@@ -301,7 +326,7 @@ def download(item: dict, meter: Meter, *, conns: int = DEFAULT_CONNS,
                         h.update(b)
                 if h.hexdigest().lower() != str(item["sha256"]).lower():
                     raise RuntimeError("sha256 不符")
-            os.replace(part, dest)
+            _safe_replace(part, dest)
             try:
                 _sidecar_path(part).unlink()
             except Exception:
