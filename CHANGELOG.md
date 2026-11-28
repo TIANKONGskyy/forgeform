@@ -52,6 +52,23 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.9.7 — 出图最小集 + 文→图→3D 78 秒（2026-11-28）
+
+新增 `--only image` 套件：Z-Image Turbo int8（5.8 GB）+ Qwen3-4B fp8（5.2 GB）+ VAE（0.3 GB），
+外加自动装 ComfyUI 运行环境（venv + torch 2.7 + 依赖）。
+
+干净安装实测：
+
+| 环节 | 耗时 |
+|---|---|
+| `--only direct`（hy3dgen 12 GB） | 147 s |
+| `--only image`（11 GB + ComfyUI 环境） | 472 s |
+| z_image 出图 1024²/4 步 | 18 s |
+| 2mini 图→3D（10 万面） | 68 s |
+| **文→图→3D 一次跑完** | **78 s** |
+
+同时修：`_ensure_comfy_env` 未定义（image 套件必崩）、权重已下完时空下载 job 导致假失败。
+
 ## v3.9.6 — 干净安装实测修掉 bootstrap 四个问题（2026-11-28）
 
 在**全新解压的发布包**上真跑 `bootstrap_models.py --only core`，暴露出四个问题：

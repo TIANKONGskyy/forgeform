@@ -145,3 +145,28 @@ pytorch3d → nvdiffrast → torch_scatter → spconv → pytorch_msssim → (py
 - `tools/install_comfy.py`：一条命令装 ComfyUI（venv→torch 2.7→源码 zip→依赖→节点包→启动验证→能力检查），
   实测 479 s 装完，ComfyUI 1097 节点、GGUF 节点可用
 - `tools/make_cuda_stubs.py`：给 pytorch3d/nvdiffrast 生成占位包（部分场景可绕过 import；3D-Pack 不行，已在上面说明）
+
+## 补充：干净安装的"三条命令"路径（2026-11-28 09:1x–09:4x）
+
+在全新解压的发布包上，把"从零到能出模型"压到三条命令：
+
+```powershell
+python tools/doctor.py --fix                      # 13 s，补目录/配置
+python tools/bootstrap_models.py --only direct      # 12 GB 直连权重，147 s（首次）
+python tools/bootstrap_models.py --only image       # 11 GB 出图栈 + ComfyUI 环境，472 s
+python app.py
+```
+
+实测数据（都是这台机器上的真实耗时）：
+
+| 环节 | 耗时 |
+|---|---|
+| `--only direct`（hy3dgen 2mini 12 GB） | 147 s |
+| `--only image`（Z-Image int8 5.8G + Qwen3-4B 5.2G + VAE 0.3G，含 ComfyUI 环境） | 472 s |
+| z_image 出图 1024²/4 步 | **18 s** |
+| 2mini 图→3D（10 万面） | **68 s** |
+| **文→图→3D 一次跑完** | **78 s**（9 s 图 + 68 s 3D） |
+
+这一轮同时修掉干净安装里的两个新问题：
+`_ensure_comfy_env` 未定义（image 套件必崩）、以及权重已下完时"下载 job"空列表导致的假失败。
+

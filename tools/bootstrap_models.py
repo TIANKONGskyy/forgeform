@@ -76,12 +76,63 @@ MS = "https://modelscope.cn/models"
 SUITES = {
     "core": "ComfyUI + 3D-Pack + Hunyuan3D 2.1（能单图建模）",
     "direct": "hy3dgen 直连权重（2mini，约 12 GB）——不依赖 ComfyUI 节点，本机实测最稳",
+    "image": "出图最小集：Z-Image Turbo int8 + Qwen3-4B 编码器 + VAE（约 11 GB，实测 21 s/张）",
     "paint": "贴图权重（PBR 2.1）",
     "mv": "多视图权重（Hunyuan3D 2mv）",
     "refine": "精修权重（Direct3D-V3 512 + DINOv3）",
     "rig": "RigAnything 语义骨骼",
     "all": "全部",
 }
+
+
+def _ensure_comfy_env(log) -> str:
+    """确保 ComfyUI + 它的 venv 就绪（出图必须有能跑的 ComfyUI）。"""
+    venv_py = COMFY_ENV / "Scripts" / "python.exe"
+    if (COMFY / "main.py").is_file() and venv_py.is_file():
+        return "已存在"
+    log("    调 tools/install_comfy.py 装 ComfyUI 运行环境（约 8 分钟）…")
+    _sh([sys.executable, str(ROOT / "tools" / "install_comfy.py")], timeout=3600)
+    return "ok"
+
+
+def _image_items() -> list[dict]:
+    """出图最小集：Z-Image Turbo（int8）+ Qwen3-4B 编码器 + VAE。
+
+    2026-11-28 实测：这套 11 GB 在本机 4 步 1024² 出图 21 秒，
+    是"能真的用起来"的最小图像栈；FLUX/Qwen-Image 都要 20–50 GB。
+    """
+    hf = "https://hf-mirror.com/Comfy-Org/z_image_turbo/resolve/main"
+    dm = COMFY / "models" / "diffusion_models"
+    te = COMFY / "models" / "text_encoders"
+    va = COMFY / "models" / "vae"
+    return [
+        {"name": "z_image_int8", "url": f"{hf}/split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors",
+         "dest": str(dm / "z_image_turbo_int8_convrot.safetensors"),
+         "bytes_hint": 6_201_000_000, "suite": "image"},
+        {"name": "qwen3_4b_fp8", "url": f"{hf}/split_files/text_encoders/qwen_3_4b_fp8_mixed.safetensors",
+         "dest": str(te / "qwen_3_4b_fp8_mixed.safetensors"),
+         "bytes_hint": 5_632_000_000, "suite": "image"},
+        {"name": "z_image_vae", "url": f"{hf}/split_files/vae/ae.safetensors",
+         "dest": str(va / "ae.safetensors"), "bytes_hint": 336_000_000, "suite": "image"},
+    ]
+
+
+def patch_image_config(log) -> str:
+    """把 z_image 指向实际下到的 safetensors（默认配置里是 GGUF 文件名）。"""
+    p = ROOT / "config.json"
+    if not p.is_file():
+        return "没有 config.json"
+    cfg = json.loads(p.read_text(encoding="utf-8-sig"))
+    img = (cfg.get("models") or {}).get("image") or {}
+    z = img.get("z_image")
+    if not isinstance(z, dict):
+        return "配置里没有 z_image"
+    z["checkpoint"] = "z_image_turbo_int8_convrot.safetensors"
+    z["clip_l"] = "qwen_3_4b_fp8_mixed.safetensors"
+    z["vae"] = "ae.safetensors"
+    z["clip_type"] = "qwen_image"
+    p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    return "z_image → safetensors"
 
 
 def _comfy_portable() -> dict:
@@ -469,6 +520,8 @@ def main(argv=None) -> int:
         print(s, flush=True)
 
     items = weight_items(ns.only)
+    if ns.only in ("image", "all"):
+        items = items + _image_items()
     # ★ 2026-11-28 实测：ComfyUI 便携版之前只登记了 URL，压根没进下载队列，
     #   结果"解压 ComfyUI"必然失败。这里把它并进同一批（同样多线程下）。
     if ns.comfy == "portable":
@@ -532,6 +585,8 @@ def main(argv=None) -> int:
     ]
     if ns.only in ("direct", "core", "all"):
         jobs.append(("hy3dgen 直连权重", lambda: _install_hy3dgen_direct(log), []))
+    if ns.only in ("image", "all"):
+        jobs.append(("ComfyUI 环境", lambda: _ensure_comfy_env(log), []))
     out = runner.run(jobs)
     # 依赖阶段：pip 要在解压 + clone 之后
     if "解压 ComfyUI" in out["done"] and "3D-Pack 仓库" in out["done"]:
@@ -543,6 +598,8 @@ def main(argv=None) -> int:
     try:
         if ns.only in ("direct", "core", "all"):
             log("  → 直连权重写进配置：" + patch_hy3dgen_config(log))
+        if ns.only in ("image", "all"):
+            log("  → 图像模型写进配置：" + patch_image_config(log))
         log("  → 写配置：" + patch_config(COMFY, log))
     except Exception as e:
         log(f"  ✗ 写配置失败：{e}")
