@@ -100,3 +100,34 @@ def test_pip_args_shape():
     a = mirrors.pip_args()
     assert a[0] == "-i" and a[1].startswith("https://")
     assert "--trusted-host" in a
+
+# ── 提示词扩写兜底 ────────────────────────────────────────
+
+def test_extract_size_mm():
+    from backend.prompt_enhance import extract_size_mm
+
+    assert extract_size_mm("做个 90mm 的杯子") == 90.0
+    assert extract_size_mm("9 厘米高") == 90.0
+    assert extract_size_mm("1.2cm 的扣") == 12.0
+    assert extract_size_mm("随便做个东西") is None
+
+
+def test_offline_enhance_sections():
+    from backend.prompt_enhance import offline_enhance
+
+    s = offline_enhance("做个马克杯 90mm")
+    assert "single object" in s["image"]
+    assert "90mm" in s["image"]
+    assert "水密" in s["three_d"] and "壁厚" in s["three_d"]
+    assert offline_enhance("")["image"] == ""
+
+
+def test_pipeline_enhance_never_silent(monkeypatch):
+    """没有 LLM 时必须走规则兜底，不能静默返回原文。"""
+    import backend.pipeline as pl
+
+    monkeypatch.setattr(pl, "llm_enhance", lambda p: p)  # 模拟没有 LLM
+    pipe = pl.Pipeline(r"D:\ForgeForm-oss\config.json")
+    out = pipe.enhance_prompt("做个笔筒")
+    assert out != "做个笔筒"
+    assert "single object" in out

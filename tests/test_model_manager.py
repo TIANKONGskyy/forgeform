@@ -1,0 +1,71 @@
+# -*- coding: utf-8 -*-
+import json
+import pathlib
+
+import pytest
+
+
+def _setup(tmp_path, monkeypatch):
+    from backend import model_manager as mm
+
+    comfy = tmp_path / "comfy"
+    (comfy / "models" / "diffusion_models").mkdir(parents=True)
+    (comfy / "models" / "diffusion_models" / "z_image_turbo_int8_convrot.safetensors").write_bytes(b"x" * 1024)
+    hy = tmp_path / "hy3dgen"
+    (hy / "hunyuan3d-2mini").mkdir(parents=True)
+    (hy / "hunyuan3d-2mini" / "config.json").write_text("{}", encoding="utf-8")
+    cfg = {
+        "paths": {"comfyui": str(comfy)},
+        "models": {
+            "image": {"z_image": {"name": "Z", "checkpoint": "z_image_turbo_int8_convrot.safetensors"},
+                       "flux": {"name": "F"}},
+            "3d": {"hunyuan_mini": {"name": "Mini", "path": str(hy / "hunyuan3d-2mini")}},
+            "active": {},
+        },
+    }
+    (tmp_path / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    monkeypatch.setattr(mm, "ROOT", tmp_path)
+    monkeypatch.setattr(mm, "COMFY", comfy)
+    monkeypatch.setattr(mm, "HY3DGEN", hy)
+    return mm
+
+
+def test_list_models_marks_installed(tmp_path, monkeypatch):
+    mm = _setup(tmp_path, monkeypatch)
+    rows = {r["key"]: r for r in mm.list_models()}
+    assert rows["z_image"]["installed"] is True
+    assert rows["flux"]["installed"] is False
+    assert rows["hunyuan_mini"]["installed"] is True
+
+
+def test_switch_writes_config(tmp_path, monkeypatch):
+    mm = _setup(tmp_path, monkeypatch)
+    mm.switch("image", "z_image")
+    assert mm.active("image") == "z_image"
+    with pytest.raises(KeyError):
+        mm.switch("image", "不存在")
+
+
+def test_delete_removes_only_its_files(tmp_path, monkeypatch):
+    mm = _setup(tmp_path, monkeypatch)
+    cfg_before = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+    r = mm.delete("image", "z_image")
+    assert r["ok"] is True and r["freed_gb"] >= 0
+    rows = {x["key"]: x for x in mm.list_models()}
+    assert rows["z_image"]["installed"] is False
+    # 配置里的其它模型没被动
+    cfg_after = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+    assert set(cfg_after["models"]["image"]) == set(cfg_before["models"]["image"])
+
+
+def test_delete_3d_removes_dir(tmp_path, monkeypatch):
+    mm = _setup(tmp_path, monkeypatch)
+    r = mm.delete("3d", "hunyuan_mini")
+    assert r["ok"] is True
+    assert not (tmp_path / "hy3dgen" / "hunyuan3d-2mini").exists()
+
+
+def test_usage_reports(tmp_path, monkeypatch):
+    mm = _setup(tmp_path, monkeypatch)
+    u = mm.usage()
+    assert u["total"] >= 2 and u["installed"] >= 1 and u["free_gb"] > 0

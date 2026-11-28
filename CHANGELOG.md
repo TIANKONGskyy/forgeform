@@ -52,6 +52,32 @@
 - `docs/RESEARCH-BRIEF-6DIRECTIONS-2026-11-26.md`：本机环境事实与踩坑清单
 - `docs/MERGE-CODEX-2026-11-26.md`：这次合并做了什么、拒了什么、为什么
 
+## v3.12.1 — 模型管理 + 扩写兜底（2026-11-28）
+
+### 1. 模型管理（单独下载 / 切换 / 删除）
+
+新增 `backend/model_manager.py` + `backend/model_ui.py` + 右列面板：
+
+- `list_models()`：每个模型的名字、类型、体积、是否就位、权重路径
+- `switch(kind, key)`：设默认（写 `models.active`，启动时优先用它）
+- `delete(kind, key)`：只删这个模型自己的权重（共享 VAE/编码器不动），
+  删完自动把 active 切到其它可用模型
+- 面板三个按钮：设为默认 / 下载 / 删除；下方显示"已装 x/y · 占 x GB · 剩 x GB"
+- HTTP：`GET /models`、`POST /models/switch`、`DELETE /models/{kind}/{key}`、
+  `POST /models/download`（写操作要 X-Ops-Token）
+
+真机实测：切换 z_image/hunyuan_mini → 出图 25 s → 建模 71 s 全通；
+删除能力用临时条目验证（文件被删、配置自动切换）。
+
+### 2. 扩写不再"静默不生效"
+
+实测：llama-server / Ollama / Strata 都没起时，`enhance_prompt` 直接返回原文，
+日志只有一行 warning，用户以为扩写生效了。
+
+现在没有 LLM 时走 `backend/prompt_enhance.py` 的规则兜底：
+抽尺寸（90mm / 9 厘米 → mm）、补 `single object / 纯白背景`、拆 IMAGE/3D 两段
+（3D 段强调水密、壁厚、底面平整），并在日志里明说"规则兜底，无可用对话模型"。
+
 ## v3.12.0 — 并发防护 + 内置 GitHub 加速（2026-11-28）
 
 ### 1. 出图/建模/能力台互斥，避免"两个模型同时占显存"

@@ -205,14 +205,23 @@ class Pipeline:
     # ─── 提示词扩写 ─────────────────────────────────────
     
     def enhance_prompt(self, prompt: str) -> str:
-        """扩写提示词（IMAGE + 3D 双段）"""
+        """扩写提示词（IMAGE + 3D 双段）。
+
+        2026-11-28：没有可用对话模型时不再静默返回原文 —— 改用规则扩写，
+        并在日志里说清"用的是规则"，避免用户以为 LLM 生效了。
+        """
         if not prompt or not prompt.strip():
             return prompt
+        from . import prompt_enhance as _pe
+
         result = llm_enhance(prompt)
         if result and result != prompt:
-            self._log(f"✨ 提示词扩写: {len(prompt)} → {len(result)} chars")
+            self._log(f"✨ 提示词扩写（LLM）: {len(prompt)} → {len(result)} chars")
             return result
-        return prompt
+        sections = _pe.offline_enhance(prompt)
+        merged = (sections.get("image") or prompt)
+        self._log(f"✨ 提示词扩写（规则兜底，无可用对话模型）: {len(prompt)} → {len(merged)} chars")
+        return merged
 
     def enhance_sections(self, prompt: str) -> dict:
         """扩写并拆分 IMAGE/3D 分段（2026-08-11：3D 用结构段，细节更好）

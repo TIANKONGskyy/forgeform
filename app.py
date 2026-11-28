@@ -1491,6 +1491,12 @@ def build():
                         _3d_choices.append((_v.get("name") or _k, _k))
                     _img_def = ((_c.get("stages") or {}).get("image") or {}).get("default_model", "")
                     _3d_def = ((_c.get("stages") or {}).get("3d") or {}).get("default_model", "")
+                    # 2026-11-28：模型管理里"设为默认"写 models.active，启动优先用它
+                    _act = (_c.get("models") or {}).get("active") or {}
+                    if _act.get("image"):
+                        _img_def = _act["image"]
+                    if _act.get("3d"):
+                        _3d_def = _act["3d"]
                 except Exception:
                     pass
 
@@ -1531,6 +1537,20 @@ def build():
             # 侧边栏（窄）
             with gr.Column(scale=3, min_width=260, elem_classes="side-col"):
                 sidebar = gr.HTML(build_sidebar(initial), elem_id="sidebar")
+
+                # ── 模型管理（2026-11-28）：单独下载 / 切换默认 / 删除 ──
+                with gr.Group(elem_classes="model-mgmt"):
+                    from backend import model_ui as _model_ui
+                    _mm_choices = _model_ui.choices()
+                    model_mgmt_html = gr.HTML(_model_ui.panel_html(), elem_id="model_mgmt")
+                    model_mgmt_dd = gr.Dropdown(choices=_mm_choices, value=(_mm_choices or [None])[0],
+                                                 label="", show_label=False, container=False,
+                                                 elem_id="model_mgmt_dd")
+                    with gr.Row(elem_classes="model-mgmt-actions"):
+                        model_mgmt_use = gr.Button("设为默认", size="sm", variant="secondary")
+                        model_mgmt_dl = gr.Button("下载", size="sm", variant="secondary")
+                        model_mgmt_del = gr.Button("删除", size="sm", variant="stop")
+                    model_mgmt_msg = gr.Markdown("", elem_id="model_mgmt_msg")
 
         # ★ 2026-11-27：五项能力工作台挪到主区下方 —— 放在对话上方会让
         #   首屏变成"三个折叠面板 + 对话框"，而且和产物库重复（产物都进左列了）。
@@ -1618,6 +1638,60 @@ def build():
             inputs=[state], outputs=[quality_radio, img_model_dd, model_3d_dd])
 
     return app
+
+
+def register_model_manager(sa) -> None:
+    """本地模型管理接口（2026-11-28）：列出 / 切换 / 删除 / 下载单个模型。
+
+    这些操作会动磁盘，必须带 X-Ops-Token（与 model-library 的删除同一套）；
+    只读的 /models 列表放开。
+    """
+    import os
+    import secrets
+
+    from fastapi import Header, HTTPException
+    from backend import model_manager as mm
+
+    _token = (os.environ.get("DSH_OPS_TOKEN") or "").strip()
+
+    def _need_token(value: str | None) -> None:
+        if not _token or not value or not secrets.compare_digest(value, _token):
+            raise HTTPException(status_code=403, detail="需要有效的 X-Ops-Token（DSH_OPS_TOKEN）")
+
+    @sa.get("/models")
+    def _models():
+        return {"models": mm.list_models(), "usage": mm.usage()}
+
+    @sa.post("/models/switch")
+    def _models_switch(payload: dict, x_ops_token: str | None = Header(default=None)):
+        _need_token(x_ops_token)
+        try:
+            return mm.switch(str(payload.get("kind")), str(payload.get("key")))
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @sa.delete("/models/{kind}/{key}")
+    def _models_delete(kind: str, key: str, x_ops_token: str | None = Header(default=None)):
+        _need_token(x_ops_token)
+        r = mm.delete(kind, key)
+        if not r.get("ok"):
+            raise HTTPException(status_code=400, detail=r.get("error"))
+        return r
+
+    @sa.post("/models/download")
+    def _models_download(payload: dict, x_ops_token: str | None = Header(default=None)):
+        """单个模型的下载：映射到 bootstrap 套件（同步执行，大文件建议后台）。"""
+        _need_token(x_ops_token)
+        import subprocess
+        import sys
+        kind, key = str(payload.get("kind")), str(payload.get("key"))
+        suite = {"image": "image", "3d": "direct"}.get(kind)
+        if suite is None:
+            raise HTTPException(status_code=400, detail=f"不支持的 kind: {kind}")
+        proc = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "tools" / "bootstrap_models.py"),
+                               "--only", suite], capture_output=True, text=True, timeout=7200)
+        return {"ok": proc.returncode == 0, "suite": suite,
+                "tail": (proc.stdout or "")[-800:]}
 
 
 def register_model_library(sa) -> None:
@@ -1928,7 +2002,23 @@ if __name__ == "__main__":
         print(f"[port] 身份路由没加上（不影响使用）: {_e}", flush=True)
     from backend.viewer_compat import register_viewer_compat
     register_viewer_compat(_sa)
+    # 模型管理按钮（2026-11-28）：不参与主 outputs，避免动 11 个返回值的契约
+    try:
+        from backend import model_ui as _mu
+
+        for _btn, _fn in ((model_mgmt_use, _mu.do_switch),
+                          (model_mgmt_dl, _mu.do_download),
+                          (model_mgmt_del, _mu.do_delete)):
+            _btn.click(_fn, inputs=[model_mgmt_dd], outputs=[model_mgmt_msg]).then(
+                lambda c: _mu.panel_html(c), inputs=[model_mgmt_dd], outputs=[model_mgmt_html])
+    except Exception:
+        pass
+
     register_model_library(_sa)
+    try:
+        register_model_manager(_sa)
+    except Exception:
+        pass
     print("[DSH] 自定义路由注册完成: /model-library（列表/预览/下载 + token 保护的发布/删除）")
 
     # ══════════════════════════════════════════════════════════════
