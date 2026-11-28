@@ -489,8 +489,10 @@ class Pipeline:
                     else:
                         results.append(StageResult(False, error="下载图片失败"))
                 else:
-                    results.append(StageResult(False, error="ComfyUI 未返回图片"))
-
+                    # 2026-11-28：把 ComfyUI 那边的具体原因带出来（掉线/任务丢失/参数错），原先一律「未返回图片」
+                    _detail = str((result or {}).get("error") or "").strip()
+                    results.append(StageResult(False, error=_friendly(_detail) if _detail
+                                                   else "ComfyUI 未返回图片（可能被别的任务挤掉了，重试一次）"))
             except Exception as e:
                 self._log(f"❌ 图片生成失败: {e}")
                 results.append(StageResult(False, error=_friendly(e)))
@@ -777,7 +779,9 @@ class Pipeline:
                     self._log(f"✅ 视频已保存: {output_path}")
                     return StageResult(True, str(output_path))
             
-            return StageResult(False, error="ComfyUI 未返回视频")
+            _vd = str((result or {}).get("error") or "").strip()
+            return StageResult(False, error=_friendly(_vd) if _vd
+                               else "ComfyUI 未返回视频（重试一次；仍失败看 ComfyUI 日志）")
             
         except Exception as e:
             self._log(f"❌ 视频生成失败: {e}")

@@ -131,3 +131,21 @@ def test_pipeline_enhance_never_silent(monkeypatch):
     out = pipe.enhance_prompt("做个笔筒")
     assert out != "做个笔筒"
     assert "single object" in out
+
+# ── 稳定性：ComfyUI 掉线要能放弃（2026-11-28）────────────────
+
+def test_comfy_poll_gives_up_when_offline():
+    """生成中 ComfyUI 被关掉时，轮询必须有上限，且给可照做的提示。"""
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "backend" / "comfy_client.py").read_text(encoding="utf-8")
+    assert "fail_streak >= 18" in src, "缺少掉线放弃阈值（实测会无限轮询 10 分钟以上）"
+    assert "ComfyUI 断开了" in src
+    assert "重新打开 ComfyUI" in src
+
+
+def test_pipeline_surfaces_backend_error():
+    """「ComfyUI 未返回图片」不能吞掉底层原因（掉线/任务丢失）。"""
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "backend" / "pipeline.py").read_text(encoding="utf-8")
+    assert "_detail" in src
+    assert "ComfyUI 断开了" not in src  # 文案在 client 里，pipeline 只透传

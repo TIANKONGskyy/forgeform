@@ -1599,6 +1599,17 @@ class ComfyUIClient:
                             "outputs": {},
                         }
 
+                # 2026-11-28 实测：ComfyUI 在生成中被关掉/崩溃时，这里会一直轮询
+                # （x36 次 = 10 分钟以上），用户只看到"卡住"。连续掉线 90 秒就放弃，
+                # 给一句能照做的话。
+                if fail_streak >= 18:
+                    logger.warning(f"ComfyUI 连续掉线 {fail_streak} 次，放弃等待任务 {prompt_id[:8]}")
+                    return {
+                        "status": "error",
+                        "error": "ComfyUI 断开了（生成中被关闭或崩溃）。重新打开 ComfyUI 后再点一次生成。",
+                        "outputs": {},
+                    }
+
                 time.sleep(5)
         
         # ★ 2026-11-17：超时必须**把任务从 ComfyUI 撤掉**。
