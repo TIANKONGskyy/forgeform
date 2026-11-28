@@ -1,13 +1,10 @@
 name: release
 
 # 打 tag（v*）时自动：
-#   1. 把仓库里的 VERSION 写成 tag 名（去掉前缀 v）
-#   2. 打一个 forgeform-<tag>.zip
-#   3. 建 / 更新 Release 并挂上 zip
-#
-# 这样发版只需要 `git tag v3.0.1 && git push --tags`，不用手动改 VERSION、
-# 手动打包、手动传附件。手动做这三步很容易漏（漏了 VERSION 的话，
-# 更新.bat 会以为还是旧版，反复重下）。
+#   1. 把 VERSION 写成 tag 名（去 v）
+#   2. 出三个资产：forgeform-<tag>.zip（手动装）、forgeform-<tag>.tar（边下边解）、forgeform-boot.zip（一键安装器）
+#   3. 建 / 更新 Release 并挂上
+# 这样发版只需要：git tag vX.Y.Z && git push --tags
 
 on:
   push:
@@ -42,14 +39,12 @@ jobs:
           echo "tag=$TAG  version=$VER"
 
       - name: Sync VERSION
-        # 仓库里的 VERSION 是给人看的，真正要保证的是"打出来的包里它等于 tag"
+        # 仓库里的 VERSION 是给人看的；包里它必须等于 tag
         run: echo "${{ steps.ver.outputs.ver }}" > VERSION
 
-      - name: Package
-        # 用 git archive：它只打**已提交**的文件，天然尊重 .gitignore。
-        # 千万别用 `zip -r .` —— 工作区里的 STL/GLB 产物会被一起打包，
-        # 实测 2.5 MB 能涨到 77 MB（docs/showcase 下的 model.stl 每个就 9 MB）。
-        # VERSION 是刚写、还没提交的，单独补进 zip。
+      - name: Package zip
+        # 用 git archive：只打已提交文件，天然尊重 .gitignore。
+        # 别用 `zip -r .` —— 工作区里的 STL/GLB 会被一起打进去（实测 2.5 MB 涨到 77 MB）。
         run: |
           NAME="forgeform-${{ steps.ver.outputs.tag }}.zip"
           PREFIX="forgeform-${{ steps.ver.outputs.tag }}"
@@ -69,25 +64,27 @@ jobs:
           print("VERSION ->", arc)
           PY
           ls -lh "$NAME"
-          echo "ASSET=$NAME" >> "$GITHUB_ENV"
+          echo "ASSET_ZIP=$NAME" >> "$GITHUB_ENV"
 
-        - name: Package tar (for streaming install)
-          # tar 是顺序格式，安装器可边下边解；zip 必须下完才能解
-          run: |
-            TAR="forgeform-${{ steps.ver.outputs.tag }}.tar"
-            PREFIX="forgeform-${{ steps.ver.outputs.tag }}"
-            git archive --format=tar --prefix="$PREFIX/" HEAD -o "$TAR"
-            tar -rf "$TAR" --transform "s,^VERSION,$PREFIX/VERSION," VERSION
-            ls -lh "$TAR"
-            echo "ASSET_TAR=$TAR" >> "$GITHUB_ENV"
+      - name: Package tar (streaming install)
+        # tar 是顺序格式，安装器可以边下边解；zip 必须下完再解
+        run: |
+          TAR="forgeform-${{ steps.ver.outputs.tag }}.tar"
+          PREFIX="forgeform-${{ steps.ver.outputs.tag }}"
+          git archive --format=tar --prefix="$PREFIX/" HEAD -o "$TAR"
+          mkdir -p _ver && cp VERSION _ver/VERSION
+          tar -rf "$TAR" -C _ver VERSION --transform "s,^VERSION,$PREFIX/VERSION,"
+          rm -rf _ver
+          ls -lh "$TAR"
+          echo "ASSET_TAR=$TAR" >> "$GITHUB_ENV"
 
-        - name: Package bootstrapper
-          # 只有 boot/ 目录：几十 KB，网站只挂这一个入口
-          run: |
-            BOOT="forgeform-boot.zip"
-            (cd boot && zip -q -r "../$BOOT" .)
-            ls -lh "$BOOT"
-            echo "ASSET_BOOT=$BOOT" >> "$GITHUB_ENV"
+      - name: Package bootstrapper
+        # 只有 boot/ 目录：9 KB 左右，网站只挂这一个下载入口
+        run: |
+          BOOT="forgeform-boot.zip"
+          (cd boot && zip -q -r "../$BOOT" .)
+          ls -lh "$BOOT"
+          echo "ASSET_BOOT=$BOOT" >> "$GITHUB_ENV"
 
       - name: Create or update release
         uses: softprops/action-gh-release@v2
@@ -95,7 +92,7 @@ jobs:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: 铸想 ForgeForm ${{ steps.ver.outputs.tag }}
           files: |
-            ${{ env.ASSET }}
+            ${{ env.ASSET_ZIP }}
             ${{ env.ASSET_TAR }}
             ${{ env.ASSET_BOOT }}
           generate_release_notes: true
@@ -105,7 +102,7 @@ jobs:
 
             ## 怎么用（推荐）
 
-            下载 **`forgeform-boot.zip`**（几十 KB）→ 解压 → **双击 `铸想安装.bat`**。
+            下载 **`forgeform-boot.zip`**（约 9 KB）→ 解压 → **双击 `铸想安装.bat`**。
 
             它会自动：检查环境 → 需要时装便携 Python → GitHub 加速下载主包
             （tar 支持**边下边解**）→ 装依赖 → 跑自检。不需要管理员权限。
@@ -118,14 +115,12 @@ jobs:
             ## 要求
 
             - Windows 10/11 x64
-            - Python 3.11/3.12/3.13（没有会由安装器自动装便携版）
+            - Python 3.11 / 3.12 / 3.13（没有会由安装器自动装便携版）
             - NVIDIA GPU，8 GB 显存起（24 GB 可跑更大模型）
             - 磁盘 ≥ 30 GB
 
-            国内下载慢就在链接前加 `https://gh-proxy.com/`。
-
       - name: Commit VERSION back
-        # 只回写 tag 对应的版本号；失败不阻断发布（可能是 fork 或只读 token）
+        # 只回写版本号；失败不阻断发布
         continue-on-error: true
         run: |
           git config user.name  "github-actions[bot]"
@@ -133,6 +128,5 @@ jobs:
           if ! git diff --quiet VERSION; then
             git add VERSION
             git commit -m "chore: VERSION -> ${{ steps.ver.outputs.ver }}"
-            # tag 触发时是 detached HEAD，推到 tag 名会失败 —— 回写主分支
             git push origin "HEAD:main" || true
           fi
